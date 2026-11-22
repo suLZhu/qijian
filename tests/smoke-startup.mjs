@@ -22,14 +22,17 @@ try {
   page.on('console', event=>{if(event.type()==='error')errors.push('CONSOLE: '+event.text())})
   page.on('requestfailed', request=>errors.push('NETWORK: '+request.url()+' '+request.failure()?.errorText))
   await page.evaluateOnNewDocument(() => {
+    if (localStorage.getItem("qijian-smoke-seeded")) return
+    localStorage.setItem("qijian-smoke-seeded","1")
+    localStorage.setItem("ai-home.assistants",JSON.stringify([{id:"assistant-yanweixi",name:"验收助手甲"},{id:"assistant-yanshuo",name:"验收助手乙"}]))
     const message = { id: 'fixture-message', role: 'user', content: 'existing chat fixture' }
     localStorage.setItem('ai-home.conversations', JSON.stringify({
       'assistant-yanweixi': [{ id: 'fixture-chat', title: 'existing chat fixture', updatedAt: new Date().toISOString(), messages: [message] }],
-      'assistant-yanshuo': [],
+      'assistant-yanshuo': [{id:'second-chat',title:'second conversation',updatedAt:new Date().toISOString(),messages:[{id:'second-message',role:'user',content:'second private chat'}]}],
     }))
     localStorage.setItem('ai-home.worldEntries', JSON.stringify([{ id: 'fixture-world', title: 'existing world fixture', content: 'fixture', boundCharacters: [] }]))
-    localStorage.setItem('ai-home.local.mcp', JSON.stringify([{ id: 'fixture-mcp', name: 'existing MCP fixture' }]))
-    localStorage.setItem('ai-home.vendors', JSON.stringify([{ id: 'fixture-vendor', name: 'existing vendor fixture' }]))
+    localStorage.setItem('ai-home.local.mcp', JSON.stringify([{ id: 'fixture-mcp', name: 'existing MCP fixture', person:'assistant-yanweixi',url:'https://example.invalid/mcp',enabled:false }]))
+    localStorage.setItem('ai-home.vendors', JSON.stringify([{ id: 'fixture-vendor', name: 'existing vendor fixture',models:[] }]))
     // Simulate an incomplete local backend snapshot alongside richer WebView data.
     localStorage.setItem('ai-home.local.state', JSON.stringify({ conversations: { 'assistant-yanweixi': [], 'assistant-yanshuo': [] }, worldEntries: [] }))
   })
@@ -56,10 +59,29 @@ try {
   assert(result.production,'Production shell did not mount')
   assert(result.existingData,'Existing profile data was overwritten during startup')
   assert(result.rootChildren>0,'React did not render any child')
-  await page.$eval('.mobile-menu-toggle', button => button.click())
-  await page.waitForSelector('.app-sidebar.sidebar-open')
-  await page.$eval('.sidebar-settings', button => button.click())
-  await page.waitForSelector('.settings-page-back')
+  const waitText = async (selector,text) => {
+    await page.waitForFunction((selector,text)=>Array.from(document.querySelectorAll(selector)).some(el=>el.getBoundingClientRect().height && el.textContent.trim()===text),{},selector,text)
+  }
+  const clickText = async (selector,text) => {
+    await waitText(selector,text)
+    await page.evaluate((selector,text)=>Array.from(document.querySelectorAll(selector)).find(el=>el.getBoundingClientRect().height && el.textContent.trim()===text).click(),selector,text)
+  }
+  await clickText('.qj-home-person-info b','验收助手甲')
+  await page.waitForSelector('[data-message-id="fixture-message"]')
+  await clickText('.production-assistant-switch button','验收助手乙')
+  await page.waitForSelector('[data-message-id="second-message"]')
+  assert.equal(await page.$('[data-message-id="fixture-message"]'),null)
+  await page.$eval('[aria-label="返回房间"]',el=>el.click())
+  await clickText('.primary-navigation button','设置')
+  await clickText('.settings-row b','供应商')
+  await waitText('b,strong,span,button','existing vendor fixture')
+  await page.$eval('.settings-page-back',el=>el.click())
+  await clickText('.settings-row b','工具与扩展')
+  await waitText('b,strong,span,button','existing MCP fixture')
+  await clickText('button','世界书')
+  await waitText('b,strong,span,button','existing world fixture')
+  await page.$eval('.settings-page-back',el=>el.click())
+  console.log('Verified assistant history, isolation, vendor, MCP and worldbook in production UI')
   for (const viewport of [{ width: 320, height: 640 }, { width: 852, height: 393 }]) {
     await page.setViewport(viewport)
     const geometry = await page.evaluate(() => {
@@ -84,6 +106,9 @@ try {
   await page.waitForFunction(() => document.querySelector('.settings-page-back')?.textContent === '全部设置')
   await page.$eval('.settings-page-back', button => button.click())
   await page.waitForFunction(() => document.querySelector('.settings-page-back')?.textContent === '主页')
+  await page.reload({waitUntil:'domcontentloaded'})
+  await page.waitForFunction(()=>document.querySelector('.production-layout'))
+  assert(await page.evaluate(()=>JSON.parse(localStorage.getItem('ai-home.conversations'))['assistant-yanweixi'][0].messages[0].id==='fixture-message'))
   console.log('Qijian browser startup smoke test PASSED')
 } finally {
   if(browser) await browser.close()

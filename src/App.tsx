@@ -767,7 +767,7 @@ export default function App() {
   const [loginPassword, setLoginPassword] = useState('')
   const [authError, setAuthError] = useState('')
   const [cloudReady, setCloudReady] = useState(false)
-  const [cloudStatus, setCloudStatus] = useState<'loading'|'saving'|'saved'|'error'>('loading')
+  const [cloudStatus, setCloudStatus] = useState<'loading'|'saving'|'saved'|'error'|'protected'>('loading')
   const cloudSaveInFlight = useRef(false)
   const queuedCloudSnapshot = useRef<any>(null)
   // 防抖的最大延迟哨兵：流式生成期间每个 chunk 都会重置 700ms 计时器，
@@ -787,7 +787,7 @@ export default function App() {
     const restoredNames = Array.isArray(data.assistants)&&data.assistants.length?applyDefaultDisplayNames(data.assistants):[]
     if (restoredNames.length) setAssistants(restoredNames)
     if (data.conversations && ASSISTANT_PEOPLE.every(id=>Array.isArray(data.conversations[id]))) {
-      const convs:Record<Person,Conversation[]>=Object.fromEntries(ASSISTANT_PEOPLE.map(id=>[id,data.conversations[id]])) as Record<Person,Conversation[]>
+      const convs:Record<Person,Conversation[]>=Object.fromEntries(Object.entries(data.conversations).filter(([,list])=>Array.isArray(list))) as Record<Person,Conversation[]>
       // 数据安全（云端优先恢复的冲突保护）：本快照即将覆盖本地会话。若本地持有
       // 云端没有的内容（典型：上次会话末尾云保存失败，本地新、云端旧），先把本地
       // 整体备份到 localStorage——产品行为仍是云端优先，但本地不会静默消失。
@@ -795,7 +795,7 @@ export default function App() {
         try {
           localStorage.setItem(RECOVERY_BACKUP_KEY, JSON.stringify(buildRecoveryBackup(conversationsRef.current, activeConversationIdsRef.current)))
           console.warn('[ai-home] 云端快照覆盖前已备份本地聊天到 ' + RECOVERY_BACKUP_KEY)
-        } catch { /* 备份失败不阻断恢复流程 */ }
+        } catch { throw new Error('本地聊天备份失败，已中止快照恢复') }
       }
       setConversations(convs)
       const ids=data.activeConversationIds||{}
@@ -863,7 +863,7 @@ export default function App() {
     if (decideCloudLoadAction({ cloudState: result.state ?? null }) === 'apply-cloud') {
       if (hasEmptySnapshotConflict(latestSnapshot.current || {}, result.state)) {
         setCloudReady(false)
-        setCloudStatus('error')
+        setCloudStatus('protected')
         return
       }
       applySnapshot(result.state)
@@ -1484,6 +1484,7 @@ export default function App() {
     // because its recent messages are already provided verbatim below.
     // 注意：必须在气泡插入之后 await——否则用户消息要陪检索一起等云端往返。
     const mcpPreload=(async ()=>{
+      if (!currentChatPrefs.tools) return []
       const started=performance.now()
       try {
         const listData=await fetchJsonWithSoftTimeout('/api/mcp?person='+encodeURIComponent(target),{credentials:'include'},300,abortController.signal,reason=>chatTiming('chat_mcp_preload_failure',{stage:'list',reason}))
@@ -2439,7 +2440,7 @@ export default function App() {
       {page === 'fun' && <Fun shortcut={funShortcut} onShortcutUsed={()=>setFunShortcut('')} displayName={displayName} />}
       {page === 'settings' && <Settings packIcons={activePack?.icons} onBack={()=>{setPage('home');setActiveTool('');setChatOpen(false)}} onLogout={logout} cloudStatus={cloudStatus} themePrefs={themePrefs} setThemePrefs={setThemePrefs} customAssets={customAssets} conversations={conversations} modelConfig={modelConfig} personAppearance={personAppearance} setPersonAppearance={setPersonAppearance} onOpenTool={(tool)=>{setPerson(tool.person);setActiveTool(tool.tool);setPage('room');setToolReturnToSettings(true)}} displayName={displayName} timeZone={timeZone} setTimeZone={setTimeZone} worldEntries={worldEntries} setWorldEntries={setWorldEntries} modelProfiles={modelProfiles} setModelProfiles={setModelProfiles} bindings={bindings} setBindings={setBindings} vendors={vendors} setVendors={setVendors} subscriptions={subscriptions} setSubscriptions={setSubscriptions} onApiBaseApplied={recheckAfterApiChange} systemPeople={assistants.map(a=>a.id)} avatarOf={(id)=>characters[id]?.avatar||''} workspaceConfigs={workspaceConfigs} onWorkspaceSaved={(config)=>setWorkspaceConfigs(old=>({...old,[config.person]:config}))} defaultModelId={defaultModelId} setDefaultModelId={setDefaultModelId} />}
     </section>
-    {fallbackNotice ? <div className="cloud-status error fallback-notice" role="status"><span><IconWarning className="ui-icon-inline" size={14}/> {fallbackNotice}</span><button onClick={()=>{setFallbackNotice('');navigate('settings')}}>去设置重新连接</button><button onClick={()=>setFallbackNotice('')}>知道了</button></div> : ((!isLocalMode()||cloudStatus==='error')&&cloudStatus!=='saved' && <div className={'cloud-status '+cloudStatus} role="status"><span>{cloudStatus==='saving'?(isLocalMode()?'本地保存中…':'云端保存中…'):cloudStatus==='error'?(isLocalMode()?'本地保存失败，请检查浏览器存储空间':'云端暂不可用，本地数据已保留'):'连接云端…'}</span>{cloudStatus==='error'&&<button onClick={retryCloudConnection}>{isLocalMode()?'重试保存':'重连云端'}</button>}</div>)}
+    {fallbackNotice ? <div className="cloud-status error fallback-notice" role="status"><span><IconWarning className="ui-icon-inline" size={14}/> {fallbackNotice}</span><button onClick={()=>{setFallbackNotice('');navigate('settings')}}>去设置重新连接</button><button onClick={()=>setFallbackNotice('')}>知道了</button></div> : ((!isLocalMode()||cloudStatus==='error'||cloudStatus==='protected')&&cloudStatus!=='saved' && <div className={'cloud-status '+cloudStatus} role="status"><span>{cloudStatus==='protected'?'检测到快照缺少已有记录，同步已暂停。本机记录仍可查看。':cloudStatus==='saving'?(isLocalMode()?'本地保存中…':'云端保存中…'):cloudStatus==='error'?(isLocalMode()?'本地保存失败，请检查浏览器存储空间':'云端暂不可用，本地数据已保留'):'连接云端…'}</span>{cloudStatus==='error'&&<button onClick={retryCloudConnection}>{isLocalMode()?'重试保存':'重连云端'}</button>}</div>)}
     {showPrimaryNavigation && <nav className="primary-navigation" aria-label="主导航">
       {([['home', '主页', IconHome], ['room', '房间', IconChat], ['settings', '设置', IconSettings]] as const).map(([target, label, Icon]) =>
         <button type="button" key={target} aria-current={page === target ? 'page' : undefined} onClick={() => {
@@ -2674,7 +2675,7 @@ function Room(props: {
   if (props.chatOpen) return <Chat {...props} />
   // 头部右侧是助手切换器：两个以内只放一个「切换」按钮（不铺开默认名
   // assistant-001/002 这类编号），超过两个才用下拉选框选择当前房间。
-  const assistantIds = ASSISTANT_PEOPLE
+  const assistantIds = props.assistants.map(a=>a.id)
   const nextPerson = assistantIds.find(id => id !== props.person) || props.person
   const personSwitcher = assistantIds.length > 2
     ? <SoftSelect className="room-person-select" ariaLabel="切换助手" value={assistantIds.includes(props.person)?props.person:assistantIds[0]} onChange={v=>{props.setPerson(v)}} options={assistantIds.map(id=>({value:id,label:props.displayName(id)}))}/>
