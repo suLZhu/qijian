@@ -6,6 +6,7 @@ on:
       - fix/subscription-model-selection-theme-docs
       - fix/kelivo-provider-model-management
       - feature/ui-clean-slate-preview
+      - fix/chat-core-stability
     paths:
       - '.github/workflows/build-qijian-debug.yml'
       - 'src/**'
@@ -61,6 +62,15 @@ jobs:
           chmod +x android/gradlew
           cd android
           ./gradlew --no-daemon assembleDebug
+      - name: Verify APK metadata and signature
+        run: |
+          APK="$(find android/app/build/outputs/apk/debug -name '*.apk' -type f | head -1)"
+          test -n "$APK"
+          SDK="${ANDROID_HOME:-/usr/local/lib/android/sdk}/build-tools/36.0.0"
+          "$SDK/aapt" dump badging "$APK" | sed -n '/^package:/p'
+          "$SDK/apksigner" verify --print-certs "$APK"
+          stat -c '%n %s bytes' "$APK"
+          sha256sum "$APK"
       - name: Upload Qijian debug APK
         uses: actions/upload-artifact@v4
         with:
