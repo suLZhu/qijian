@@ -1,0 +1,19 @@
+/* 所有完整对话框共享同一个屏幕安全高度，内容超出则内部滚动。 */
+.shell .request-stats-card,
+.shell .chat-summary-card,
+.shell .vendor-kelivo-sheet {
+  box-sizing: border-box;
+  max-height: calc(100dvh - var(--app-safe-top, 0px) - var(--app-safe-bottom, 0px) - 24px);
+  overscroll-behavior: contain;
+}
+/* 浮层只负责遮罩和对齐，不与内容混用滚动区域。 */
+.shell .request-stats-modal,
+.shell .chat-summary-modal,
+.shell .vendor-kelivo-sheet-overlay {
+  box-sizing: border-box;
+  padding-top: calc(12px + var(--app-safe-top, 0px));
+  padding-bottom: calc(12px + var(--app-safe-bottom, 0px));
+}
+/* 统一可滚动区，避免头部随内容滚走；保留各功能原有互动方式。 */
+.shell .request-stats-card,
+.shell .chat-summary-card { overflow-y: auto; }
