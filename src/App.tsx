@@ -19,7 +19,7 @@ import { SystemSetupSheet } from './SystemSetupSheet'
 import { BackupCenter } from './BackupCenter'
 import { WebBrowser, type WebPage } from './WebBrowser'
 import { GUIDE_BRIEF, GUIDE_MARKDOWN } from './guide.mjs'
-import { applyWebUpdate, compareVersions, currentBundle, liveUpdateSupported, notifyAppReady, resetToBuiltin } from './liveUpdate.mjs'
+import { AppUpdateCard, AppUpdateNotice, startAppUpdateCheck } from './AppUpdateCard'
 import { applyPackVars, getActivePackId, loadThemePacks, normalizeThemePack, setActivePack as setStoredActivePack, upsertThemePack, type ThemePack } from './themePack.mjs'
 import { DEFAULT_ROOM_LAYOUT, loadRoomLayout, saveRoomLayout, resetRoomLayout, type RoomItem, type RoomLayout } from './roomLayout.mjs'
 import { WorkspaceSettings, type WorkspaceConfig } from './WorkspaceSettings'
@@ -657,27 +657,7 @@ export default function App() {
   const [drawerRenameId,setDrawerRenameId]=useState<string|null>(null)
   const [drawerRenameDraft,setDrawerRenameDraft]=useState('')
   useEffect(()=>{ (window as any).AiHomeGuide=GUIDE_MARKDOWN; return ()=>{ delete (window as any).AiHomeGuide } },[])
-  useEffect(()=>{ void notifyAppReady() },[])
-  useEffect(()=>{
-    if(!liveUpdateSupported())return
-    let target=''
-    try{ target=localStorage.getItem('ai-home.updateUrl')||'' }catch{}
-    if(!target)return
-    try{ if(localStorage.getItem('ai-home.autoUpdate')==='0')return }catch{}
-    const timer=window.setTimeout(()=>{ void (async()=>{
-      try{
-        const res=await fetch(target,{cache:'no-store',credentials:'omit'})
-        const data=await res.json()
-        const version=String(data.webVersion||'')
-        const bundleUrl=String(data.webUrl||'')
-        if(!version||!bundleUrl)return
-        const cur=await currentBundle()
-        if(cur?.bundle?.version&&compareVersions(version,cur.bundle.version)<=0)return
-        await applyWebUpdate(bundleUrl,version,String(data.webChecksum||'')||undefined)
-      }catch{ /* 自动检查失败不打扰用户 */ }
-    })() },5000)
-    return ()=>window.clearTimeout(timer)
-  },[])
+  useEffect(startAppUpdateCheck, [])
   const [activePack,setActivePack]=useState<ThemePack|null>(()=>{const id=getActivePackId();return [...BUILTIN_THEME_PACKS,...loadThemePacks()].find(p=>p.id===id)||null})
   useEffect(()=>{ applyPackVars(activePack) },[activePack])
   useEffect(()=>{ const on=()=>{const id=getActivePackId();setActivePack([...BUILTIN_THEME_PACKS,...loadThemePacks()].find(p=>p.id===id)||null)}; window.addEventListener('aihome:theme-pack',on); return ()=>window.removeEventListener('aihome:theme-pack',on) },[])
@@ -2471,6 +2451,7 @@ function Home({ onPerson, onOpenMemory, onOpenCalendar, time, today, displayName
       <div className="home-clock">{time || '--:--'}</div>
       <div className="home-date">{today}</div>
       <p className="home-greet">{greeting}。{greetText}</p>
+      <AppUpdateNotice/>
     </header>
 
     <div className="home-status-list">
@@ -3866,60 +3847,6 @@ const resourceTab=(section.startsWith('resources:')?section.slice('resources:'.l
 // 二级设置：两个分组名横排成小标签，点一个只显示那一个内容，不再铺两行大卡片。
 function SettingsTabBar({title,items,value,onChange}:{title:string;items:Array<[string,string]>;value:string;onChange:(id:string)=>void}) {
   return <div className="settings-tabs"><b className="settings-tabs-title">{title}</b><div className="settings-tabs-row" role="tablist">{items.map(([id,label])=><button type="button" role="tab" key={id} aria-selected={value===id} className={'settings-tab'+(value===id?' active':'')} onClick={()=>onChange(id)}>{label}</button>)}</div></div>
-}
-
-function AppUpdateCard() {
-  const [url, setUrl] = useState(() => { try { return localStorage.getItem('ai-home.updateUrl') || '' } catch { return '' } })
-  const [msg, setMsg] = useState('')
-  const [auto, setAuto] = useState(() => { try { return localStorage.getItem('ai-home.autoUpdate') !== '0' } catch { return true } })
-  const save = () => { try { localStorage.setItem('ai-home.updateUrl', url.trim()) } catch {} setMsg('更新地址已保存') }
-  const check = () => {
-    const bridge = (window as any).AiHomeSystem
-    if (!bridge || typeof bridge.checkAppUpdate !== 'function') { setMsg('仅 Android App 内支持检查更新'); return }
-    const target = url.trim()
-    if (!/^https?:\/\//i.test(target)) { setMsg('请先填写 http(s) 的更新清单地址'); return }
-    try { localStorage.setItem('ai-home.updateUrl', target) } catch {}
-    bridge.checkAppUpdate(target)
-    setMsg('已发起 APK 检查，发现新版本会弹窗提示下载安装')
-  }
-  const checkWeb = async () => {
-    const target = url.trim()
-    if (!/^https?:\/\//i.test(target)) { setMsg('请先填写 http(s) 的更新清单地址'); return }
-    try {
-      setMsg('正在检查界面更新…')
-      const res = await fetch(target, { cache: 'no-store', credentials: 'omit' })
-      const data = await res.json()
-      const version = String(data.webVersion || '')
-      const bundleUrl = String(data.webUrl || '')
-      if (!version || !bundleUrl) { setMsg('清单缺少 webVersion / webUrl'); return }
-      const cur = await currentBundle()
-      if (cur?.bundle?.version && compareVersions(version, cur.bundle.version) <= 0) { setMsg('界面已是最新：' + cur.bundle.version); return }
-      if (!window.confirm('发现新界面 ' + version + '，下载后立即生效，继续？')) { setMsg('已取消'); return }
-      setMsg('正在下载界面包…')
-      await applyWebUpdate(bundleUrl, version, String(data.webChecksum || '') || undefined)
-    } catch (e: any) {
-      setMsg('界面更新失败：' + (e?.message || String(e)))
-    }
-  }
-  const resetWeb = async () => {
-    if (!window.confirm('恢复到 App 内置界面？')) return
-    try { await resetToBuiltin(); setMsg('已恢复内置界面，正在重载…') } catch (e: any) { setMsg('恢复失败：' + (e?.message || e)) }
-  }
-  return <div className="setting-card settings-inner-card">
-    <b>应用更新</b>
-    <p className="muted">清单 JSON：versionCode / versionName / apkUrl / notes，以及可选的 webVersion / webUrl。「检查 APK 更新」走系统安装；「检查界面更新」走 Live Update，只替换网页资源、立即生效，不用装 APK。</p>
-    <input className="memory-search" value={url} onChange={e => setUrl(e.target.value)} placeholder="https://your-server/qijian/latest.json" aria-label="更新清单地址"/>
-    <label className="update-auto"><input type="checkbox" checked={auto} onChange={e => { setAuto(e.target.checked); try { localStorage.setItem('ai-home.autoUpdate', e.target.checked ? '1' : '0') } catch {} }}/> 启动时自动检查界面更新</label>
-    <div className="settings-shortcuts">
-      <div className="settings-shortcut-group"><div>
-        <button type="button" onClick={save}>保存地址</button>
-        <button type="button" onClick={check}>检查 APK 更新</button>
-        <button type="button" onClick={() => void checkWeb()}>检查界面更新</button>
-        <button type="button" onClick={() => void resetWeb()}>恢复内置界面</button>
-      </div></div>
-    </div>
-    {msg && <p className="muted">{msg}</p>}
-  </div>
 }
 
 function SettingsGuidePage() {
