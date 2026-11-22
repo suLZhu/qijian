@@ -211,6 +211,7 @@ public class MainActivity extends BridgeActivity {
         WebView webView = (getBridge() != null) ? getBridge().getWebView() : null;
         if (webView == null) return;
         String js = "(function(){var r=document.documentElement;if(!r)return;"
+            + "r.dataset.nativeInsets='true';"
             + "r.style.setProperty('--native-safe-top','" + safeTopDp + "px');"
             + "r.style.setProperty('--native-safe-bottom','" + safeBottomDp + "px');"
             + "r.style.setProperty('--native-safe-left','" + safeLeftDp + "px');"

@@ -64,6 +64,7 @@ try {
     await page.setViewport(viewport)
     const geometry = await page.evaluate(() => {
       const root = document.documentElement
+      root.dataset.nativeInsets = 'true'
       root.style.setProperty('--native-safe-top', '24px')
       root.style.setProperty('--native-safe-left', '20px')
       root.style.setProperty('--native-safe-right', '16px')
@@ -73,7 +74,7 @@ try {
       const title = document.querySelector('.settings-page-header h2').getBoundingClientRect()
       return { headerTop: header.top, headerLeft: header.left, backWidth: back.width, backHeight: back.height, iconWidth: icon.width, titleTop: title.top, titleHeight: title.height, iconTop: icon.top, iconHeight: icon.height }
     })
-    assert(geometry.headerTop >= 24 && geometry.headerTop < 50, 'Settings should consume the top inset once')
+    assert(geometry.headerTop >= 24 && geometry.headerTop < 50, 'Settings should consume the top inset once: ' + JSON.stringify(geometry))
     assert(geometry.headerLeft >= 20, 'Settings must avoid the left cutout')
     assert(geometry.backWidth >= 48 && geometry.backHeight >= 48, 'Back hit target is too small')
     assert.equal(geometry.iconWidth, 24, 'Back glyph size')
