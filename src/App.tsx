@@ -47,7 +47,7 @@ import { messageWithVision, historyVisionMessageIndexes, historicalMessageWithou
 // 会话内消息搜索（微信式）：纯字符串匹配 + 上一条/下一条循环 + messageId 定位。
 import { searchMessages, stepMatchIndex, type ChatSearchResult } from './chatSearch.mjs'
 // 云端恢复决策（数据安全）：启动动作判定、覆盖前本地备份、快照→视图提取。
-import { RECOVERY_BACKUP_KEY, decideCloudLoadAction, classifyCloudLoadError, shouldBackupBeforeApply, buildRecoveryBackup, pickActiveConversationIds, pickActiveMessagesFromSnapshot } from './cloudRecovery.mjs'
+import { RECOVERY_BACKUP_KEY, hasEmptySnapshotConflict, decideCloudLoadAction, classifyCloudLoadError, shouldBackupBeforeApply, buildRecoveryBackup, pickActiveConversationIds, pickActiveMessagesFromSnapshot } from './cloudRecovery.mjs'
 // 模型请求诊断（黑匣子）：只旁路观察最终 payload，绝不改请求、绝不记录凭证。
 // 资源库绑定层：设置区一次性添加模型/MCP/世界书，聊天窗口按助手选择由哪个使用。
 import { createToolExecutionBudget } from './toolExecutionBudget.mjs'
@@ -839,7 +839,14 @@ export default function App() {
     // 启动决策统一走纯函数（tests/cloud-recovery.test.mjs 锁定）：
     // 云端有快照 → apply（空本地绝无路径进入 PUT 分支，非空云端不被覆盖）；
     // 云端无快照 → 首次迁移上传本机状态。
-    if (decideCloudLoadAction({ cloudState: result.state ?? null }) === 'apply-cloud') applySnapshot(result.state)
+    if (decideCloudLoadAction({ cloudState: result.state ?? null }) === 'apply-cloud') {
+      if (hasEmptySnapshotConflict(latestSnapshot.current || {}, result.state)) {
+        setCloudReady(false)
+        setCloudStatus('error')
+        return
+      }
+      applySnapshot(result.state)
+    }
     else {
       const saved = await apiFetch('/api/state', { method: 'PUT', credentials: 'include', headers: {'Content-Type':'application/json'}, body: JSON.stringify({state:latestSnapshot.current}) })
       if (!saved.ok) {

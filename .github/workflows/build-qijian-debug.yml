@@ -9,6 +9,7 @@ on:
       - feature/ui-clean-slate-preview
       - fix/chat-core-stability
       - fix/android-update-51
+      - fix/p0-production-entry-recovery
     paths:
       - '.github/workflows/build-qijian-debug.yml'
       - 'src/**'
@@ -84,6 +85,7 @@ jobs:
         run: |
           APK="$(find android/app/build/outputs/apk/debug -name '*.apk' -type f | head -1)"
           test -n "$APK"
+          python3 scripts/check-production-apk.py "$APK"
           SDK="${ANDROID_HOME:-/usr/local/lib/android/sdk}/build-tools/36.0.0"
           "$SDK/aapt" dump badging "$APK" | sed -n '/^package:/p'
           "$SDK/apksigner" verify --print-certs "$APK"

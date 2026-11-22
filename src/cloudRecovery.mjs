@@ -121,3 +121,22 @@ export function pickActiveMessagesFromSnapshot(convs, activeIds) {
   }
   return result
 }
+
+// A startup snapshot that empties a populated category is ambiguous. Suspend
+// syncing before applying any of it so the local copy remains available.
+export function hasEmptySnapshotConflict(local, incoming) {
+  const records = value => Array.isArray(value)
+    ? value.length > 0
+    : Boolean(value && typeof value === 'object' && Object.values(value).some(records))
+  const texts = value => Boolean(value && typeof value === 'object'
+    && Object.values(value).some(part => typeof part === 'string' && part.trim()))
+  const own = key => Object.hasOwn(incoming, key)
+  const chatConflict = (own('conversations') || own('messages'))
+    && (conversationsHaveData(local.conversations) || records(local.messages))
+    && !conversationsHaveData(incoming.conversations) && !records(incoming.messages)
+  return Boolean(chatConflict
+    || ['worldEntries', 'mcpConnections', 'memoryEntries', 'assistants'].some(
+      key => own(key) && records(local[key]) && !records(incoming[key])
+    )
+    || ['worldbook', 'memory'].some(key => own(key) && texts(local[key]) && !texts(incoming[key])))
+}

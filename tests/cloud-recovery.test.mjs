@@ -1,3 +1,4 @@
+import { hasEmptySnapshotConflict } from '../src/cloudRecovery.mjs'
 // 云端恢复链验收（第八阶段：数据安全）。
 // 核心规则：有数据的一侧不能被空数据的一侧覆盖；
 // 云端优先恢复是既有产品行为，覆盖前对本地做差异备份。
@@ -216,4 +217,22 @@ test('快照字段守卫：缺 conversations 的部分快照不会清掉本地�
   assert.deepEqual(ids, {})
   const view = pickActiveMessagesFromSnapshot(undefined, {})
   assert.deepEqual(view, {})
+})
+
+
+test('空启动快照不会覆盖现有聊天、世界书、MCP 或长期记忆', () => {
+  const examples = {
+    conversations: { assistant: [{ messages: [{ content: 'local' }] }] },
+    messages: { assistant: [{ content: 'local' }] },
+    worldEntries: [{ id: 'local' }],
+    mcpConnections: { assistant: [{ id: 'local' }] },
+    memoryEntries: { assistant: [{ id: 'local' }] },
+    memory: { assistant: 'local' },
+    worldbook: { assistant: 'local' },
+  }
+  for (const [key, value] of Object.entries(examples)) {
+    assert.equal(hasEmptySnapshotConflict({ [key]: value }, { [key]: {} }), true, key)
+    assert.equal(hasEmptySnapshotConflict({ [key]: value }, { themePrefs: {} }), false, key)
+    assert.equal(hasEmptySnapshotConflict({ [key]: value }, { [key]: value }), false, key)
+  }
 })
