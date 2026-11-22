@@ -48,7 +48,7 @@ export function normalizeRoomStyle(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined
   const clean = Object.create(null)
   for (const [key, entry] of Object.entries(value)) {
-    if (!key || /^\\d+$/.test(key) || key === '__proto__' || key === 'constructor' || key === 'prototype') continue
+    if (!key || /^\d+$/.test(key) || key === '__proto__' || key === 'constructor' || key === 'prototype') continue
     // Nested objects, arrays and nulls are not valid inline React CSS values.
     if (typeof entry !== 'string' && (typeof entry !== 'number' || !Number.isFinite(entry))) continue
     if (typeof entry === 'string' && entry.length > 1000) continue
