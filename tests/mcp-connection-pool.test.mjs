@@ -43,3 +43,28 @@ test('失败的调用不自动重试，但下一次可重建连接', async () =>
   assert.equal(await pool.use('x','v1',{},c=>c.id),2)
   await pool.close()
 })
+
+test('配置替换时并发请求共享新连接，旧调用失败不关闭新连接', async () => {
+  let opens = 0
+  let finishOldClose
+  const oldClose = new Promise(resolve => { finishOldClose = resolve })
+  let failOldOperation
+  const oldOperation = new Promise((_, reject) => { failOldOperation = reject })
+  const pool = createMcpConnectionPool({ createClient: async () => {
+    const id = ++opens
+    return { client: { id, close: async () => { if (id === 1) await oldClose } } }
+  } })
+  const first = pool.use('one', 'old', {}, () => oldOperation)
+  const rejected = assert.rejects(first, /旧调用失败/)
+  await Promise.resolve()
+  const replacements = await Promise.all([
+    pool.use('one', 'new', {}, client => client.id),
+    pool.use('one', 'new', {}, client => client.id),
+  ])
+  assert.deepEqual(replacements, [2, 2])
+  failOldOperation(new Error('旧调用失败'))
+  await rejected
+  assert.equal(await pool.use('one', 'new', {}, client => client.id), 2)
+  finishOldClose()
+  await pool.close()
+})

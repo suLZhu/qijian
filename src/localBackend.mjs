@@ -1,3 +1,4 @@
+import { recallExcerpt } from './contextCompression.mjs'
 // 本地模式后端垫片（LocalBackend）：未配置服务器地址时，浏览器/WebView 内
 // 直接应答全部 /api/* 请求，让 App 开箱即用——不依赖任何云端或本机后端进程。
 //
@@ -224,7 +225,7 @@ function searchLocalMemory({ person, query, exclude, limit = 5 }) {
         if (!message || (message.role !== 'user' && message.role !== 'assistant')) return
         const content = typeof message.content === 'string' ? message.content.trim().slice(0, 5000) : ''
         if (content.length < 2) return
-        rows.push({ conversationId: conversation.id, title, messageIndex: index, role: message.role, content })
+        rows.push({ conversationId: conversation.id, title, messageIndex: index, role: message.role, at: message.at || '', content })
       })
     }
   }
@@ -236,7 +237,7 @@ function searchLocalMemory({ person, query, exclude, limit = 5 }) {
     .sort((a, b) => b.score - a.score)
     .slice(0, Math.min(30, Math.max(1, limit * 6)))
   return scored
-    .map(r => ({ ...r, content: r.content.slice(0, 700) }))
+    .map(r => ({ ...r, content: recallExcerpt(r.content, r.content.indexOf(terms.find(t => r.content.includes(t))), 700) }))
     .sort((a, b) => b.score - a.score)
     .slice(0, limit)
 }

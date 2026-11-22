@@ -1,3 +1,5 @@
+import { recallExcerpt } from './contextCompression.mjs'
+
 // Original conversation recall index. It stores text only, never attachment bytes or keys.
 // Each assistant has a strict person partition. Indexed rows mirror /api/state snapshots.
 export function initMemoryIndex(db) {
@@ -52,6 +54,7 @@ export function searchMemoryIndex(db, { person, query, exclude = '', limit = 5 }
     return segments
   }))].slice(0, 20)
   const clauses = terms.map(() => 'instr(content, ?) > 0').join(' OR ')
-  const rows = db.prepare(`SELECT conversation_id AS conversationId,title,message_index AS messageIndex,role,substr(content,1,700) AS content FROM conversation_recall WHERE person=? AND conversation_id != ? AND (${clauses}) ORDER BY rowid DESC LIMIT ?`).all(person, exclude, ...terms, Math.min(30, Math.max(1,limit*6)))
+  const rows = db.prepare(`SELECT conversation_id AS conversationId,title,message_index AS messageIndex,role,content FROM conversation_recall WHERE person=? AND conversation_id != ? AND (${clauses}) ORDER BY rowid DESC LIMIT ?`).all(person, exclude, ...terms, Math.min(30, Math.max(1,limit*6)))
   return rows.map(r => ({...r, score: terms.reduce((n,t)=>n+(r.content.includes(t)?1:0),0)})).sort((a,b)=>b.score-a.score).slice(0,limit)
+    .map(r => ({ ...r, content: recallExcerpt(r.content, r.content.indexOf(terms.find(t => r.content.includes(t))), 700) }))
 }

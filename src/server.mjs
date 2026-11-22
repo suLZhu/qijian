@@ -1263,7 +1263,7 @@ const apiServer = createServer(async (req, res) => {
     const results = searchMemoryIndex(db, { person, query, exclude, limit: 5 })
     // 向量结果作为附加通道返回，不改变原有 results 结构（旧客户端不受影响）。
     let vectorResults = []
-    const vectorConfig = memoryVectorConfig(person)
+    const vectorConfig = url.searchParams.get('vectors') === '0' ? null : memoryVectorConfig(person)
     if (vectorConfig) {
       try {
         const [queryVector] = await embedTexts(vectorConfig, [query])

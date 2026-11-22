@@ -122,6 +122,11 @@ function recallTerms(query) {
  * 只搜已经因为摘要/窗口预算而没有逐条发送的消息；纯同步、零网络，
  * 用于在长对话中自动把与本轮话题最相关的旧细节补回上下文。
  */
+export function recallExcerpt(content, matchPosition, limit = 900) {
+  const start = matchPosition < limit - 100 ? 0 : Math.max(0, matchPosition - 120)
+  return content.slice(start, start + limit)
+}
+
 export function searchMessageList(messages, query, limit = 4) {
   const terms = recallTerms(query)
   if (!terms.length) return []
@@ -146,12 +151,11 @@ export function searchMessageList(messages, query, limit = 4) {
       }
     }
     if (!score) continue
-    const start = bestMatch < 800 ? 0 : Math.max(0, bestMatch - 120)
     hits.push({
       index,
       role: message.role,
       at: message.at || '',
-      content: content.slice(start, start + 900),
+      content: recallExcerpt(content, bestMatch),
       score,
     })
   }
