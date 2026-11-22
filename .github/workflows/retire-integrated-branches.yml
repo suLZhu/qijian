@@ -1,0 +1,40 @@
+name: Retire verified integration branches
+on:
+  push:
+    branches: [feature/ui-clean-slate-preview]
+    paths: [.github/workflows/retire-integrated-branches.yml]
+permissions:
+  contents: write
+jobs:
+  retire:
+    if: github.event.before == '5d1e83642bd58683011b1f3efb0547c33cb15685'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Delete the eight backed-up refs in one transaction
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD^)" = '5d1e83642bd58683011b1f3efb0547c33cb15685'
+          test "$(git rev-parse origin/main)" = 'e007625fff93b910cfc51c1cbf8c5fbdd5b79c8c'
+          leases=()
+          deletions=()
+          while read -r name expected; do
+            ref="refs/heads/$name"
+            test "$(git rev-parse "refs/remotes/origin/$name")" = "$expected"
+            git merge-base --is-ancestor "$expected" HEAD^
+            leases+=("--force-with-lease=$ref:$expected")
+            deletions+=(":$ref")
+          done <<'BRANCHES'
+          feat/vendor-settings d5c6f6c43f20c0454b418a215b69eb91bbd28c82
+          feature/layout-unification-preview dcc8df817615bf185c8edb2b5aa293cdab5fe579
+          fix/android-update-51 cafc11af23651645aea4387f1b53fe2e6331a6f6
+          fix/chat-core-stability 21292f5a9f75e6ec2a6cbe68bd30943f1d09bbe2
+          fix/kelivo-provider-model-management e007625fff93b910cfc51c1cbf8c5fbdd5b79c8c
+          fix/mcp-async-reconnect-20261117 8e6203724008da753ab5d336157ab649341bd661
+          fix/p0-production-entry-recovery f1d0d96d7967275301a8f9e5acd413da5c13838f
+          refactor/unified-rendering-and-components 5d5f15b7e9fbadaebc5ffb117ff925268fedf65f
+          BRANCHES
+          git push --atomic "${leases[@]}" origin "${deletions[@]}"
