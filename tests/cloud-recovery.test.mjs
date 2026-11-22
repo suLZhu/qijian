@@ -236,3 +236,9 @@ test('空启动快照不会覆盖现有聊天、世界书、MCP 或长期记忆'
     assert.equal(hasEmptySnapshotConflict({ [key]: value }, { [key]: value }), false, key)
   }
 })
+
+test('空会话表优先于视图缓存，并检查助手间的部分清空', () => {
+  const local = { conversations: { a: [{ messages: [{ content: 'a' }] }], b: [{ messages: [{ content: 'b' }] }] } }
+  const cloud = { conversations: { a: local.conversations.a, b: [] }, messages: { b: [{ content: 'stale view' }] } }
+  assert.equal(hasEmptySnapshotConflict(local, cloud), true)
+})
