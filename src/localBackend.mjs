@@ -225,7 +225,7 @@ function searchLocalMemory({ person, query, exclude, limit = 5 }) {
         if (!message || (message.role !== 'user' && message.role !== 'assistant')) return
         const content = typeof message.content === 'string' ? message.content.trim().slice(0, 5000) : ''
         if (content.length < 2) return
-        rows.push({ conversationId: conversation.id, title, messageIndex: index, role: message.role, at: message.at || '', content })
+        rows.push({ conversationId: conversation.id, title, messageIndex: index, messageId: message.id || null, role: message.role, at: message.at || '', content })
       })
     }
   }

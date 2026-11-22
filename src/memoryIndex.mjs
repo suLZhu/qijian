@@ -8,18 +8,26 @@ export function initMemoryIndex(db) {
     message_index UNINDEXED, role UNINDEXED, content,
     tokenize='trigram'
   )`)
-  const count = db.prepare('SELECT count(*) AS n FROM conversation_recall').get().n
-  if (!count) {
-    const saved = db.prepare('SELECT payload FROM app_state WHERE id=1').get()
-    if (saved) {
-      try { rebuildMemoryIndex(db, JSON.parse(saved.payload)) }
-      catch (error) { console.warn('[recall] initial indexing skipped:', error.message) }
+  const hasSources = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='conversation_recall_sources'").get()
+  if (!hasSources) {
+    db.exec('BEGIN IMMEDIATE')
+    try {
+      db.exec('CREATE TABLE conversation_recall_sources (recall_rowid INTEGER PRIMARY KEY, message_id TEXT, message_at TEXT)')
+      const saved = db.prepare('SELECT payload FROM app_state WHERE id=1').get()
+      if (saved) rebuildMemoryIndex(db, JSON.parse(saved.payload))
+      db.exec('COMMIT')
+    } catch (error) {
+      db.exec('ROLLBACK')
+      console.warn('[recall] source migration skipped:', error.message)
+      db.exec('CREATE TABLE IF NOT EXISTS conversation_recall_sources (recall_rowid INTEGER PRIMARY KEY, message_id TEXT, message_at TEXT)')
     }
   }
 }
 
 export function rebuildMemoryIndex(db, state) {
   const insert = db.prepare('INSERT INTO conversation_recall (person,conversation_id,title,message_index,role,content) VALUES (?,?,?,?,?,?)')
+  const insertSource = db.prepare('INSERT INTO conversation_recall_sources VALUES (?,?,?)')
+  db.prepare('DELETE FROM conversation_recall_sources').run()
   db.prepare('DELETE FROM conversation_recall').run()
   // v3 snapshots key conversations by assistantId; legacy Chinese keys are
   // mapped once so old exports still index under the stable id.
@@ -35,7 +43,8 @@ export function rebuildMemoryIndex(db, state) {
         if (!['user','assistant'].includes(message?.role)) continue
         const content = typeof message.content === 'string' ? message.content.trim().slice(0, 5000) : ''
         if (content.length < 2) continue
-        insert.run(person, conversation.id.slice(0, 120), title, index, message.role, content)
+        const { lastInsertRowid } = insert.run(person, conversation.id.slice(0, 120), title, index, message.role, content)
+        insertSource.run(lastInsertRowid, typeof message.id === 'string' ? message.id : null, typeof message.at === 'string' ? message.at : null)
       }
     }
   }
@@ -54,7 +63,7 @@ export function searchMemoryIndex(db, { person, query, exclude = '', limit = 5 }
     return segments
   }))].slice(0, 20)
   const clauses = terms.map(() => 'instr(content, ?) > 0').join(' OR ')
-  const rows = db.prepare(`SELECT conversation_id AS conversationId,title,message_index AS messageIndex,role,content FROM conversation_recall WHERE person=? AND conversation_id != ? AND (${clauses}) ORDER BY rowid DESC LIMIT ?`).all(person, exclude, ...terms, Math.min(30, Math.max(1,limit*6)))
+  const rows = db.prepare(`SELECT conversation_id AS conversationId,title,message_index AS messageIndex,role,content,message_id AS messageId,message_at AS at FROM conversation_recall LEFT JOIN conversation_recall_sources ON recall_rowid=conversation_recall.rowid WHERE person=? AND conversation_id != ? AND (${clauses}) ORDER BY conversation_recall.rowid DESC LIMIT ?`).all(person, exclude, ...terms, Math.min(30, Math.max(1,limit*6)))
   return rows.map(r => ({...r, score: terms.reduce((n,t)=>n+(r.content.includes(t)?1:0),0)})).sort((a,b)=>b.score-a.score).slice(0,limit)
     .map(r => ({ ...r, content: recallExcerpt(r.content, r.content.indexOf(terms.find(t => r.content.includes(t))), 700) }))
 }

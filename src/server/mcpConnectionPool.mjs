@@ -61,10 +61,24 @@ export function createMcpConnectionPool({ createClient, maxConnections = 48 }) {
     }
   }
 
+  async function listTools(key, version, config) {
+    return use(key, version, config, client => {
+      const entry = entries.get(key)
+      if (!entry || entry.version !== version) return client.listTools()
+      if (entry.tools && entry.tools.expiresAt > Date.now()) return entry.tools.promise
+      const catalog = { expiresAt: Infinity, promise: client.listTools() }
+      entry.tools = catalog
+      return catalog.promise.then(result => {
+        catalog.expiresAt = Date.now() + 30_000
+        return result
+      })
+    })
+  }
+
   async function close() {
     closed = true
     await Promise.all([...entries.keys()].map(drop))
   }
 
-  return { use, drop, close, get size() { return entries.size } }
+  return { use, listTools, drop, close, get size() { return entries.size } }
 }

@@ -68,3 +68,15 @@ test('配置替换时并发请求共享新连接，旧调用失败不关闭新�
   finishOldClose()
   await pool.close()
 })
+
+test('工具清单并发复用且配置更新后立即刷新', async () => {
+  let lists = 0
+  const pool = createMcpConnectionPool({ createClient: async () => ({client:{
+    listTools: async () => ++lists,
+    close: async () => {},
+  }}) })
+  assert.deepEqual(await Promise.all([pool.listTools('x', 'v1', {}), pool.listTools('x', 'v1', {})]), [1, 1])
+  assert.equal(await pool.listTools('x', 'v1', {}), 1)
+  assert.equal(await pool.listTools('x', 'v2', {}), 2)
+  await pool.close()
+})

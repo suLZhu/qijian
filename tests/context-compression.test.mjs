@@ -1,7 +1,10 @@
 // 上下文压缩：只压早段、摘要之后的消息必须全部保留、AI 能检索原文。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
+import { DatabaseSync } from 'node:sqlite'
+import { initMemoryIndex, rebuildMemoryIndex, searchMemoryIndex } from '../src/memoryIndex.mjs'
 import {
+  applySummaryRefresh, planSummaryRefresh, updateSummaryMessages,
   CONTEXT_LIMITS, planCompaction, buildSummaryPrompt,
   buildSummarySystemMessage, searchHistory, searchMessageList,
 } from '../src/contextCompression.mjs'
@@ -88,4 +91,60 @@ test('长消息召回片段保留实际命中的原文', () => {
   const [hit] = searchMessageList([{ role: 'user', content }], '桂花茶店')
   assert.match(hit.content, /周六下午三点去桂花茶店/)
   assert.ok(hit.content.length <= 900)
+})
+
+test('长会话增量摘要只推进实际覆盖的范围；旧数据无边界时从原文重建', () => {
+  const conversation = { messages: messages(60), summary: '旧摘要' }
+  const refresh = planSummaryRefresh(conversation.messages, -1, conversation.summary)
+  assert.doesNotMatch(refresh.prompt[1].content, /旧摘要/)
+  const next = applySummaryRefresh(conversation, refresh, '已整理八条', '2026-11-22')
+  assert.equal(next.summaryThrough, 8)
+  assert.equal(next.summaryThroughId, 'm7')
+  const incremental = planSummaryRefresh(next.messages, 7, next.summary)
+  assert.match(incremental.prompt[1].content, /已整理八条/)
+  assert.equal(incremental.throughId, 'm15')
+})
+
+test('编辑、删除或重生覆盖范围内的消息会使摘要失效；晚到摘要不会重新写回', () => {
+  const original = { messages: messages(40) }
+  const plan = planSummaryRefresh(original.messages, -1)
+  const summarized = applySummaryRefresh(original, plan, '摘要', '2026-11-22')
+  const variants = [
+    original.messages.map((m, i) => i === 0 ? { ...m, content: '已编辑' } : m),
+    original.messages.filter((_, i) => i !== 2),
+    original.messages.map((m, i) => i === 1 ? { ...m, content: '重新生成' } : m),
+  ]
+  for (const messages of variants) {
+    const updated = updateSummaryMessages(summarized, messages)
+    assert.equal(updated.summary, undefined)
+    assert.equal(applySummaryRefresh(updated, plan, '晚到的摘要', '2026-11-22'), updated)
+  }
+  const appended = updateSummaryMessages(summarized, [...original.messages, { id: 'new', role: 'user', content: '是新消息' }])
+  assert.equal(appended.summary, summarized.summary)
+})
+
+test('云端旧索引从权威快照补齐来源，缺失字段保留为空且删除后不再返回', () => {
+  const db = new DatabaseSync(':memory:')
+  try {
+    db.exec('CREATE TABLE app_state (id INTEGER PRIMARY KEY, payload TEXT)')
+    const person = 'assistant-yanweixi'
+    const source = { id: 'real', at: '2026-01-01T09:00:00Z', role: 'user', content: '桂花茶喝过' }
+    const state = { conversations: { [person]: [{ id: 'conv', messages: [source, { role: 'assistant', content: '桂花茶真香' }] }] } }
+    db.prepare('INSERT INTO app_state VALUES (1, ?)').run(JSON.stringify(state))
+    initMemoryIndex(db)
+    const results = searchMemoryIndex(db, { person, query: '桂花茶' })
+    assert.equal(results.find(r => r.messageId === 'real').at, source.at)
+    assert.equal(results.find(r => r.role === 'assistant').at, null)
+    assert.deepEqual(searchMemoryIndex(db, { person: 'assistant-yanshuo', query: '桂花茶' }), [])
+    rebuildMemoryIndex(db, { conversations: {} })
+    assert.deepEqual(searchMemoryIndex(db, { person, query: '桂花茶' }), [])
+  } finally {
+    db.close()
+  }
+})
+
+test('当前会话重复原文只保留最新命中', () => {
+  const content = '之前买了桂花茶'
+  const hits = searchMessageList([{role:'user', content}, {role:'user', content}], '桂花茶')
+  assert.deepEqual(hits.map(hit => hit.index), [1])
 })
