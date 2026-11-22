@@ -1,0 +1,28 @@
+:root {
+  --ui-icon-action: 24px;
+  --ui-icon-chevron: 20px;
+  --ui-icon-assist: 16px;
+  --ui-touch-size: 48px;
+}
+
+.ui-touch-control {
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-inline-size: var(--ui-touch-size) !important;
+  min-block-size: var(--ui-touch-size) !important;
+  flex-shrink: 0;
+}
+
+.ui-back-button {
+  gap: 6px;
+  padding-inline: 6px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+}
+
+.ui-touch-control > .ui-icon-image {
+  flex-shrink: 0;
+}

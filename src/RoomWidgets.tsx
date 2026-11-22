@@ -1,10 +1,11 @@
+import { CloseButton } from './uiPrimitives'
 // 房间工作区里的小组件：记账本 / 清单 / 便签 / 计数器。
 // 助手通过 widget_* 工具创建，长期保存；只有用户点删除才会消失。
 import { useCallback, useEffect, useRef, useState } from 'react'
 import './RoomWidgets.css'
 import { apiFetch } from './apiBase.mjs'
 import { confirmDialog } from './uiDialog'
-import { IconCheck, IconChevronRight, IconClose, IconEdit, IconGrid, IconLedger, IconMinus, IconPlus, IconSparkles, IconTrash, type IconComponent } from './icons'
+import { IconCheck, IconChevronRight, IconEdit, IconGrid, IconLedger, IconMinus, IconPlus, IconSparkles, IconTrash, type IconComponent } from './icons'
 
 export type WidgetType = 'custom' | 'ledger' | 'checklist' | 'note' | 'counter'
 export type RoomWidget = {
@@ -253,7 +254,7 @@ function WidgetSheet({ widget, onClose, onSaved }: { widget: RoomWidget; onClose
     <div className="widget-sheet" role="dialog" aria-modal="true" aria-label={current.title} onClick={event => event.stopPropagation()}>
       <div className="widget-sheet-head">
         <span className="widget-sheet-type">{TYPE_META[current.type]?.label || '小组件'}</span>
-        <button type="button" className="widget-sheet-close" onClick={onClose} aria-label="关闭"><IconClose size={15}/></button>
+        <CloseButton className="widget-sheet-close" onClick={onClose} label="关闭"/>
       </div>
       <input className="widget-title-input" value={title} onChange={event => setTitle(event.target.value)} onBlur={() => void rename()} aria-label="小组件名称" />
       {error && <p className="widget-error" role="alert">{error}</p>}

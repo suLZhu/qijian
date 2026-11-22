@@ -135,9 +135,13 @@ test('Mist 顶栏保留 Android 状态栏安全区与可点击热区', () => {
   const mist = read('src/mist.css')
   assert.match(mist, /\.shell \.chat-header \{[^}]*padding-top:max\(8px,calc\(var\(--app-safe-top\) \+ 6px\)\)!important/)
   assert.match(mist, /\.shell \.fullscreen-chat \.chat-header \{[\s\S]*?padding-top:max\(8px,calc\(var\(--app-safe-top\) \+ 6px\)\)!important/)
-  assert.match(mist, /\.shell \.chat-header-actions button::after \{[^}]*inset:-5px/)
+  assert.match(mist, /\.shell \.chat-header-actions button/)
+  const controls = read('src/uiPrimitives.css')
+  assert.match(controls, /--ui-touch-size: 48px/)
+  assert.match(controls, /--ui-icon-action: 24px/)
+  assert.match(controls, /min-block-size: var\(--ui-touch-size\)/)
   const appCss = read('src/App.css')
-  assert.match(appCss, /--app-safe-top:max\(env\(safe-area-inset-top/)
+  assert.match(appCss, /--app-safe-top:var\(--native-safe-top,env\(safe-area-inset-top/)
 })
 
 test('供应商多 Key：新建时可勾选，编辑页仍能增删改备用 Key，且样式类都有定义', () => {
@@ -171,7 +175,7 @@ test('供应商详情 / 新增供应商都是独立页面，不再在列表下�
   assert.match(app, /onClick=\{backToList\}/)
   assert.doesNotMatch(app, /editing===v\.id/, '列表点开不应再靠内联 editing 状态')
   // Android 返回键：供应商二级页先回列表。
-  assert.match(app, /if\(section\.startsWith\('vendor:'\)\)\{setSection\('vendor'\);return true\}/)
+  assert.match(app, /if\(section\.startsWith\('vendor:'\)\)\{openSection\('vendor'\);return\}/)
   assert.match(css, /\.vendor-page\{display:flex/)
 })
 

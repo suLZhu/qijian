@@ -121,3 +121,34 @@ export function pickActiveMessagesFromSnapshot(convs, activeIds) {
   }
   return result
 }
+
+// A startup snapshot that empties a populated category is ambiguous. Suspend
+// syncing before applying any of it so the local copy remains available.
+export function hasEmptySnapshotConflict(local, incoming) {
+  const populated = value => Array.isArray(value) ? value.length > 0
+    : typeof value === 'string' ? Boolean(value.trim())
+    : Boolean(value && typeof value === 'object' && Object.values(value).some(populated))
+  const own = key => Object.hasOwn(incoming, key)
+  const losesEntries = (before, after) => {
+    if (!populated(before)) return false
+    if (!populated(after)) return true
+    if (Array.isArray(before) || Array.isArray(after) || typeof before !== 'object' || typeof after !== 'object') return false
+    return Object.keys(before).some(key => populated(before[key]) && !populated(after[key]))
+  }
+  const conversationMessages = value => Object.fromEntries(Object.entries(value || {}).map(
+    ([person, list]) => [person, Array.isArray(list) ? list.flatMap(conversation => conversation?.messages || []) : []]
+  ))
+  if (own('conversations') || own('messages')) {
+    const before = { ...conversationMessages(local.conversations) }
+    for (const [person, messages] of Object.entries(local.messages || {})) {
+      if (!populated(before[person])) before[person] = messages
+    }
+    // The app reads a complete conversation map ahead of the legacy message view.
+    const after = incoming.conversations && Object.keys(before).every(person => Array.isArray(incoming.conversations[person]))
+      ? conversationMessages(incoming.conversations) : incoming.messages
+    if (losesEntries(before, after)) return true
+  }
+  return ['worldEntries', 'mcpConnections', 'memoryEntries', 'assistants', 'worldbook', 'memory'].some(
+    key => own(key) && losesEntries(local[key], incoming[key])
+  )
+}

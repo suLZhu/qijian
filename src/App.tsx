@@ -25,8 +25,8 @@ import { DEFAULT_ROOM_LAYOUT, loadRoomLayout, saveRoomLayout, resetRoomLayout, t
 import { WorkspaceSettings, type WorkspaceConfig } from './WorkspaceSettings'
 import { confirmDialog } from './uiDialog'
 import { applySummaryRefresh, planCompaction, planSummaryRefresh, buildSummarySystemMessage, searchHistory, searchMessageList, updateSummaryMessages } from './contextCompression.mjs'
-import { IconHome, IconChat, IconSettings, IconClock, IconMemory, IconCalendar, IconSun, IconPalette, IconPlug, IconChart, IconSparkles, IconFolder, IconShield, IconInfo, IconFlower, IconPlus, IconBack, IconChevronRight, IconChevronDown, IconChevronUp, IconClose, IconEdit, IconTrash, IconEye, IconEyeOff, IconArrowUp, IconArrowDown, IconSwitch, IconShare, IconTest, IconSearch, IconMinus, IconFile, IconWarning, IconMail, IconBook, IconCheck, IconCopy, IconRefresh, IconEmoji, IconPhoto, IconCoffee, IconMusic, IconLedger, IconGrid, IconMore, IconStar, IconMenu, IconMic, IconStop, IconSend, type IconComponent } from './icons'
-import { IconButton, SettingsRow } from './uiPrimitives'
+import { IconHome, IconChat, IconSettings, IconClock, IconMemory, IconCalendar, IconSun, IconPalette, IconPlug, IconChart, IconSparkles, IconFolder, IconShield, IconInfo, IconFlower, IconPlus, IconChevronRight, IconChevronDown, IconChevronUp, IconClose, IconEdit, IconTrash, IconEye, IconEyeOff, IconArrowUp, IconArrowDown, IconSwitch, IconShare, IconTest, IconSearch, IconMinus, IconFile, IconWarning, IconMail, IconBook, IconCheck, IconCopy, IconRefresh, IconEmoji, IconPhoto, IconCoffee, IconMusic, IconLedger, IconGrid, IconMore, IconStar, IconMenu, IconMic, IconStop, IconSend, type IconComponent } from './icons'
+import { BackButton, CloseButton, IconButton, SettingsRow } from './uiPrimitives'
 import { DEFAULT_BEAUTIFY_PACK, BEAUTIFY_PACKS } from './beautify'
 import { BUILTIN_THEME_PACKS } from './builtinThemePacks.mjs'
 import { PersonAppearance } from './PersonAppearance'
@@ -47,7 +47,7 @@ import { messageWithVision, historyVisionMessageIndexes, historicalMessageWithou
 // 会话内消息搜索（微信式）：纯字符串匹配 + 上一条/下一条循环 + messageId 定位。
 import { searchMessages, stepMatchIndex, type ChatSearchResult } from './chatSearch.mjs'
 // 云端恢复决策（数据安全）：启动动作判定、覆盖前本地备份、快照→视图提取。
-import { RECOVERY_BACKUP_KEY, decideCloudLoadAction, classifyCloudLoadError, shouldBackupBeforeApply, buildRecoveryBackup, pickActiveConversationIds, pickActiveMessagesFromSnapshot } from './cloudRecovery.mjs'
+import { RECOVERY_BACKUP_KEY, hasEmptySnapshotConflict, decideCloudLoadAction, classifyCloudLoadError, shouldBackupBeforeApply, buildRecoveryBackup, pickActiveConversationIds, pickActiveMessagesFromSnapshot } from './cloudRecovery.mjs'
 // 模型请求诊断（黑匣子）：只旁路观察最终 payload，绝不改请求、绝不记录凭证。
 // 资源库绑定层：设置区一次性添加模型/MCP/世界书，聊天窗口按助手选择由哪个使用。
 import { createToolExecutionBudget } from './toolExecutionBudget.mjs'
@@ -839,7 +839,14 @@ export default function App() {
     // 启动决策统一走纯函数（tests/cloud-recovery.test.mjs 锁定）：
     // 云端有快照 → apply（空本地绝无路径进入 PUT 分支，非空云端不被覆盖）；
     // 云端无快照 → 首次迁移上传本机状态。
-    if (decideCloudLoadAction({ cloudState: result.state ?? null }) === 'apply-cloud') applySnapshot(result.state)
+    if (decideCloudLoadAction({ cloudState: result.state ?? null }) === 'apply-cloud') {
+      if (hasEmptySnapshotConflict(latestSnapshot.current || {}, result.state)) {
+        setCloudReady(false)
+        setCloudStatus('error')
+        return
+      }
+      applySnapshot(result.state)
+    }
     else {
       const saved = await apiFetch('/api/state', { method: 'PUT', credentials: 'include', headers: {'Content-Type':'application/json'}, body: JSON.stringify({state:latestSnapshot.current}) })
       if (!saved.ok) {
@@ -2244,16 +2251,16 @@ export default function App() {
     {/* 全面屏：主页显示完整「菜单」胶囊；进入房间/会话等页面自动收成贴边细把手，点一下才滑出。 */}
     {page!=='settings'&&(()=>{
       const edge=page!=='home'
-      return <button type="button" className={'mobile-menu-toggle'+(edge?' sidebar-edge-handle':'')+(edge&&sidebarOpen?' moved':'')} aria-label={sidebarOpen?'收起菜单':'打开菜单'} aria-expanded={sidebarOpen} onClick={()=>setSidebarOpen(v=>!v)}><span aria-hidden="true"><IconMenu size={17}/></span>{edge?null:<b>菜单</b>}</button>
+      return <button type="button" className={'ui-touch-control mobile-menu-toggle'+(edge?' sidebar-edge-handle':'')+(edge&&sidebarOpen?' moved':'')} aria-label={sidebarOpen?'收起菜单':'打开菜单'} aria-expanded={sidebarOpen} onClick={()=>setSidebarOpen(v=>!v)}><span aria-hidden="true"><IconMenu size="var(--ui-icon-action)"/></span>{edge?null:<b>菜单</b>}</button>
     })()}
     {sidebarOpen&&<button type="button" className="sidebar-scrim" aria-label="关闭侧边栏" onClick={()=>setSidebarOpen(false)}/>}
     <aside className={"app-sidebar"+(sidebarOpen?' sidebar-open':'')} aria-hidden={!sidebarOpen}>
-      <div className="sidebar-brand"><div className="sidebar-logo"><IconFlower size={17}/></div><div><b>侧边栏</b><small>HISTORY &amp; TOOLS</small></div><button className="sidebar-close" aria-label="收起侧边栏" onClick={()=>setSidebarOpen(false)}><IconClose size={15}/></button></div>
+      <div className="sidebar-brand"><div className="sidebar-logo"><IconFlower size={17}/></div><div><b>侧边栏</b><small>HISTORY &amp; TOOLS</small></div><CloseButton className="sidebar-close" label="收起侧边栏" onClick={()=>setSidebarOpen(false)}/></div>
       <div className="sidebar-scroll">
         <section className="sidebar-section sidebar-nav">
-          <button type="button" className={'sidebar-nav-row'+(page==='home'?' active':'')} onClick={()=>{setSidebarOpen(false);navigate('home')}}><IconHome size={16}/><b>主页</b><small>概览 / 未读</small></button>
-          <button type="button" className={'sidebar-nav-row'+(page==='room'?' active':'')} onClick={()=>{setSidebarOpen(false);setPage('room');setActiveTool('');setChatOpen(false)}}><IconChat size={16}/><b>房间</b><small>聊天与工具</small></button>
-          <button type="button" className="sidebar-nav-row" onClick={()=>{setSidebarOpen(false);setPage('room');setChatOpen(false);setActiveTool('记忆面板')}}><span aria-hidden="true"><IconMemory size={17}/></span><b>记忆库</b><small>{displayName(person)}</small></button>
+          <button type="button" className={'ui-touch-control sidebar-nav-row'+(page==='home'?' active':'')} onClick={()=>{setSidebarOpen(false);navigate('home')}}><IconHome size="var(--ui-icon-action)"/><b>主页</b><small>概览 / 未读</small></button>
+          <button type="button" className={'ui-touch-control sidebar-nav-row'+(page==='room'?' active':'')} onClick={()=>{setSidebarOpen(false);setPage('room');setActiveTool('');setChatOpen(false)}}><IconChat size="var(--ui-icon-action)"/><b>房间</b><small>聊天与工具</small></button>
+          <button type="button" className="ui-touch-control sidebar-nav-row" onClick={()=>{setSidebarOpen(false);setPage('room');setChatOpen(false);setActiveTool('记忆面板')}}><span aria-hidden="true"><IconMemory size="var(--ui-icon-action)"/></span><b>记忆库</b><small>{displayName(person)}</small></button>
         </section>
         <section className="sidebar-section sidebar-combined">
           <div className="sidebar-combined-card">
@@ -2278,9 +2285,9 @@ export default function App() {
             </div>
           </div>
         </section>
-        {chatOpen&&<button type="button" className="sidebar-back-room" onClick={drawerBackToRoom}><IconBack className="ui-icon-inline" size={14}/> 返回房间</button>}
+        {chatOpen&&<BackButton className="sidebar-back-room" label="返回房间" onClick={drawerBackToRoom}>返回房间</BackButton>}
       </div>
-        <button type="button" className="sidebar-settings" onClick={()=>{pageBeforeSettings.current=page;setSidebarOpen(false);navigate('settings')}}><IconSettings size={16}/><b>设置</b></button>
+        <button type="button" className="ui-touch-control sidebar-settings" onClick={()=>{pageBeforeSettings.current=page;setSidebarOpen(false);navigate('settings')}}><IconSettings size="var(--ui-icon-action)"/><b>设置</b></button>
       <div className="sidebar-footer"><span className="sidebar-status-dot"/><span>小家 · 侧边栏{inbox.filter(m=>!m.read_at).length?' · 未读 ' + inbox.filter(m=>!m.read_at).length:''}</span></div>
     </aside>
     {toast&&(()=>{const env=toast.kind==='task_result'?parseTaskEnvelope(toast.content):null;return <div className="inbox-toast" role="status"><button type="button" className="inbox-toast-main" onClick={()=>openInboxMessage(toast)}><b><IconMail className="ui-icon-inline" size={14}/> {displayName(toast.person)} · {env?'定时任务结果':toast.kind==='test'?'通知测试':'新消息'}</b><span>{env?env.answer||'（任务已完成，无文字总结）':toast.content}</span><small>{env?'点击查看结果会话':'点击打开聊天'}</small></button><button type="button" aria-label="收起消息" className="inbox-toast-dismiss" onClick={()=>setToast(null)}><IconClose size={15}/></button></div>})()}
@@ -2567,7 +2574,7 @@ function Room(props: {
   if (props.activeTool) return <div className="room-screen room-tool-screen">
     {/* 工具 / 档案页不再重复房间头部的头像与名字：整屏只留档案里那一份改名入口。 */}
     <header className="room-tool-header">
-      <button className="settings-back" onClick={() => {const backToChat=props.profileFromChat&&props.activeTool==='助手档案';props.setActiveTool('');if(backToChat){props.setProfileFromChat(false);props.setChatOpen(true)}}}>{props.profileFromChat&&props.activeTool==='助手档案'?<><IconBack className="ui-icon-inline" size={14}/> 返回聊天</>:<><IconBack className="ui-icon-inline" size={14}/> 工作区</>}</button>
+      <BackButton className="settings-back" label={props.profileFromChat&&props.activeTool==='助手档案'?'返回聊天':'返回工作区'} onClick={() => {const backToChat=props.profileFromChat&&props.activeTool==='助手档案';props.setActiveTool('');if(backToChat){props.setProfileFromChat(false);props.setChatOpen(true)}}}>{props.profileFromChat&&props.activeTool==='助手档案'?'返回聊天':'工作区'}</BackButton>
       <b className="room-tool-title">{props.activeTool}</b>
       {personSwitcher&&<div className="room-person-switch" aria-label="切换助手">{personSwitcher}</div>}
     </header>
@@ -3635,7 +3642,7 @@ function Chat(p: any) {
   }
   return <div className="fullscreen-chat">
     {/* 全面屏顶栏：不铺返回/会话控件。历史会话从左侧抽屉点选，返回房间走系统返回手势或抽屉底部入口。 */}
-    <header className="chat-header chat-header-simple"><span className="chat-header-title"><button type="button" className="chat-avatar avatar-link" title="打开助手档案与用户设置" aria-label="打开助手档案" onClick={()=>p.openAssistantProfile(true)}>{personAvatar?<img src={personAvatar} alt=""/>:<img src={DEFAULT_AVATAR} alt=""/>}</button><b>{p.displayName(p.person)}</b></span><span className="chat-header-actions"><IconButton icon={IconPlus} label="新对话" className="btn-icon" iconSize={16} onClick={createConversation}/><IconButton icon={IconSwitch} label="切换助手" className="btn-icon" iconSize={16} onClick={()=>{p.setPerson(p.person === YWX ? YS : YWX);p.setChatError('')}}/></span></header>
+    <header className="chat-header chat-header-simple"><span className="chat-header-title"><button type="button" className="chat-avatar avatar-link" title="打开助手档案与用户设置" aria-label="打开助手档案" onClick={()=>p.openAssistantProfile(true)}>{personAvatar?<img src={personAvatar} alt=""/>:<img src={DEFAULT_AVATAR} alt=""/>}</button><b>{p.displayName(p.person)}</b></span><span className="chat-header-actions"><IconButton icon={IconPlus} label="新对话" className="btn-icon" iconSize="var(--ui-icon-action)" touch onClick={createConversation}/><IconButton icon={IconSwitch} label="切换助手" className="btn-icon" iconSize="var(--ui-icon-action)" touch onClick={()=>{p.setPerson(p.person === YWX ? YS : YWX);p.setChatError('')}}/></span></header>
     {searchOpen&&<div className="chat-search"><input autoFocus value={searchQuery} onChange={e=>{setSearchQuery(e.target.value);setSearchActiveIdx(-1)}} onKeyDown={e=>{if(e.key==='Enter'){e.preventDefault();stepMatch(1)}if(e.key==='Escape'){closeSearch()}}} placeholder="搜索当前会话的聊天记录……" aria-label="搜索当前会话的聊天记录"/>{searchQuery.trim()&&<span className="chat-search-count" aria-live="polite">{searchActiveIdx>=0?`${searchActiveIdx+1}/${searchResult.total}`:`共 ${searchResult.total} 条`}</span>}<button type="button" aria-label="上一条匹配" title="上一条匹配" disabled={!searchResult.items.length} onClick={()=>stepMatch(-1)}><IconArrowUp size={15}/></button><button type="button" aria-label="下一条匹配" title="下一条匹配（Enter 同效）" disabled={!searchResult.items.length} onClick={()=>stepMatch(1)}><IconArrowDown size={15}/></button>{searchQuery.trim()&&<button type="button" onClick={()=>setSearchQuery('')}>清除</button>}</div>}
     {searchOpen&&searchQuery.trim()&&<div className="chat-search-results" role="list">{searchResult.items.length?searchResult.items.map((x:any,i:number)=><button type="button" role="listitem" className={i===searchActiveIdx?'current':''} key={(x.messageId||'idx-'+x.index)+'-'+i} onClick={()=>{setSearchActiveIdx(i);if(x.messageId)scrollToMatch(x.messageId)}}><b>{x.role==='user'?'你':'助手'} · 第 {x.index+1} 条{x.count>1?` · ${x.count} 处匹配`:''}</b><span>{x.snippet}</span></button>):<p>没有找到匹配的消息。</p>}{searchResult.total>searchResult.items.length&&<p className="chat-search-overflow">仅显示前 {searchResult.items.length} 条，共 {searchResult.total} 条匹配。</p>}</div>}
     {/* 会话切换已收进顶栏下拉，这里不再铺头像卡片。 */}
@@ -3648,7 +3655,7 @@ function Chat(p: any) {
     <div className="chat-scroll-indicator" ref={scrollIndicatorRef} aria-hidden="true"/>
     {summaryOpen&&summaryConversation?.summary&&<div className="chat-summary-modal" role="presentation" onClick={()=>setSummaryOpen(false)}>
       <div className="chat-summary-card" role="dialog" aria-modal="true" aria-label="前情提要" onClick={e=>e.stopPropagation()}>
-        <header><b>前情提要</b><button type="button" onClick={()=>setSummaryOpen(false)} aria-label="关闭"><IconClose size={15}/></button></header>
+        <header><b>前情提要</b><CloseButton onClick={()=>setSummaryOpen(false)} label="关闭"/></header>
         <div className="chat-summary-text">{summaryConversation.summary}</div>
         <small>原文仍完整保留；需要细节时助手可以用 conversation_search 回顾。</small>
       </div>
@@ -3679,7 +3686,7 @@ function Chat(p: any) {
     </div>}
     {/* 图标面板：点输入框底部的图标，在输入区上方展开；不遮罩、不打断聊天。 */}
     {tray&&tray!=='model'&&!selectMode&&<div className="compose-tray" role="dialog" aria-label="聊天工具面板">
-      <div className="compose-tray-head"><b>{tray==='world'?'世界书':tray==='mcp'?'MCP':'工具'}</b><small>{p.displayName(chatPerson)} 的本次绑定</small>{(tray==='world'||tray==='mcp')&&<button type="button" className="compose-tray-config" aria-label="完整绑定设置" title="完整绑定设置" onClick={()=>{setTray('');setBindOpen(true)}}><IconSettings size={15}/></button>}<button type="button" className="compose-tray-close" aria-label="关闭面板" onClick={()=>setTray('')}><IconClose size={15}/></button></div>
+      <div className="compose-tray-head"><b>{tray==='world'?'世界书':tray==='mcp'?'MCP':'工具'}</b><small>{p.displayName(chatPerson)} 的本次绑定</small>{(tray==='world'||tray==='mcp')&&<button type="button" className="compose-tray-config" aria-label="完整绑定设置" title="完整绑定设置" onClick={()=>{setTray('');setBindOpen(true)}}><IconSettings size={15}/></button>}<CloseButton className="compose-tray-close" label="关闭面板" onClick={()=>setTray('')}/></div>
       <div className="compose-tray-body">
         {(tray==='world'||tray==='mcp')&&<>
           {tray==='mcp'&&<div className="tray-section">
@@ -3712,7 +3719,7 @@ function Chat(p: any) {
         <button type="button" className={'cw-circle'+(emojiOpen?' active':'')} aria-label="表情包" onClick={()=>{setTray('');setAttachOpen(false);setPlusOpen(false);setEmojiTab('emoji');setEmojiOpen(v=>!v)}}><IconEmoji size={17}/></button>
         <button type="button" className={'cw-circle'+(plusOpen?' active':'')} aria-label="更多" aria-expanded={plusOpen} onClick={()=>{setEmojiOpen(false);setTray('');setAttachOpen(false);setPlusOpen(v=>!v)}}><IconPlus size={17}/></button>
         <IconButton icon={IconMic} label="语音输入" className="cw-circle" iconSize={17} onClick={()=>showToolHint('语音输入待接入')}/>
-        {p.sending&&!p.draft.trim()&&!files.length?<IconButton icon={IconStop} label="停止生成" className="cw-circle send stop" iconSize={16} onClick={()=>p.stopGeneration()}/>:<IconButton icon={IconSend} label="发送" type="submit" className="cw-circle send" iconSize={17} disabled={!p.draft.trim()&&!files.length}/>} 
+        {p.sending&&!p.draft.trim()&&!files.length?<IconButton icon={IconStop} label="停止生成" className="cw-circle send stop" iconSize="var(--ui-icon-action)" touch onClick={()=>p.stopGeneration()}/>:<IconButton icon={IconSend} label="发送" type="submit" className="cw-circle send" iconSize="var(--ui-icon-action)" touch disabled={!p.draft.trim()&&!files.length}/>}
       </div>
       {toolHint&&<div className="compose-tool-hint" role="status">{toolHint}</div>}
       {plusOpen&&<div className="compose-plus-panel" role="dialog" aria-label="更多功能">
@@ -3729,7 +3736,7 @@ function Chat(p: any) {
       </div>}
       {statsOpen&&<div className="request-stats-modal" role="presentation" onClick={()=>setStatsOpen(false)}>
         <div className="request-stats-card" role="dialog" aria-modal="true" aria-label="最近的请求" onClick={e=>e.stopPropagation()}>
-          <header><b>最近的请求</b><button type="button" onClick={()=>setStatsOpen(false)} aria-label="关闭"><IconClose size={15}/></button></header>
+          <header><b>最近的请求</b><CloseButton onClick={()=>setStatsOpen(false)} label="关闭"/></header>
           <RequestStats messages={currentMessages}/>
         </div>
       </div>}
@@ -3741,7 +3748,7 @@ function Chat(p: any) {
       <input ref={imageInput} className="hidden-file-input" type="file" accept="image/*" multiple onChange={e=>loadFiles(e.target.files,true)}/>
       <input ref={fileInput} className="hidden-file-input" type="file" multiple onChange={e=>loadFiles(e.target.files)}/>
     </form>}
-    {lightbox&&<div className="image-lightbox" role="dialog" aria-modal="true" aria-label={lightbox.name} onClick={()=>setLightbox(null)}><button type="button" className="lightbox-close" aria-label="关闭图片预览" onClick={()=>setLightbox(null)}><IconClose size={15}/></button><img src={assetUrl(lightbox.src)} alt={lightbox.name} onClick={e=>e.stopPropagation()}/><div>{lightbox.name}</div></div>}
+    {lightbox&&<div className="image-lightbox" role="dialog" aria-modal="true" aria-label={lightbox.name} onClick={()=>setLightbox(null)}><CloseButton className="lightbox-close" label="关闭图片预览" onClick={()=>setLightbox(null)}/><img src={assetUrl(lightbox.src)} alt={lightbox.name} onClick={e=>e.stopPropagation()}/><div>{lightbox.name}</div></div>}
     {tray==='model'&&!selectMode&&<ModelPickerSheet profiles={p.modelProfiles||[]} activeId={quickBinding.modelProfileId} vendorKeys={vendorKeyOptions} binding={quickBinding} onPatchBinding={patchBinding} onPick={id=>{patchBinding({...quickBinding,modelProfileId:id});setTray('')}} onClose={closeModelSheet} subscriptionVendorIds={(p.vendors||[]).filter((v:Vendor)=>v.subscription).map((v:Vendor)=>v.id)} vendors={p.vendors||[]} routeState={p.routeState} setRouteState={p.setRouteState} lastRouteInfo={p.lastRouteInfo||''} person={chatPerson}/>}
     {bindOpen&&<ChatBindPanel person={chatPerson} displayName={p.displayName} worldEntries={p.worldEntries} setWorldEntries={p.setWorldEntries} bindings={p.bindings} setBindings={p.setBindings} onClose={()=>setBindOpen(false)}/>}
   </div>
@@ -3757,7 +3764,7 @@ function Fun({shortcut,onShortcutUsed,displayName}:{shortcut:string;onShortcutUs
   const rooms:Array<{name:string;key:string;icon:IconComponent;desc:string}>=[{name:'公共客厅',key:'客厅',icon:IconCoffee,desc:'一起聊天、分享日常'},{name:'内嵌浏览器',key:'内嵌浏览器',icon:IconSearch,desc:'在小家里浏览网页'},{name:'可视化网页',key:'可视化网页',icon:IconGrid,desc:'查看互动网页与小工具'},{name:'相册',key:'相册',icon:IconPhoto,desc:'收藏图片与共同回忆'},{name:'播放器',key:'播放器',icon:IconMusic,desc:'音乐、音频与播放列表'},{name:'记账单',key:'记账单',icon:IconLedger,desc:'记录真实人民币收支'},{name:'日记本',key:'日记本',icon:IconBook,desc:'写下公开或上锁的日记'},{name:'更多工具',key:'待定',icon:IconPlus,desc:'以后继续扩展新模块'}]
   function post(e:FormEvent){e.preventDefault();if(!draft.trim())return;setMessages(old=>[...old,{id:crypto.randomUUID(),author:'顾',content:draft.trim(),at:new Date().toISOString()}]);setDraft('')}
   const selected=rooms.find(x=>x.key===active)
-  return <div className="fun-screen"><header className="fun-heading"><div><span className="fun-eyebrow">OUR SHARED SPACE</span><h2>娱乐房</h2><p>把想用的功能做成独立小模块，点开就能进入。</p></div></header>{!active?<div className="fun-module-grid">{rooms.map((room,i)=>{const RoomIcon=room.icon;return <button type="button" className="fun-module-card" key={room.key} onClick={()=>setActive(room.key)}><span className={'fun-module-icon module-icon-'+i}><RoomIcon size={20}/></span><b>{room.name}</b><small>{room.desc}</small><span className="fun-module-arrow">进入 <IconShare size={13}/></span></button>})}</div>:<section className="fun-module-detail"><button className="fun-back" onClick={()=>setActive('')}><IconBack className="ui-icon-inline" size={14}/> 全部模块</button>{active==='记账单'?<Ledger/>:active==='日记本'?<Diary personLabel={displayName}/>:active==='客厅'?<section className="lounge-panel"><h3>公共客厅</h3><p className="muted">这里是大家一起讨论的地方。当前先搭好共享留言结构；AI 自动参与、实时推送与跨设备同步待后续接入。</p><div className="lounge-messages">{messages.length?messages.map(m=><article key={m.id}><b>{m.author}</b><small>{new Date(m.at).toLocaleString('zh-CN')}</small><p>{m.content}</p></article>):<p className="muted">客厅还很安静，留下一条消息试试。</p>}</div><form onSubmit={post} className="lounge-compose"><textarea rows={2} value={draft} onChange={e=>setDraft(e.target.value)} placeholder="给客厅留句话……"/><button disabled={!draft.trim()}>发送留言</button></form></section>:<section className="lounge-panel"><h3>{selected?.name||active}</h3><p className="muted">{selected?.desc}</p><div className="module-placeholder"><span>{selected?(()=>{const I=selected.icon;return <I size={22}/>})():<IconPlus size={22}/>}</span><b>{selected?.name||active}工作区</b><small>模块入口已建立 · 实际功能待接入</small></div></section>}</section>}</div>
+  return <div className="fun-screen"><header className="fun-heading"><div><span className="fun-eyebrow">OUR SHARED SPACE</span><h2>娱乐房</h2><p>把想用的功能做成独立小模块，点开就能进入。</p></div></header>{!active?<div className="fun-module-grid">{rooms.map((room,i)=>{const RoomIcon=room.icon;return <button type="button" className="fun-module-card" key={room.key} onClick={()=>setActive(room.key)}><span className={'fun-module-icon module-icon-'+i}><RoomIcon size={20}/></span><b>{room.name}</b><small>{room.desc}</small><span className="fun-module-arrow">进入 <IconShare size={13}/></span></button>})}</div>:<section className="fun-module-detail"><BackButton className="fun-back" label="返回全部模块" onClick={()=>setActive('')}>全部模块</BackButton>{active==='记账单'?<Ledger/>:active==='日记本'?<Diary personLabel={displayName}/>:active==='客厅'?<section className="lounge-panel"><h3>公共客厅</h3><p className="muted">这里是大家一起讨论的地方。当前先搭好共享留言结构；AI 自动参与、实时推送与跨设备同步待后续接入。</p><div className="lounge-messages">{messages.length?messages.map(m=><article key={m.id}><b>{m.author}</b><small>{new Date(m.at).toLocaleString('zh-CN')}</small><p>{m.content}</p></article>):<p className="muted">客厅还很安静，留下一条消息试试。</p>}</div><form onSubmit={post} className="lounge-compose"><textarea rows={2} value={draft} onChange={e=>setDraft(e.target.value)} placeholder="给客厅留句话……"/><button disabled={!draft.trim()}>发送留言</button></form></section>:<section className="lounge-panel"><h3>{selected?.name||active}</h3><p className="muted">{selected?.desc}</p><div className="module-placeholder"><span>{selected?(()=>{const I=selected.icon;return <I size={22}/>})():<IconPlus size={22}/>}</span><b>{selected?.name||active}工作区</b><small>模块入口已建立 · 实际功能待接入</small></div></section>}</section>}</div>
 }
 function Settings({onBack,onLogout,packIcons,cloudStatus,themePrefs,setThemePrefs,customAssets,conversations,modelConfig,onOpenTool,displayName,personAppearance,setPersonAppearance,timeZone,setTimeZone,worldEntries,setWorldEntries,modelProfiles,setModelProfiles,bindings,setBindings,vendors,setVendors,subscriptions,setSubscriptions,systemPeople,avatarOf,onApiBaseApplied,workspaceConfigs,onWorkspaceSaved,defaultModelId,setDefaultModelId}:{onBack:()=>void;onLogout:()=>void;packIcons?:Record<string,string>;cloudStatus:string;themePrefs:ThemePrefs;setThemePrefs:(v:ThemePrefs)=>void;customAssets:CustomAssets;conversations:Record<Person,Conversation[]>;modelConfig:Record<Person,ModelConfig>;onOpenTool:(v:{person:Person;tool:Tool})=>void;displayName:(p:Person)=>string;personAppearance:Record<string,PersonAppearancePref>;setPersonAppearance:React.Dispatch<React.SetStateAction<Record<string,PersonAppearancePref>>>;timeZone:string;setTimeZone:(v:string)=>void;worldEntries:WorldEntry[];setWorldEntries:React.Dispatch<React.SetStateAction<WorldEntry[]>>;modelProfiles:ModelProfile[];setModelProfiles:React.Dispatch<React.SetStateAction<ModelProfile[]>>;bindings:Record<Person,PersonBinding>;setBindings:React.Dispatch<React.SetStateAction<Record<Person,PersonBinding>>>;vendors:Vendor[];setVendors:React.Dispatch<React.SetStateAction<Vendor[]>>;subscriptions:SubscriptionAccount[];setSubscriptions:React.Dispatch<React.SetStateAction<SubscriptionAccount[]>>;systemPeople?:string[];avatarOf?:(p:string)=>string;onApiBaseApplied?:()=>void;workspaceConfigs:Record<string,WorkspaceConfig>;onWorkspaceSaved:(config:WorkspaceConfig)=>void;defaultModelId:string;setDefaultModelId:(v:string)=>void}) {
   void workspaceConfigs
@@ -3778,12 +3785,6 @@ function Settings({onBack,onLogout,packIcons,cloudStatus,themePrefs,setThemePref
     requestAnimationFrame(()=>window.scrollTo({top:0,left:0,behavior:'auto'}))
   }
   useEffect(()=>{window.scrollTo({top:0,left:0,behavior:'auto'})},[section])
-  // Android 返回键：二级页先退回一级，一级页再退回设置首页。
-  useEffect(()=>{
-    // 供应商详情 / 手动新增是列表下的二级页：先回「供应商列表」，其余仍回设置首页。
-    const unregister=pushBackHandler(()=>{if(section.startsWith('vendor:keys:')){setSection('vendor:'+section.slice('vendor:keys:'.length));return true}if(section.startsWith('vendor:')){setSection('vendor');return true}if(section){setSection('');return true}onBack();return true})
-    return unregister
-  },[section,onBack])
   // 输入框是「编辑缓冲」：null 表示未在编辑，直接显示当前生效时区；
   // 云端快照回填 timeZone 后无需任何同步逻辑，派生值自动跟随。
   const [tzDraft,setTzDraft]=useState<string|null>(null)
@@ -3834,8 +3835,11 @@ const resourceTab=(section.startsWith('resources:')?section.slice('resources:'.l
     if(section.startsWith('vendor:')){openSection('vendor');return}
     openSection('')
   }
+  const settingsBackRef = useRef(settingsBack)
+  settingsBackRef.current = settingsBack
+  useEffect(() => pushBackHandler(() => { settingsBackRef.current(); return true }), [])
   const settingsBackLabel=!section?'主页':section.startsWith('vendor:')?'供应商':'全部设置'
-  return <div className="settings-screen"><header className="settings-page-header"><button type="button" className="settings-page-back" onClick={settingsBack}><IconBack className="ui-icon-inline" size={15}/><span>{settingsBackLabel}</span></button><h2>{sectionTitle}</h2><span className="settings-page-head-spacer" aria-hidden="true"/></header>{!section?<div className="settings-groups settings-flat-list"><div className="settings-row-list">{cards.map(card=><SettingsRow key={card.id} icon={cardIcons[card.id]||IconInfo} title={card.title} onClick={()=>openSection(card.section)}/>)}</div></div>:<div className="settings-detail">{activeGroup&&<SettingsTabBar title={activeGroup.title} items={activeGroup.tabs} value={section} onChange={openSection}/>}{section==='guide'&&<SettingsGuidePage/>}{section==='skill'&&<SettingsSkillPage people={ASSISTANT_PEOPLE} displayName={displayName}/>}{section==='memory'&&<SettingsMemoryPage people={ASSISTANT_PEOPLE} displayName={displayName} onOpenTool={onOpenTool}/>}{section==='system'&&<AndroidSystemSettings people={systemPeople||[]} displayName={displayName} avatarOf={avatarOf||(()=>'')}/>}{(section==='theme'||section.startsWith('theme:'))&&<SettingsSubNav section={section} onSelect={setSection}/>}{section==='bind'&&<><ResourceLibrary key="bind-library" initialTab="world" tabs={['world','mcp']} worldEntries={worldEntries} setWorldEntries={setWorldEntries} modelProfiles={modelProfiles} setModelProfiles={setModelProfiles} bindings={bindings} setBindings={setBindings} displayName={displayName}/></>}{section.startsWith('vendor')&&section!=='vendor:account'&&<VendorCenter section={section} onSection={setSection} vendors={vendors} setVendors={setVendors} setModelProfiles={setModelProfiles} modelProfiles={modelProfiles} defaultModelId={defaultModelId} setDefaultModelId={setDefaultModelId}/>}{showResources&&<ResourceLibrary key={resourceTab||'resources'} initialTab={resourceTab||undefined} only={resourceOnly?(resourceTab||undefined):undefined} worldEntries={worldEntries} setWorldEntries={setWorldEntries} modelProfiles={modelProfiles} setModelProfiles={setModelProfiles} bindings={bindings} setBindings={setBindings} displayName={displayName} />}{(section==='theme'||section==='theme:global')&&<div className="theme-page"><ThemeSettings value={themePrefs} onChange={setThemePrefs}/></div>}{section==='theme:person'&&<AssistantThemeSettings personAppearance={personAppearance} setPersonAppearance={setPersonAppearance} assets={customAssets} displayName={displayName}/>}{section==='vendor:account'&&<SubscriptionAccounts vendors={vendors} setVendors={setVendors} setModelProfiles={setModelProfiles} subscriptions={subscriptions} setSubscriptions={setSubscriptions}/>}{section==='usage'&&<div className="setting-card settings-inner-card"><b>AI 用量统计</b><UsageStats people={ASSISTANT_PEOPLE} conversations={conversations} models={Object.fromEntries(ASSISTANT_PEOPLE.map(p=>[p,(modelConfig[p]&&modelConfig[p].model)||((modelProfiles.find(x=>x.id===(bindings[p]&&bindings[p].modelProfileId))||{}).name)||'']))} displayName={displayName}/></div>}{section==='workspace'&&<div className="setting-card settings-inner-card"><b>工作区工具</b><p className="muted">按助手直接打开主动任务、自主生活、工具看板与技能库。</p><div className="settings-shortcuts">{ASSISTANT_PEOPLE.map(person=><div className="settings-shortcut-group" key={person}><b>{displayName(person)}</b><div><button type="button" onClick={()=>onOpenTool({person,tool:'工作流'})}>主动任务</button><button type="button" onClick={()=>onOpenTool({person,tool:'自主生活'})}>自主生活</button><button type="button" onClick={()=>onOpenTool({person,tool:'工具调用看板'})}>调用看板</button><button type="button" onClick={()=>onOpenTool({person,tool:'记忆面板'})}>记忆面板</button><button type="button" onClick={()=>onOpenTool({person,tool:'SKILL 技能库'})}>技能库</button></div></div>)}</div></div>}{section==='applock'&&<AppLockSettings/>}{section==='files'&&<div className="setting-card settings-inner-card"><WorkspaceSettings people={ASSISTANT_PEOPLE} displayName={displayName} onSaved={onWorkspaceSaved}/></div>}{section==='chatdisplay'&&<ChatDisplaySettings/>}{section==='data'&&<div className="settings-data-rows">
+  return <div className="settings-screen"><header className="settings-page-header"><BackButton className="settings-page-back" label={settingsBackLabel} onClick={settingsBack}><span>{settingsBackLabel}</span></BackButton><h2>{sectionTitle}</h2><span className="settings-page-head-spacer" aria-hidden="true"/></header>{!section?<div className="settings-groups settings-flat-list"><div className="settings-row-list">{cards.map(card=><SettingsRow key={card.id} icon={cardIcons[card.id]||IconInfo} title={card.title} onClick={()=>openSection(card.section)}/>)}</div></div>:<div className="settings-detail">{activeGroup&&<SettingsTabBar title={activeGroup.title} items={activeGroup.tabs} value={section} onChange={openSection}/>}{section==='guide'&&<SettingsGuidePage/>}{section==='skill'&&<SettingsSkillPage people={ASSISTANT_PEOPLE} displayName={displayName}/>}{section==='memory'&&<SettingsMemoryPage people={ASSISTANT_PEOPLE} displayName={displayName} onOpenTool={onOpenTool}/>}{section==='system'&&<AndroidSystemSettings people={systemPeople||[]} displayName={displayName} avatarOf={avatarOf||(()=>'')}/>}{(section==='theme'||section.startsWith('theme:'))&&<SettingsSubNav section={section} onSelect={setSection}/>}{section==='bind'&&<><ResourceLibrary key="bind-library" initialTab="world" tabs={['world','mcp']} worldEntries={worldEntries} setWorldEntries={setWorldEntries} modelProfiles={modelProfiles} setModelProfiles={setModelProfiles} bindings={bindings} setBindings={setBindings} displayName={displayName}/></>}{section.startsWith('vendor')&&section!=='vendor:account'&&<VendorCenter section={section} onSection={setSection} vendors={vendors} setVendors={setVendors} setModelProfiles={setModelProfiles} modelProfiles={modelProfiles} defaultModelId={defaultModelId} setDefaultModelId={setDefaultModelId}/>}{showResources&&<ResourceLibrary key={resourceTab||'resources'} initialTab={resourceTab||undefined} only={resourceOnly?(resourceTab||undefined):undefined} worldEntries={worldEntries} setWorldEntries={setWorldEntries} modelProfiles={modelProfiles} setModelProfiles={setModelProfiles} bindings={bindings} setBindings={setBindings} displayName={displayName} />}{(section==='theme'||section==='theme:global')&&<div className="theme-page"><ThemeSettings value={themePrefs} onChange={setThemePrefs}/></div>}{section==='theme:person'&&<AssistantThemeSettings personAppearance={personAppearance} setPersonAppearance={setPersonAppearance} assets={customAssets} displayName={displayName}/>}{section==='vendor:account'&&<SubscriptionAccounts vendors={vendors} setVendors={setVendors} setModelProfiles={setModelProfiles} subscriptions={subscriptions} setSubscriptions={setSubscriptions}/>}{section==='usage'&&<div className="setting-card settings-inner-card"><b>AI 用量统计</b><UsageStats people={ASSISTANT_PEOPLE} conversations={conversations} models={Object.fromEntries(ASSISTANT_PEOPLE.map(p=>[p,(modelConfig[p]&&modelConfig[p].model)||((modelProfiles.find(x=>x.id===(bindings[p]&&bindings[p].modelProfileId))||{}).name)||'']))} displayName={displayName}/></div>}{section==='workspace'&&<div className="setting-card settings-inner-card"><b>工作区工具</b><p className="muted">按助手直接打开主动任务、自主生活、工具看板与技能库。</p><div className="settings-shortcuts">{ASSISTANT_PEOPLE.map(person=><div className="settings-shortcut-group" key={person}><b>{displayName(person)}</b><div><button type="button" onClick={()=>onOpenTool({person,tool:'工作流'})}>主动任务</button><button type="button" onClick={()=>onOpenTool({person,tool:'自主生活'})}>自主生活</button><button type="button" onClick={()=>onOpenTool({person,tool:'工具调用看板'})}>调用看板</button><button type="button" onClick={()=>onOpenTool({person,tool:'记忆面板'})}>记忆面板</button><button type="button" onClick={()=>onOpenTool({person,tool:'SKILL 技能库'})}>技能库</button></div></div>)}</div></div>}{section==='applock'&&<AppLockSettings/>}{section==='files'&&<div className="setting-card settings-inner-card"><WorkspaceSettings people={ASSISTANT_PEOPLE} displayName={displayName} onSaved={onWorkspaceSaved}/></div>}{section==='chatdisplay'&&<ChatDisplaySettings/>}{section==='data'&&<div className="settings-data-rows">
 <div className="setting-card settings-inner-card"><b>备份与恢复</b><BackupCenter people={systemPeople||[]} vendors={vendors} setVendors={setVendors} setModelProfiles={setModelProfiles}/></div>
 <div className="setting-card settings-inner-card"><b>{isLocalMode()?'本地数据':'云端数据'}</b><p>{isLocalMode()?(cloudStatus==='error'?'最近一次保存失败：浏览器存储空间可能不足，请清理旧聊天或附件后重试。':'所有聊天、人物与设置都保存在这台设备的浏览器存储里，不上传任何服务器。修改后稍等片刻会自动保存。'):cloudStatus==='error'?'最近一次保存失败，请检查连接后重试。':cloudStatus==='saving'?'正在保存最新更改…':'已启用自动保存。修改后请稍等片刻，数据会自动同步。'}</p></div>
 <div className="setting-card settings-inner-card"><b>时区（动态时间上下文）</b><p className="muted">助手感知到的日期、星期、时间与时段按此时区在服务端实时生成；默认 Asia/Shanghai（UTC+8）。只保存配置，不会获取你的位置或天气。</p><input className="memory-search" list="time-zone-options" value={tzInput} placeholder="如 Asia/Shanghai" aria-label="IANA 时区" onChange={e=>setTzDraft(e.target.value)} onBlur={()=>{if(!tzError&&tzInput.trim()){const tz=normalizeTimeZone(tzInput.trim());setTimeZone(tz);setTzDraft(null)}}}/><datalist id="time-zone-options">{['Asia/Shanghai','Asia/Hong_Kong','Asia/Taipei','Asia/Tokyo','Asia/Seoul','Asia/Singapore','Europe/London','Europe/Paris','America/New_York','America/Los_Angeles','UTC'].map(z=><option key={z} value={z}/>)}</datalist>{tzError?<p className="chat-error" style={{marginTop:8}}>{tzError}</p>:<p className="muted" style={{marginTop:8}}>当前生效：{timeZone} · 预览 {tzPreview.date} {tzPreview.weekday} {tzPreview.time}（{tzPreview.partOfDay}，{tzPreview.utcOffset}）</p>}</div>
@@ -4028,7 +4032,7 @@ function ModelCatalogPage({vendors,onBack,onOpenVendor}:{
                     <ModelChips spec={e.spec}/>
                     <em className="catalog-vendor">{e.vendorName}</em>
                   </span>
-                  <span className="vendor-kelivo-provider-caret" aria-hidden="true"><IconChevronRight size={14}/></span>
+                  <span className="vendor-kelivo-provider-caret" aria-hidden="true"><IconChevronRight size="var(--ui-icon-chevron)"/></span>
                 </div>})}
             </div>
           })}
@@ -4398,7 +4402,7 @@ function VendorCenter({vendors,setVendors,setModelProfiles,section,onSection,mod
               <span className="vendor-kelivo-provider-icon" aria-hidden="true">{v.avatar||v.name.slice(0,1)}</span>
               <span className="vendor-kelivo-provider-info"><b>{v.name}</b><small>{v.keys.filter(k=>!!k.value).length} Key · {v.models.filter(m=>m.selected).length} 模型</small></span>
               <span className={'vendor-kelivo-provider-status '+status[1]}>{status[0]}</span>
-              <span className="vendor-kelivo-provider-caret"><IconChevronRight size={14}/></span>
+              <span className="vendor-kelivo-provider-caret"><IconChevronRight size="var(--ui-icon-chevron)"/></span>
             </button>
           }
           return <>
@@ -4413,7 +4417,7 @@ function VendorCenter({vendors,setVendors,setModelProfiles,section,onSection,mod
                 {!collapsed&&list.map(row)}
               </div>
             })}
-            <button type="button" className="vendor-kelivo-provider-row add" onClick={()=>{resetEditUI();onSection('vendor:add')}}><span className="vendor-kelivo-provider-icon" aria-hidden="true"><IconPlus size={15}/></span><span className="vendor-kelivo-provider-info"><b>添加供应商</b></span><span className="vendor-kelivo-provider-caret"><IconChevronRight size={14}/></span></button>
+            <button type="button" className="vendor-kelivo-provider-row add" onClick={()=>{resetEditUI();onSection('vendor:add')}}><span className="vendor-kelivo-provider-icon" aria-hidden="true"><IconPlus size={15}/></span><span className="vendor-kelivo-provider-info"><b>添加供应商</b></span><span className="vendor-kelivo-provider-caret"><IconChevronRight size="var(--ui-icon-chevron)"/></span></button>
           </>
         })()}
       </div>
@@ -4487,7 +4491,7 @@ function VendorCenter({vendors,setVendors,setModelProfiles,section,onSection,mod
     {importOpen&&<div className="vendor-kelivo-sheet-overlay" role="presentation" onClick={()=>setImportOpen(false)}>
       <section className="vendor-kelivo-sheet vendor-import-sheet" role="dialog" aria-modal="true" aria-label="导入供应商" onClick={e=>e.stopPropagation()}>
         <div className="vendor-kelivo-sheet-grip"/>
-        <header className="vendor-import-head"><b>导入供应商</b><button type="button" aria-label="关闭导入" onClick={()=>setImportOpen(false)}><IconClose size={15}/></button></header>
+        <header className="vendor-import-head"><b>导入供应商</b><CloseButton label="关闭导入" onClick={()=>setImportOpen(false)}/></header>
         <p className="vendor-import-hint">粘贴 Kelivo 导出的模型配置 JSON：数组，每项含 name / apiEndpoint / apiKey / modelName。只迁移地址、Key 与模型名。</p>
         <textarea className="vendor-import-text" aria-label="Kelivo 配置 JSON" placeholder='[{"name":"Aeon AI","apiEndpoint":"https://…/v1","apiKey":"sk-…","modelName":"gpt-5.6,glm-5.2"}]' value={importText} onChange={e=>setImportText(e.target.value)}/>
         {!!importMsg&&<p className="vendor-import-msg" role="status">{importMsg}</p>}
@@ -4509,7 +4513,7 @@ function VendorCenter({vendors,setVendors,setModelProfiles,section,onSection,mod
     {showNew&&<div className="vendor-kelivo-sheet-overlay vendor-add-overlay" role="presentation" onClick={backToList}>
       <section className="vendor-kelivo-sheet vendor-add-sheet" role="dialog" aria-modal="true" aria-label="添加供应商" onClick={e=>e.stopPropagation()}>
         <div className="vendor-kelivo-sheet-grip"/>
-        <header className="vendor-add-head"><button type="button" aria-label="关闭" onClick={backToList}><IconClose size={15}/></button><b>添加供应商</b><span aria-hidden="true"/></header>
+        <header className="vendor-add-head"><CloseButton label="关闭" onClick={backToList}/><b>添加供应商</b><span aria-hidden="true"/></header>
         <div className="vendor-add-tabs" role="tablist" aria-label="供应商类型">
           {([['openai','OpenAI'],['google','Google'],['claude','Claude'],['account','账号登录']] as const).map(([id,label])=>(
             <button type="button" key={id} role="tab" aria-selected={addTab===id} className={addTab===id?'active':''} onClick={()=>{
@@ -4649,7 +4653,7 @@ function VendorCenter({vendors,setVendors,setModelProfiles,section,onSection,mod
         </div>
         {capTest&&<div className="vendor-cap-layer" role="presentation" onClick={()=>setCapTest(null)}>
           <section className="vendor-cap-card" role="dialog" aria-label="模型测试" onClick={e=>e.stopPropagation()}>
-            <header className="vendor-cap-head"><b>模型测试</b><button type="button" aria-label="关闭测试" onClick={()=>setCapTest(null)}><IconClose size={15}/></button></header>
+            <header className="vendor-cap-head"><b>模型测试</b><CloseButton label="关闭测试" onClick={()=>setCapTest(null)}/></header>
             {capTest.models.map(id=>{
               const res=capTest.results[id]||{}
               const done=CAP_ROWS.every(([k])=>res[k]&&res[k]!.state!=='run')
@@ -4776,6 +4780,11 @@ function ResourceLibrary({ initialTab, only, tabs, worldEntries, setWorldEntries
   const [mcpEdit, setMcpEdit] = useState<Array<{ id: string; person: Person }>>([])
   const [mcpTest, setMcpTest] = useState<{ busy: boolean; ok?: boolean; message: string }>({ busy: false, message: '' })
   const [mcpFormOpen, setMcpFormOpen] = useState(false)
+  const closeMcpForm = () => { setMcpFormOpen(false); setMcpEdit([]); setMcpDraft({ name: '', url: '', token: '', owner: 'all' }); setMcpTest({ busy: false, message: '' }) }
+  useEffect(() => {
+    if (tab !== 'mcp' || !mcpFormOpen) return
+    return pushBackHandler(() => { closeMcpForm(); return true })
+  }, [tab, mcpFormOpen])
   const [mcpShowToken, setMcpShowToken] = useState(false)
   const mcp = useMcpLibrary()
   // 同一服务会为每位助手各存一条连接，这里按「名称 + 地址」合成一张卡片。
@@ -4946,7 +4955,7 @@ function ResourceLibrary({ initialTab, only, tabs, worldEntries, setWorldEntries
     {tab==='world' && <div className="resource-world"><WorldbookEditor entries={worldEntries} onChange={setWorldEntries} personLabel={displayName}/></div>}
     {tab==='mcp' && <>
       {mcpFormOpen ? <>
-        <div className="worldbook-form-head"><button type="button" className="worldbook-back" onClick={() => { setMcpFormOpen(false); setMcpEdit([]); setMcpDraft({ name: '', url: '', token: '', owner: 'all' }); setMcpTest({ busy: false, message: '' }) }}><IconBack className="ui-icon-inline" size={14}/> 返回</button><b>{mcpEdit.length ? '编辑 MCP 服务' : '新增 MCP 服务'}</b></div>
+        <div className="worldbook-form-head"><BackButton className="worldbook-back" label="返回 MCP 列表" onClick={closeMcpForm}>返回</BackButton><b>{mcpEdit.length ? '编辑 MCP 服务' : '新增 MCP 服务'}</b></div>
         <form className="resource-form" onSubmit={addMcp}>
           <label>服务名称<input value={mcpDraft.name} onChange={e=>setMcpDraft({...mcpDraft,name:e.target.value})} placeholder="例如：记事本服务" required/></label>
           <label>主机地址<input value={mcpDraft.url} onChange={e=>setMcpDraft({...mcpDraft,url:e.target.value})} placeholder="https://example.com/mcp" type="url" required/></label>

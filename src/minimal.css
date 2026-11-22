@@ -53,7 +53,7 @@ body.has-pack .shell::before{display:none!important}
 .shell>.screen{
   margin-left:0!important;
   width:100%!important;
-  padding:0 14px 28px!important;
+  padding:0 calc(14px + var(--app-safe-right)) calc(28px + var(--app-safe-bottom)) calc(14px + var(--app-safe-left))!important;
   background:#fff!important;
 }
 .shell .home-screen,
@@ -568,11 +568,11 @@ body.has-pack .shell::before{display:none!important}
 
 /* 6.2 页面层级结构统一：一级 / 二级 / 三级只允许一个页头。 */
 .shell .settings-screen{
-  padding-top:var(--minimal-top)!important;
+  padding-top:calc(var(--app-safe-top) + 8px)!important;
 }
 .shell .settings-page-header{
   display:grid!important;
-  grid-template-columns:92px minmax(0,1fr) 92px!important;
+  grid-template-columns:minmax(48px,1fr) minmax(0,2fr) minmax(48px,1fr)!important;
   align-items:center!important;
   width:100%!important;
   height:var(--minimal-header)!important;
@@ -597,20 +597,15 @@ body.has-pack .shell::before{display:none!important}
   text-overflow:ellipsis!important;
 }
 .shell .settings-page-back{
-  display:inline-flex!important;
-  align-items:center!important;
-  justify-content:flex-start!important;
-  gap:5px!important;
-  width:auto!important;
-  min-width:0!important;
-  height:36px!important;
-  margin:0!important;
-  padding:0 4px!important;
-  border:0!important;
-  border-radius:0!important;
-  background:#fff!important;
-  color:#222!important;
-  font-size:12px!important;
+  justify-content:flex-start;
+  width:100%;
+  margin:0;
+  font-size:12px;
+  white-space:nowrap;
+}
+.shell .settings-page-back span:not(.ui-icon-image){
+  overflow:hidden;
+  text-overflow:ellipsis;
 }
 .shell .settings-page-head-spacer{display:block!important}
 
@@ -736,9 +731,9 @@ html,body{
 .shell .mobile-menu-toggle:not(.sidebar-edge-handle){
   position:absolute!important;
   top:calc(var(--app-safe-top,0px) + 8px)!important;
-  left:16px!important;
+  left:calc(16px + var(--app-safe-left))!important;
   z-index:18!important;
-  height:36px!important;
+  height:var(--ui-touch-size)!important;
   min-width:70px!important;
   padding:0 10px!important;
   border:1px solid var(--minimal-line-strong)!important;
@@ -749,17 +744,17 @@ html,body{
   -webkit-backdrop-filter:none!important;
 }
 .shell .home-screen.home-today{
-  padding-top:calc(var(--app-safe-top,0px) + 58px)!important;
+  padding-top:calc(var(--app-safe-top,0px) + 64px)!important;
 }
 .shell .home-today .home-hero{
   padding-top:0!important;
 }
 
-/* 内页只留一条很窄的边缘把手。 */
+/* 侧边栏入口与系统返回边缘留开，保留统一触控尺寸。 */
 .shell .mobile-menu-toggle.sidebar-edge-handle{
-  width:10px!important;
-  min-width:10px!important;
-  height:54px!important;
+  left:calc(var(--app-safe-left) + 16px)!important;
+  width:var(--ui-touch-size)!important;
+  height:var(--ui-touch-size)!important;
   padding:0!important;
   opacity:.38!important;
   border:0!important;
@@ -767,15 +762,12 @@ html,body{
   background:#ededed!important;
   box-shadow:none!important;
 }
-.shell .mobile-menu-toggle.sidebar-edge-handle .ui-icon-image{
-  display:none!important;
-}
 
 /* 抽屉整体和前三个导航都收窄，不再横跨整块侧栏。 */
 @media(max-width:700px){
   .shell .app-sidebar{
     width:min(252px,72vw)!important;
-    padding:calc(var(--app-safe-top,0px) + 10px) 12px 12px!important;
+    padding:calc(var(--app-safe-top,0px) + 10px) 12px calc(12px + var(--app-safe-bottom)) calc(12px + var(--app-safe-left))!important;
   }
 }
 .shell .sidebar-nav{
@@ -785,12 +777,11 @@ html,body{
 }
 .shell .sidebar-nav-row{
   display:grid!important;
-  grid-template-columns:18px minmax(0,1fr) auto!important;
+  grid-template-columns:var(--ui-icon-action) minmax(0,1fr) auto!important;
   align-items:center!important;
   gap:7px!important;
   width:100%!important;
-  height:40px!important;
-  min-height:40px!important;
+  min-height:var(--ui-touch-size)!important;
   padding:0 2px!important;
   border:0!important;
   border-bottom:1px solid var(--minimal-line)!important;
