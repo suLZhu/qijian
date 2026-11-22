@@ -56,6 +56,33 @@ try {
   assert(result.production,'Production shell did not mount')
   assert(result.existingData,'Existing profile data was overwritten during startup')
   assert(result.rootChildren>0,'React did not render any child')
+  await page.$eval('.mobile-menu-toggle', button => button.click())
+  await page.waitForSelector('.app-sidebar.sidebar-open')
+  await page.$eval('.sidebar-settings', button => button.click())
+  await page.waitForSelector('.settings-page-back')
+  for (const viewport of [{ width: 320, height: 640 }, { width: 852, height: 393 }]) {
+    await page.setViewport(viewport)
+    const geometry = await page.evaluate(() => {
+      const root = document.documentElement
+      root.style.setProperty('--native-safe-top', '24px')
+      root.style.setProperty('--native-safe-left', '20px')
+      root.style.setProperty('--native-safe-right', '16px')
+      const header = document.querySelector('.settings-page-header').getBoundingClientRect()
+      const back = document.querySelector('.settings-page-back').getBoundingClientRect()
+      const icon = document.querySelector('.settings-page-back .ui-icon-image').getBoundingClientRect()
+      const title = document.querySelector('.settings-page-header h2').getBoundingClientRect()
+      return { headerTop: header.top, headerLeft: header.left, backWidth: back.width, backHeight: back.height, iconWidth: icon.width, titleTop: title.top, titleHeight: title.height, iconTop: icon.top, iconHeight: icon.height }
+    })
+    assert(geometry.headerTop >= 24 && geometry.headerTop < 50, 'Settings should consume the top inset once')
+    assert(geometry.headerLeft >= 20, 'Settings must avoid the left cutout')
+    assert(geometry.backWidth >= 48 && geometry.backHeight >= 48, 'Back hit target is too small')
+    assert.equal(geometry.iconWidth, 24, 'Back glyph size')
+    assert(Math.abs(geometry.titleTop + geometry.titleHeight / 2 - geometry.iconTop - geometry.iconHeight / 2) < 2, 'Back glyph is misaligned with title')
+  }
+  await page.$eval('.settings-row', button => button.click())
+  await page.waitForFunction(() => document.querySelector('.settings-page-back')?.textContent === '全部设置')
+  await page.$eval('.settings-page-back', button => button.click())
+  await page.waitForFunction(() => document.querySelector('.settings-page-back')?.textContent === '主页')
   console.log('Qijian browser startup smoke test PASSED')
 } finally {
   if(browser) await browser.close()

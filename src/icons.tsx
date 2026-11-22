@@ -2,17 +2,17 @@
 // 页面里不再内联 SVG，也不再用 data URI；Android WebView 只加载 /ui-icons-sprite.svg。
 import type { CSSProperties, ReactElement } from 'react'
 
-export type IconProps = { size?: number; className?: string }
+export type IconProps = { size?: number | string; className?: string }
 export type IconComponent = (props: IconProps) => ReactElement
 
 const ICON_KEYS = ["home","chat","user","settings","clock","memory","grid","calendar","coffee","photo","music","ledger","book","plus","sun","star","flower","list","palette","plug","chart","sparkles","folder","shield","info","back","chevron-right","chevron-down","chevron-up","close","edit","trash","eye","eye-off","arrow-up","arrow-down","switch","share","test","search","minus","file","warning","mail","lock","check","more","video","copy","refresh","emoji","menu","mic","stop","send"] as const
 const ICON_INDEX: Record<string,number> = Object.fromEntries(ICON_KEYS.map((k,i)=>[k,i]))
 
-function IconImage({name,size=20,className}:{name:string}&IconProps){
+function IconImage({name,size='var(--ui-icon-chevron)',className}:{name:string}&IconProps){
   const index=ICON_INDEX[name]??0
-  const sheetWidth=ICON_KEYS.length*size
-  const style={width:sheetWidth,height:size,maxWidth:'none',transform:'translateX(' + (-index*size) + 'px)'} as CSSProperties
-  return <span className={'ui-icon-image'+(className?' '+className:'')} style={{width:size,height:size}} aria-hidden="true"><img src="/ui-icons-sprite.svg" alt="" draggable={false} style={style}/></span>
+  const length=typeof size==='number'?size+'px':size
+  const style={width:`calc(${length} * ${ICON_KEYS.length})`,height:length,maxWidth:'none',transform:`translateX(calc(${length} * ${-index}))`} as CSSProperties
+  return <span className={'ui-icon-image'+(className?' '+className:'')} style={{width:length,height:length}} aria-hidden="true"><img src="/ui-icons-sprite.svg" alt="" draggable={false} style={style}/></span>
 }
 
 export const IconHome: IconComponent = props => <IconImage name="home" {...props}/>

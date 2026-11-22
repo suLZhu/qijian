@@ -1,3 +1,4 @@
+import { CloseButton } from './uiPrimitives'
 import { useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from 'react'
 import { pushBackHandler } from './backStack.mjs'
 import type { ModelProfile, PersonBinding } from './resourceBindings.mjs'
@@ -90,7 +91,7 @@ export function ModelPickerSheet({
     <section className="model-sheet" role="dialog" aria-label="选择模型" onClick={e => e.stopPropagation()}>
       <span className="model-sheet-handle" aria-hidden="true"/>
       <div className="model-sheet-head">
-        <button type="button" className="model-sheet-close" aria-label="关闭模型面板" onClick={onClose}><IconClose size={16}/></button>
+        <CloseButton className="model-sheet-close" label="关闭模型面板" onClick={onClose}/>
         <b>选择模型</b>
         <span aria-hidden="true"/>
       </div>

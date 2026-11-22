@@ -1,8 +1,9 @@
+import { CloseButton } from './uiPrimitives'
 // 记忆的三种可视化：星空 / 花园 / 日记本，外加原来的列表。
 // 只负责画和点开详情；状态变更仍交给 MemoryGovernancePanel 的 transition。
 import { useMemo, useState } from 'react'
 import './MemoryViews.css'
-import { IconStar, IconFlower, IconBook, IconList, IconClose, type IconComponent } from './icons'
+import { IconStar, IconFlower, IconBook, IconList, type IconComponent } from './icons'
 import {
   MEMORY_VIEWS, normalizeMemoryView, starLayout, gardenLayout, groupMemoriesByDay, categoryColor,
 } from './memoryVisuals.mjs'
@@ -76,7 +77,7 @@ function MemoryRecordSheet({ record, onClose, onTransition }: {
     <div className="memory-sheet" role="dialog" aria-modal="true" aria-label={record.title} onClick={event => event.stopPropagation()}>
       <div className="memory-sheet-head">
         <span className={'memory-sheet-badge ' + record.lifecycle}>{LIFECYCLE_LABEL[record.lifecycle]}</span>
-        <button type="button" className="memory-sheet-close" onClick={onClose} aria-label="关闭"><IconClose size={15}/></button>
+        <CloseButton className="memory-sheet-close" onClick={onClose} label="关闭"/>
       </div>
       <b className="memory-sheet-title">{record.title}</b>
       <p className="memory-sheet-meta">{SCOPE_LABEL[record.scope]} · {record.category} · {record.createdBy === 'model' ? '助手提议' : '手动记录'}</p>

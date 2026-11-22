@@ -106,7 +106,6 @@
 }
 /* icon 按钮视觉 36px，点击热区补到 46px，避免状态栏下方点不中。 */
 .shell .chat-header-actions button { position:relative; }
-.shell .chat-header-actions button::after { content:"";position:absolute;inset:-5px; }
 .shell .chat-header-actions button:hover,
 .shell .chat-header-actions button.tool-active { background:var(--primary-soft)!important;color:var(--primary)!important; }
 .shell .chat-header-actions button:last-child,

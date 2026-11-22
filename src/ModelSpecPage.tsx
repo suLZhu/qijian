@@ -1,6 +1,7 @@
+import { CloseButton } from './uiPrimitives'
 import { useEffect, useState, type ReactNode } from 'react'
 import { pushBackHandler } from './backStack.mjs'
-import { IconCheck, IconClose, IconPlus, IconTrash } from './icons'
+import { IconCheck, IconPlus, IconTrash } from './icons'
 import {
   MODEL_TYPES, INPUT_MODALITIES, OUTPUT_MODALITIES, MODEL_ABILITIES,
   normalizeModelSpec, type ModelSpec, type ResolvedModelSpec,
@@ -63,7 +64,7 @@ export function ModelSpecPage({ vendorName, modelId, spec, onSave, onClose }: Pr
 
   return <div className="model-edit-page">
     <header className="mep-head">
-      <button type="button" className="mep-close" aria-label="关闭" onClick={onClose}><IconClose size={15}/></button>
+      <CloseButton className="mep-close" label="关闭" onClick={onClose}/>
       <b>编辑模型</b>
       <button type="button" className="mep-save" aria-label="保存" onClick={() => onSave(normalizeModelSpec(draft))}><IconCheck size={15}/></button>
     </header>
