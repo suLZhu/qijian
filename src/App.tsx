@@ -19,7 +19,7 @@ import { SystemSetupSheet } from './SystemSetupSheet'
 import { BackupCenter } from './BackupCenter'
 import { WebBrowser, type WebPage } from './WebBrowser'
 import { GUIDE_BRIEF, GUIDE_MARKDOWN } from './guide.mjs'
-import { applyWebUpdate, compareVersions, currentBundle, liveUpdateSupported, notifyAppReady, resetToBuiltin } from './liveUpdate.mjs'
+import { AppUpdateCard, AppUpdateNotice, startAppUpdateCheck } from './AppUpdateCard'
 import { applyPackVars, getActivePackId, loadThemePacks, normalizeThemePack, setActivePack as setStoredActivePack, upsertThemePack, type ThemePack } from './themePack.mjs'
 import { DEFAULT_ROOM_LAYOUT, loadRoomLayout, saveRoomLayout, resetRoomLayout, type RoomItem, type RoomLayout } from './roomLayout.mjs'
 import { WorkspaceSettings, type WorkspaceConfig } from './WorkspaceSettings'
@@ -657,27 +657,7 @@ export default function App() {
   const [drawerRenameId,setDrawerRenameId]=useState<string|null>(null)
   const [drawerRenameDraft,setDrawerRenameDraft]=useState('')
   useEffect(()=>{ (window as any).AiHomeGuide=GUIDE_MARKDOWN; return ()=>{ delete (window as any).AiHomeGuide } },[])
-  useEffect(()=>{ void notifyAppReady() },[])
-  useEffect(()=>{
-    if(!liveUpdateSupported())return
-    let target=''
-    try{ target=localStorage.getItem('ai-home.updateUrl')||'' }catch{}
-    if(!target)return
-    try{ if(localStorage.getItem('ai-home.autoUpdate')==='0')return }catch{}
-    const timer=window.setTimeout(()=>{ void (async()=>{
-      try{
-        const res=await fetch(target,{cache:'no-store',credentials:'omit'})
-        const data=await res.json()
-        const version=String(data.webVersion||'')
-        const bundleUrl=String(data.webUrl||'')
-        if(!version||!bundleUrl)return
-        const cur=await currentBundle()
-        if(cur?.bundle?.version&&compareVersions(version,cur.bundle.version)<=0)return
-        await applyWebUpdate(bundleUrl,version,String(data.webChecksum||'')||undefined)
-      }catch{ /* 自动检查失败不打扰用户 */ }
-    })() },5000)
-    return ()=>window.clearTimeout(timer)
-  },[])
+  useEffect(startAppUpdateCheck, [])
   const [activePack,setActivePack]=useState<ThemePack|null>(()=>{const id=getActivePackId();return [...BUILTIN_THEME_PACKS,...loadThemePacks()].find(p=>p.id===id)||null})
   useEffect(()=>{ applyPackVars(activePack) },[activePack])
   useEffect(()=>{ const on=()=>{const id=getActivePackId();setActivePack([...BUILTIN_THEME_PACKS,...loadThemePacks()].find(p=>p.id===id)||null)}; window.addEventListener('aihome:theme-pack',on); return ()=>window.removeEventListener('aihome:theme-pack',on) },[])
@@ -1384,7 +1364,7 @@ export default function App() {
       latestStreamContent = content
       latestStreamReasoning = reasoning
       if (streamPaintTimer !== undefined) return
-      const delay = Math.max(0, 90 - (Date.now() - lastStreamPaint))
+      const delay = Math.max(0, 160 - (Date.now() - lastStreamPaint))
       streamPaintTimer = setTimeout(flushStreamPaint, delay)
     }
     // 重新生成失败/空白时恢复原有有效回复；消息若已被用户删除，map 匹配不到、天然无副作用。
@@ -2471,6 +2451,7 @@ function Home({ onPerson, onOpenMemory, onOpenCalendar, time, today, displayName
       <div className="home-clock">{time || '--:--'}</div>
       <div className="home-date">{today}</div>
       <p className="home-greet">{greeting}。{greetText}</p>
+      <AppUpdateNotice/>
     </header>
 
     <div className="home-status-list">
@@ -3088,10 +3069,10 @@ function Chat(p: any) {
  const chatDisplay = useChatDisplay()
   // 聊天窗口内的「配置」抽屉：按当前助手选择模型预设 / 世界书条目 / MCP 服务。
   // 输入栏图标点开的小面板：与表情面板互斥，不遮挡聊天记录。
-  const [tray,setTray]=useState<''|'model'|'bind'|'tools'>('')
+  const [tray,setTray]=useState<''|'model'|'world'|'mcp'|'tools'>('')
   const [bindOpen,setBindOpen]=useState(false)
   const formRef=useRef<HTMLFormElement>(null)
-  const openTray=(id:''|'model'|'bind'|'tools')=>{
+  const openTray=(id:''|'model'|'world'|'mcp'|'tools')=>{
     // 打开半屏模型面板前先收起软键盘，否则键盘会把 sheet 顶到屏幕外。
     if(id==='model'){const active=document.activeElement;if(active instanceof HTMLElement)active.blur()}
     setTray(t=>t===id?'':id);setEmojiOpen(false);setAttachOpen(false)
@@ -3146,7 +3127,15 @@ function Chat(p: any) {
   const [newCustom,setNewCustom]=useState('')
   const [attachOpen,setAttachOpen]=useState(false)
   const [plusOpen,setPlusOpen]=useState(false)
-  void openTray
+  useEffect(() => {
+    if (!plusOpen) return
+    const closeOutside = (event:PointerEvent) => {
+      const target = event.target
+      if (target instanceof Element && !target.closest('.compose-plus-panel,.cw-circle[aria-label="更多"]')) setPlusOpen(false)
+    }
+    document.addEventListener('pointerdown', closeOutside)
+    return () => document.removeEventListener('pointerdown', closeOutside)
+  }, [plusOpen])
   // 点输入栏图标时浮出一条文字说明（1.4s 自动消失），图标本身只留图形。
   const [toolHint,setToolHint]=useState('')
   const hintTimerRef=useRef<number|undefined>(undefined)
@@ -3383,13 +3372,20 @@ function Chat(p: any) {
     pin()
     // 进入聊天时消息/图片/键盘可能晚一步撑高，补几次并监听 DOM 变化，确保落在最新一条。
     const timers=[60,220,500,900,1400,2000].map(ms=>window.setTimeout(pin,ms))
-    const mo=new MutationObserver(()=>requestAnimationFrame(pin))
+    // A streamed reply can update text dozens of times per second. Coalesce scroll
+    // work into one animation frame, and never fight intentional history scrolling.
+    let queuedFrame=0
+    const schedulePin=()=>{
+      if(!scrollPinned.current || queuedFrame) return
+      queuedFrame=requestAnimationFrame(()=>{queuedFrame=0;pin()})
+    }
+    const mo=new MutationObserver(schedulePin)
     mo.observe(el,{childList:true,subtree:true,characterData:true,attributes:true,attributeFilter:['src']})
-    const onImgLoad=()=>requestAnimationFrame(pin)
+    const onImgLoad=schedulePin
     el.addEventListener('load',onImgLoad,true)
-    const ro=new ResizeObserver(()=>requestAnimationFrame(pin))
+    const ro=new ResizeObserver(schedulePin)
     ro.observe(el)
-    return ()=>{timers.forEach(t=>window.clearTimeout(t));mo.disconnect();ro.disconnect();el.removeEventListener('load',onImgLoad,true)}
+    return ()=>{timers.forEach(t=>window.clearTimeout(t));if(queuedFrame)cancelAnimationFrame(queuedFrame);mo.disconnect();ro.disconnect();el.removeEventListener('load',onImgLoad,true)}
   },[chatPerson,activeChatConversationId,p.person])
   // 打字时键盘把可视高度压小，容器 resize 后滚动位置会被浏览器重算；
   // 只要焦点还在输入框，就补滚到最新一条，保证「边打字边看得见聊天记录」。
@@ -3683,20 +3679,20 @@ function Chat(p: any) {
     </div>}
     {/* 图标面板：点输入框底部的图标，在输入区上方展开；不遮罩、不打断聊天。 */}
     {tray&&tray!=='model'&&!selectMode&&<div className="compose-tray" role="dialog" aria-label="聊天工具面板">
-      <div className="compose-tray-head"><b>{tray==='bind'?'世界书 / MCP':'工具'}</b><small>{p.displayName(chatPerson)} 的本次绑定</small>{tray==='bind'&&<button type="button" className="compose-tray-config" aria-label="完整绑定设置" title="完整绑定设置" onClick={()=>{setTray('');setBindOpen(true)}}><IconSettings size={15}/></button>}<button type="button" className="compose-tray-close" aria-label="关闭面板" onClick={()=>setTray('')}><IconClose size={15}/></button></div>
+      <div className="compose-tray-head"><b>{tray==='world'?'世界书':tray==='mcp'?'MCP':'工具'}</b><small>{p.displayName(chatPerson)} 的本次绑定</small>{(tray==='world'||tray==='mcp')&&<button type="button" className="compose-tray-config" aria-label="完整绑定设置" title="完整绑定设置" onClick={()=>{setTray('');setBindOpen(true)}}><IconSettings size={15}/></button>}<button type="button" className="compose-tray-close" aria-label="关闭面板" onClick={()=>setTray('')}><IconClose size={15}/></button></div>
       <div className="compose-tray-body">
-        {tray==='bind'&&<>
-          <div className="tray-section">
+        {(tray==='world'||tray==='mcp')&&<>
+          {tray==='mcp'&&<div className="tray-section">
             <b className="tray-section-title">MCP</b>
             {quickMcp.error&&<p className="mcp-error">{quickMcp.error}</p>}
             {trayMcp.length===0&&<p className="muted tray-empty">还没有 MCP 服务，到设置里添加。</p>}
             {trayMcp.map(c=><label className="tray-option tray-switch-row" key={c.id}><span><i className="tray-no">{mcpNo(c.id)}</i> {c.name}<small>{c.url}</small></span><input type="checkbox" className="tray-switch" checked={(quickBinding.mcpIds===null?mcpAll:quickBinding.mcpIds).includes(c.id)} onChange={v=>patchBinding(toggleMcpId(quickBinding,c.id,v.target.checked,mcpAll))}/></label>)}
-          </div>
-          <div className="tray-section">
+          </div>}
+          {tray==='world'&&<div className="tray-section">
             <b className="tray-section-title">世界书</b>
             {trayWorld.length===0&&<p className="muted tray-empty">还没有世界书条目。</p>}
             {trayWorld.map(e=><label className="tray-option tray-switch-row" key={e.id}><span><i className="tray-no">{worldNo(e.id)}</i> {e.title||'未命名条目'}<small>{e.enabled?'已启用':'已停用'} · 打开后这位助手的对话里生效</small></span><input type="checkbox" className="tray-switch" checked={isWorldEntryBound(e,chatPerson)} onChange={v=>p.setWorldEntries((old:WorldEntry[])=>toggleWorldEntryBinding(old,chatPerson,e.id,v.target.checked))}/></label>)}
-          </div>
+          </div>}
         </>}
         {tray==='tools'&&<div className="tray-tool-grid">{CHAT_QUICK_TOOLS.map(t=><button type="button" className="tray-tool-card" key={t.id} onClick={()=>runQuickTool(t.id)}><b>{t.icon} {t.label}</b><small>{t.desc}</small></button>)}</div>}
       </div>
@@ -3722,8 +3718,8 @@ function Chat(p: any) {
       {plusOpen&&<div className="compose-plus-panel" role="dialog" aria-label="更多功能">
         <div className="cp-grid">
           <button type="button" className="cp-item" onClick={()=>{setPlusOpen(false);cameraInput.current?.click()}}><span className="cp-ico"><IconPhoto size={18}/></span><small>拍照</small></button>
-          <button type="button" className="cp-item" onClick={()=>{setPlusOpen(false);openTray('bind')}}><span className="cp-ico"><IconBook size={18}/></span><small>世界书</small></button>
-          <button type="button" className="cp-item" onClick={()=>{setPlusOpen(false);openTray('bind')}}><span className="cp-ico"><IconPlug size={18}/></span><small>MCP</small></button>
+          <button type="button" className="cp-item" onClick={()=>{setPlusOpen(false);openTray('world')}}><span className="cp-ico"><IconBook size={18}/></span><small>世界书</small></button>
+          <button type="button" className="cp-item" onClick={()=>{setPlusOpen(false);openTray('mcp')}}><span className="cp-ico"><IconPlug size={18}/></span><small>MCP</small></button>
           <button type="button" className="cp-item" onClick={()=>{setPlusOpen(false);setAttachOpen(true)}}><span className="cp-ico"><IconFile size={18}/></span><small>文件</small></button>
           <button type="button" className="cp-item" onClick={()=>{setPlusOpen(false);openTray('tools')}}><span className="cp-ico"><IconSettings size={18}/></span><small>工具</small></button>
           <button type="button" className="cp-item" onClick={()=>{setPlusOpen(false);if(searchOpen)closeSearch();else setSearchOpen(true)}}><span className="cp-ico"><IconSearch size={18}/></span><small>查找聊天记录</small></button>
@@ -3853,60 +3849,6 @@ function SettingsTabBar({title,items,value,onChange}:{title:string;items:Array<[
   return <div className="settings-tabs"><b className="settings-tabs-title">{title}</b><div className="settings-tabs-row" role="tablist">{items.map(([id,label])=><button type="button" role="tab" key={id} aria-selected={value===id} className={'settings-tab'+(value===id?' active':'')} onClick={()=>onChange(id)}>{label}</button>)}</div></div>
 }
 
-function AppUpdateCard() {
-  const [url, setUrl] = useState(() => { try { return localStorage.getItem('ai-home.updateUrl') || '' } catch { return '' } })
-  const [msg, setMsg] = useState('')
-  const [auto, setAuto] = useState(() => { try { return localStorage.getItem('ai-home.autoUpdate') !== '0' } catch { return true } })
-  const save = () => { try { localStorage.setItem('ai-home.updateUrl', url.trim()) } catch {} setMsg('更新地址已保存') }
-  const check = () => {
-    const bridge = (window as any).AiHomeSystem
-    if (!bridge || typeof bridge.checkAppUpdate !== 'function') { setMsg('仅 Android App 内支持检查更新'); return }
-    const target = url.trim()
-    if (!/^https?:\/\//i.test(target)) { setMsg('请先填写 http(s) 的更新清单地址'); return }
-    try { localStorage.setItem('ai-home.updateUrl', target) } catch {}
-    bridge.checkAppUpdate(target)
-    setMsg('已发起 APK 检查，发现新版本会弹窗提示下载安装')
-  }
-  const checkWeb = async () => {
-    const target = url.trim()
-    if (!/^https?:\/\//i.test(target)) { setMsg('请先填写 http(s) 的更新清单地址'); return }
-    try {
-      setMsg('正在检查界面更新…')
-      const res = await fetch(target, { cache: 'no-store', credentials: 'omit' })
-      const data = await res.json()
-      const version = String(data.webVersion || '')
-      const bundleUrl = String(data.webUrl || '')
-      if (!version || !bundleUrl) { setMsg('清单缺少 webVersion / webUrl'); return }
-      const cur = await currentBundle()
-      if (cur?.bundle?.version && compareVersions(version, cur.bundle.version) <= 0) { setMsg('界面已是最新：' + cur.bundle.version); return }
-      if (!window.confirm('发现新界面 ' + version + '，下载后立即生效，继续？')) { setMsg('已取消'); return }
-      setMsg('正在下载界面包…')
-      await applyWebUpdate(bundleUrl, version, String(data.webChecksum || '') || undefined)
-    } catch (e: any) {
-      setMsg('界面更新失败：' + (e?.message || String(e)))
-    }
-  }
-  const resetWeb = async () => {
-    if (!window.confirm('恢复到 App 内置界面？')) return
-    try { await resetToBuiltin(); setMsg('已恢复内置界面，正在重载…') } catch (e: any) { setMsg('恢复失败：' + (e?.message || e)) }
-  }
-  return <div className="setting-card settings-inner-card">
-    <b>应用更新</b>
-    <p className="muted">清单 JSON：versionCode / versionName / apkUrl / notes，以及可选的 webVersion / webUrl。「检查 APK 更新」走系统安装；「检查界面更新」走 Live Update，只替换网页资源、立即生效，不用装 APK。</p>
-    <input className="memory-search" value={url} onChange={e => setUrl(e.target.value)} placeholder="https://your-server/qijian/latest.json" aria-label="更新清单地址"/>
-    <label className="update-auto"><input type="checkbox" checked={auto} onChange={e => { setAuto(e.target.checked); try { localStorage.setItem('ai-home.autoUpdate', e.target.checked ? '1' : '0') } catch {} }}/> 启动时自动检查界面更新</label>
-    <div className="settings-shortcuts">
-      <div className="settings-shortcut-group"><div>
-        <button type="button" onClick={save}>保存地址</button>
-        <button type="button" onClick={check}>检查 APK 更新</button>
-        <button type="button" onClick={() => void checkWeb()}>检查界面更新</button>
-        <button type="button" onClick={() => void resetWeb()}>恢复内置界面</button>
-      </div></div>
-    </div>
-    {msg && <p className="muted">{msg}</p>}
-  </div>
-}
-
 function SettingsGuidePage() {
   const blocks: React.ReactNode[] = []
   let code: string[] | null = null
@@ -3986,6 +3928,9 @@ function useMcpLibrary() {
   return { connections, error, setError, refresh }
 }
 
+// MCP 状态在资源页卸载后保留，避免切换世界书时重新握手并冻结界面。
+const mcpProbeCache = new Map<string, { ok: boolean; count?: number }>()
+const mcpProbeInflight = new Map<string, Promise<{ ok: boolean; count?: number }>>()
 const EMPTY_PROFILE = { id: '', name: '', endpoint: '', model: '', inputPrice: '', outputPrice: '', cachedInputPrice: '', usdToCny: '7.2' }
 
 function groupModelsByName(ids: string[]): { id: string; label: string; models: string[] }[] {
@@ -4828,7 +4773,6 @@ function ResourceLibrary({ initialTab, only, tabs, worldEntries, setWorldEntries
   // 已添加的服务收进一个下拉：默认只占一行，选中才展开详情与移除按钮。
   const [mcpCounts, setMcpCounts] = useState<Record<string, number | undefined>>({})
   const [mcpStatus, setMcpStatus] = useState<Record<string, 'ok' | 'fail'>>({})
-  const mcpStatusLoadedRef = useRef<Set<string>>(new Set())
   const [mcpEdit, setMcpEdit] = useState<Array<{ id: string; person: Person }>>([])
   const [mcpTest, setMcpTest] = useState<{ busy: boolean; ok?: boolean; message: string }>({ busy: false, message: '' })
   const [mcpFormOpen, setMcpFormOpen] = useState(false)
@@ -4844,32 +4788,45 @@ function ResourceLibrary({ initialTab, only, tabs, worldEntries, setWorldEntries
     }
     return [...map.values()]
   }, [mcp.connections])
-  // 列表不再展开：进入 MCP tab 时后台探一次工具数/连通状态，小横条也能显示。
+  // 已连接服务直接使用本次启动的状态缓存；切换世界书不重复初始化 MCP。
   useEffect(() => {
     if (tab !== 'mcp') return
     let cancelled = false
-    const load = async () => {
-      const pending = mcpGroups.filter(group => !mcpStatusLoadedRef.current.has(group.key))
-      for (const group of pending) mcpStatusLoadedRef.current.add(group.key)
-      // 并行探测：4 个服务不用排队等，切到 MCP 页更快出状态。
-      await Promise.all(pending.map(async group => {
-        const connection = group.items[0]
-        if (!connection) return
-        try {
-          const response = await apiFetch('/api/mcp/' + encodeURIComponent(connection.id) + '/tools', {
-            method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ person: connection.person }),
-          })
-          const data = await response.json().catch(() => ({}))
-          if (cancelled) return
-          setMcpStatus(old => ({ ...old, [group.key]: response.ok ? 'ok' : 'fail' }))
-          if (response.ok && Array.isArray(data.tools)) setMcpCounts(old => ({ ...old, [group.key]: data.tools.length }))
-        } catch {
-          if (!cancelled) setMcpStatus(old => ({ ...old, [group.key]: 'fail' }))
-        }
-      }))
+    for (const group of mcpGroups) {
+      const cached = mcpProbeCache.get(group.key)
+      if (cached) {
+        setMcpStatus(old => ({ ...old, [group.key]: cached.ok ? 'ok' : 'fail' }))
+        if (cached.count !== undefined) setMcpCounts(old => ({ ...old, [group.key]: cached.count }))
+        continue
+      }
+      const connection = group.items[0]
+      if (!connection) continue
+      let pending = mcpProbeInflight.get(group.key)
+      if (!pending) {
+        pending = (async () => {
+          try {
+            const response = await apiFetch('/api/mcp/' + encodeURIComponent(connection.id) + '/tools', {
+              method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ person: connection.person }),
+            })
+            const data = await response.json().catch(() => ({}))
+            const result = { ok: response.ok, count: response.ok && Array.isArray(data.tools) ? data.tools.length : undefined }
+            mcpProbeCache.set(group.key, result)
+            return result
+          } catch {
+            const result = { ok: false }
+            mcpProbeCache.set(group.key, result)
+            return result
+          } finally { mcpProbeInflight.delete(group.key) }
+        })()
+        mcpProbeInflight.set(group.key, pending)
+      }
+      void pending.then(result => {
+        if (cancelled) return
+        setMcpStatus(old => ({ ...old, [group.key]: result.ok ? 'ok' : 'fail' }))
+        if (result.count !== undefined) setMcpCounts(old => ({ ...old, [group.key]: result.count }))
+      })
     }
-    void load()
     return () => { cancelled = true }
   }, [tab, mcpGroups])
 
@@ -4918,6 +4875,10 @@ function ResourceLibrary({ initialTab, only, tabs, worldEntries, setWorldEntries
       setMcpDraft({ name: '', url: '', token: '', owner: 'all' })
       setMcpTest({ busy: false, message: '' })
       setMcpFormOpen(false)
+      mcpProbeCache.clear()
+      mcpProbeInflight.clear()
+      setMcpStatus({})
+      setMcpCounts({})
       await mcp.refresh()
     } catch (err) { mcp.setError(err instanceof Error ? err.message : String(err)) }
     finally { setMcpBusy(false) }
@@ -4939,6 +4900,10 @@ function ResourceLibrary({ initialTab, only, tabs, worldEntries, setWorldEntries
         const data = await response.json().catch(() => ({}))
         if (!response.ok) throw new Error(data.error || '更新 MCP 失败')
       }
+      mcpProbeCache.clear()
+      mcpProbeInflight.clear()
+      setMcpStatus({})
+      setMcpCounts({})
       await mcp.refresh()
     } catch (error) {
       mcp.setError(error instanceof Error ? error.message : String(error))
@@ -4953,6 +4918,10 @@ function ResourceLibrary({ initialTab, only, tabs, worldEntries, setWorldEntries
         const r = await apiFetch('/api/mcp/' + c.id, { method: 'DELETE', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ person: c.person }) })
         if (!r.ok) { const d = await r.json().catch(() => ({})); throw new Error(d.error || '移除失败') }
       }
+      mcpProbeCache.clear()
+      mcpProbeInflight.clear()
+      setMcpStatus({})
+      setMcpCounts({})
       await mcp.refresh()
     } catch (err) { mcp.setError(err instanceof Error ? err.message : String(err)) }
   }
@@ -4981,7 +4950,7 @@ function ResourceLibrary({ initialTab, only, tabs, worldEntries, setWorldEntries
         <form className="resource-form" onSubmit={addMcp}>
           <label>服务名称<input value={mcpDraft.name} onChange={e=>setMcpDraft({...mcpDraft,name:e.target.value})} placeholder="例如：记事本服务" required/></label>
           <label>主机地址<input value={mcpDraft.url} onChange={e=>setMcpDraft({...mcpDraft,url:e.target.value})} placeholder="https://example.com/mcp" type="url" required/></label>
-          <label>Token（可选）<span className="mcp-token-field"><input value={mcpDraft.token} onChange={e=>setMcpDraft({...mcpDraft,token:e.target.value})} type={mcpShowToken ? "text" : "password"} autoComplete="new-password" placeholder={mcpEdit.length?'留空表示不修改':'需要鉴权时再填'}/><button type="button" className="mcp-token-eye" aria-label={mcpShowToken?'隐藏 Token':'显示 Token'} onClick={()=>setMcpShowToken(v=>!v)}>{mcpShowToken?'隐藏':'显示'}</button></span></label>
+          <label>Token（可选）<span className="mcp-token-field"><input value={mcpDraft.token} onChange={e=>setMcpDraft({...mcpDraft,token:e.target.value})} type="text" autoComplete="off" inputMode="text" spellCheck={false} style={!mcpShowToken?{WebkitTextSecurity:'disc'} as React.CSSProperties:undefined} placeholder={mcpEdit.length?'留空表示不修改':'需要鉴权时再填'}/><button type="button" className="mcp-token-eye" aria-label={mcpShowToken?'隐藏 Token':'显示 Token'} onClick={()=>setMcpShowToken(v=>!v)}>{mcpShowToken?'隐藏':'显示'}</button></span></label>
           <div className="resource-form-actions"><button type="submit" disabled={mcpBusy}>{mcpBusy?'正在保存…':(mcpEdit.length?'保存修改':'添加服务')}</button><button type="button" className="ghost" disabled={mcpBusy||mcpTest.busy||!mcpDraft.url.trim()} onClick={()=>void testMcp()}>{mcpTest.busy?'测试中…':'测试链接'}</button></div>
           {mcpTest.message&&<small className={'mcp-test'+(mcpTest.ok===false?' bad':mcpTest.ok?' ok':'')}>{mcpTest.ok?<IconCheck className="ui-icon-inline" size={13}/>:<IconClose className="ui-icon-inline" size={13}/>} {mcpTest.message}</small>}
           <small>添加后所有助手都可用；到聊天窗口的「世界书 / MCP」里再按助手打开或关闭。</small>
