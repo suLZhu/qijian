@@ -940,7 +940,9 @@ const apiServer = createServer(async (req, res) => {
       const row = db.prepare('SELECT * FROM mcp_connections WHERE id=? AND person=?').get(mcpMatch[1], person)
       if (!row) return send(res, 404, { error: '此 MCP 没有绑定到当前人物' })
       if (mcpMatch[2] === 'tools') {
-        const result = await withMcpClient(row, client => client.listTools())
+        if (!row.enabled) return send(res, 404, { error: 'MCP 服务未启用' })
+        validateRemoteUrl(row.url)
+        const result = await mcpConnectionPool.listTools(row.id, row.updated_at, row)
         return send(res, 200, { tools: result.tools.map(t => ({ name: t.name, description: t.description || '', inputSchema: t.inputSchema })) })
       }
       const toolName = String(body.name || '')
@@ -1263,7 +1265,7 @@ const apiServer = createServer(async (req, res) => {
     const results = searchMemoryIndex(db, { person, query, exclude, limit: 5 })
     // 向量结果作为附加通道返回，不改变原有 results 结构（旧客户端不受影响）。
     let vectorResults = []
-    const vectorConfig = memoryVectorConfig(person)
+    const vectorConfig = url.searchParams.get('vectors') === '0' ? null : memoryVectorConfig(person)
     if (vectorConfig) {
       try {
         const [queryVector] = await embedTexts(vectorConfig, [query])
@@ -1362,7 +1364,7 @@ const apiServer = createServer(async (req, res) => {
       db.exec('BEGIN IMMEDIATE')
       try {
         db.prepare('INSERT INTO app_state (id,payload,updated_at) VALUES (1,?,?) ON CONFLICT(id) DO UPDATE SET payload=excluded.payload, updated_at=excluded.updated_at').run(payload, updatedAt)
-        rebuildMemoryIndex(db, body.state)
+        rebuildMemoryIndex(db, JSON.parse(payload))
         db.exec('COMMIT')
       } catch (error) { db.exec('ROLLBACK'); throw error }
       return send(res, 200, { ok: true, updatedAt })

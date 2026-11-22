@@ -82,14 +82,11 @@ test('聊天技术信息折叠、操作栏常驻在气泡下方、输入框单�
   assert.match(app, /import '\.\/mist\.css'/)
   const css = read('src/mist.css')
   assert.match(css, /\.message-stack \.message-actions \{ opacity:1!important;pointer-events:auto!important/)
-  // 操作按钮用文字，不再依赖内联 SVG（老 WebView 会把 SVG 画成一条横线）。
-  // 操作按钮用位图图标（内联 SVG 在部分 Android WebView 上会被画成一条横线）。
-  assert.match(app, /className="message-action-icon" src="\/msg-icons\/copy\.png"/)
-  assert.match(app, /className="message-action-icon" src="\/msg-icons\/trash\.png"/)
-  assert.doesNotMatch(app, /message-action-label/)
-  for (const name of ['copy', 'edit', 'regen', 'trash']) {
-    assert.ok(existsSync('public/msg-icons/' + name + '.png'), '缺少图标 public/msg-icons/' + name + '.png')
-  }
+  assert.match(app, /icon=\{copiedId===m.id\?IconCheck:IconCopy\}.*copyMessage\(m\)/)
+  assert.match(app, /icon=\{IconEdit\}.*startEdit\(m\)/)
+  assert.match(app, /icon=\{IconRefresh\}.*disabled=\{!canRegenerate\}/)
+  assert.match(app, /icon=\{IconTrash\}.*removeMessage\(m\)/)
+  assert.match(app, /再点一次确认删除这条消息/)
   // Token 贴在操作图标同一行，折叠时明细不占位
   assert.match(css, /\.message-actions \.message-tech \{ margin:0 0 0 3px;display:inline-flex/)
   assert.match(css, /\.message-tech:not\(\[open\]\)>\.message-tech-body \{ display:none!important; \}/)
@@ -150,7 +147,7 @@ test('供应商多 Key：新建时可勾选，编辑页仍能增删改备用 Key
   assert.match(app, /启用多 Key 模式/)
   assert.match(app, /newMultiKey\?newExtraKeys\.filter\(k=>k\.value\.trim\(\)\)/)
   // 编辑页：原有「多 KEY 模式」管理区保留，能改备注、改角色、删除既有 Key。
-  assert.match(app, /多 KEY 模式/)
+  assert.match(app, /多 Key 模式.*checked=\{showBackupKeys\}/)
   assert.match(app, /addBackupKey/)
   assert.match(app, /aria-label="删除这把 Key"/)
   // 新加的样式类必须真的落在 App.css，避免只有 markup 没有样式。
@@ -169,12 +166,12 @@ test('供应商详情 / 新增供应商都是独立页面，不再在列表下�
   assert.match(app, /section==='vendor:add'/)
   assert.match(app, /section\.startsWith\('vendor:'\)&&!showNew/)
   // 页面容器与返回按钮存在，列表只在 isList 时渲染。
-  assert.match(app, /const isList=!showNew&&!active/)
+  assert.match(app, /const isList=!showNew&&!showDefault&&!showCatalog&&!showKeyManager&&!active/)
   assert.match(app, /className="vendor-page"/)
-  assert.match(app, /← 供应商/)
+  assert.match(app, /onClick=\{backToList\}/)
   assert.doesNotMatch(app, /editing===v\.id/, '列表点开不应再靠内联 editing 状态')
   // Android 返回键：供应商二级页先回列表。
-  assert.match(app, /section\.startsWith\('vendor:'\)&&section!=='vendor:account'\?'vendor':''/)
+  assert.match(app, /if\(section\.startsWith\('vendor:'\)\)\{setSection\('vendor'\);return true\}/)
   assert.match(css, /\.vendor-page\{display:flex/)
 })
 
@@ -209,10 +206,10 @@ test('主题美化底部有微信式字体大小拉条，跟随系统字号并�
   assert.match(main, /scale = scale \* appFontFactor\(\)/)
 })
 
-test('世界书与 MCP 合并成一栏，设置页与聊天齿轮共用两栏页面', () => {
+test('智能扩展分开管理资源，聊天齿轮保留世界书和 MCP 双栏绑定', () => {
   const app = read('src/App.tsx')
   const css = read('src/App.css')
-  assert.match(app, /title:'世界书 \/ MCP'/)
+  assert.match(app, /extensions:\{title:'智能扩展',tabs:\[\['world','世界书'\],\['mcp','MCP'\]/)
   assert.match(app, /<WorldMcpMatrix mode="bind" person=\{person\}/)
   assert.match(app, /function WorldMcpMatrix/)
   assert.match(app, /mode==='bind'&&person\?isWorldEntryBound/)
@@ -227,7 +224,8 @@ test('输入栏图标更紧凑，点图标会浮出文字说明', () => {
   const css = read('src/App.css')
   assert.match(app, /compose-tool-hint/)
   assert.match(app, /compose-plus-panel/)
-  assert.match(app, /拍摄/)
+  assert.match(app, /cameraInput\.current\?\.click\(\).*拍照/)
+  assert.match(app, /ref=\{cameraInput\}.*capture="environment"/)
   assert.match(css, /\.compose-tool-hint\{position:absolute/)
   assert.match(css, /\.compose-box button\.compose-tool-icon\{width:36px!important/)
   assert.match(css, /\.compose-box \.compose-icons\{gap:0\}/)
@@ -304,10 +302,10 @@ test('世界书 / MCP 的新增表单各自独立成页', () => {
   const app = read('src/App.tsx')
   assert.match(wb, /worldbook-list-page/)
   assert.match(wb, /worldbook-form-page/)
-  assert.match(wb, /＋ 添加世界书/)
+  assert.match(wb, /aria-label="添加世界书" onClick=\{openNew\}/)
   assert.match(wb, /worldbook-back/)
   assert.match(app, /mcpFormOpen/)
-  assert.match(app, /＋ 添加 MCP 服务/)
+  assert.match(app, /setMcpFormOpen\(true\).*添加 MCP 服务/)
   assert.match(app, /mcp-list-head/)
 })
 
