@@ -13,10 +13,10 @@ test('短对话不压缩', () => {
   assert.deepEqual(planCompaction(messages(10)), { needed: false, cut: 0 })
 })
 
-test('超过 32 条：压掉最旧的，保留最近 20 条', () => {
+test('超过消息条数上限时保留配置的最近消息', () => {
   const plan = planCompaction(messages(40))
   assert.equal(plan.needed, true)
-  assert.equal(plan.cut, 20)
+  assert.equal(plan.cut, 40 - CONTEXT_LIMITS.keepMessages)
 })
 
 test('条数没超但字数超预算，也会从最旧的开始压', () => {
@@ -81,4 +81,11 @@ test('conversation_search 检索原始消息并隔离助手', () => {
   assert.ok(!JSON.stringify(hits).includes('别的助手'))
   assert.equal(searchHistory(conversations, 'assistant-yanweixi', '桂花茶', 1).length, 1)
   assert.deepEqual(searchHistory(conversations, 'assistant-yanweixi', ''), [])
+})
+
+test('长消息召回片段保留实际命中的原文', () => {
+  const content = '背景信息'.repeat(300) + '约定周六下午三点去桂花茶店。'
+  const [hit] = searchMessageList([{ role: 'user', content }], '桂花茶店')
+  assert.match(hit.content, /周六下午三点去桂花茶店/)
+  assert.ok(hit.content.length <= 900)
 })

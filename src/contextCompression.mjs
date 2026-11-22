@@ -133,16 +133,25 @@ export function searchMessageList(messages, query, limit = 4) {
     const content = String(message.content || '').trim()
     if (!content) continue
     let score = 0
+    let bestMatch = 0
+    let bestWeight = 0
     for (const term of terms) {
-      if (!content.includes(term)) continue
-      score += term.length >= 5 ? 4 : term.length >= 3 ? 2 : 1
+      const position = content.indexOf(term)
+      if (position < 0) continue
+      const weight = term.length >= 5 ? 4 : term.length >= 3 ? 2 : 1
+      score += weight
+      if (weight > bestWeight) {
+        bestMatch = position
+        bestWeight = weight
+      }
     }
     if (!score) continue
+    const start = bestMatch < 800 ? 0 : Math.max(0, bestMatch - 120)
     hits.push({
       index,
       role: message.role,
       at: message.at || '',
-      content: content.slice(0, 900),
+      content: content.slice(start, start + 900),
       score,
     })
   }
