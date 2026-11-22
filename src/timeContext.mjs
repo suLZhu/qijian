@@ -9,6 +9,7 @@
 
 export const DEFAULT_TIME_ZONE = 'Asia/Shanghai'
 
+
 // 校验 IANA 时区名；非法或空值回退到默认时区（Asia/Shanghai UTC+8）。
 export function normalizeTimeZone(tz) {
   const raw = String(tz == null ? '' : tz).trim()
@@ -83,23 +84,26 @@ export function buildTimeContext(now, timeZone) {
 // 用户自述作息（补觉/上夜班等）优先于时段推断。
 export function timeContextText(ctx) {
   return [
-    '【当前时间上下文】（本轮请求时实时生成，仅供参考）',
-    '日期：' + ctx.date + '（' + ctx.weekday + '）',
-    '本地时间：' + ctx.time + '（24 小时制）',
-    '时段：' + ctx.partOfDay,
-    '时区：' + ctx.timeZone + '（' + ctx.utcOffset + '）',
+    '【当前时间上下文】当前时间：' + ctx.date + ' ' + ctx.weekday + ' ' + ctx.time + '（' + ctx.partOfDay + '，' + ctx.timeZone + ' ' + ctx.utcOffset + '）',
+    '这是本轮请求实时生成的当前时刻基准（24 小时制）。',
     '使用说明：',
-    '1. 如果用户询问现在几点、今天星期几，优先使用上面这轮请求的日期与时间，不要用训练时的旧时间。以上时间仅用于合理安排与时间有关的表达（例如把上午 9 点理解为通常的活动时间，而不是睡觉时间）。',
-    '2. 若用户在对话中明确说自己在补觉、上夜班或作息与此时段不符，一律以用户所说的为准，不要机械套用常规作息。',
-    '3. 本上下文不包含天气、位置、地址或任何地理推断信息；不要据此虚构天气或地点。',
+    '1. 以上日期与时间就是本轮对话的“现在”，属于当前时刻基准。不要说“我无法知道当前时间”，也不要使用训练数据中的旧日期代替它。',
+    '2. 涉及“刚才、过一会儿、今天、明天、昨晚、几点了、上午/下午/晚上”等表达时，必须以上述当前时刻为基准理解和推理；必要时先计算日期跨越与时间先后，再回答。',
+    '3. 时间不相关时无需机械报时；但涉及作息、吃饭、上班、睡觉、提醒等时间敏感建议时，应让措辞与当前时段一致。例如上午 9 点通常是活动时间，不应仅因模板习惯催用户睡觉。',
+    '4. 若用户在对话中明确说自己在补觉、上夜班或作息与常规时段不符，一律以用户所说的为准，不要机械套用常规作息。',
+    '5. 本上下文不包含天气、位置、地址或任何地理推断信息；不要据此虚构天气或地点。',
   ].join('\n')
 }
 
-// 把时间上下文作为【独立】的 system 消息放到消息数组最前面。
-// 不修改传入数组，也不替换/覆盖已有的 system 消息（人物设定、
-// 世界书、长期记忆都保持原样）。
+// 把时间上下文作为【独立】的 system 消息放在稳定 system/developer 前缀之后。
+// 角色卡 / 系统设定 / 摘要等稳定前缀保持在请求最前方，便于上游 Prompt Cache
+// 复用；每分钟变化的时间不能放第 1 条，否则会让整段前缀缓存失效。
+// 不修改传入数组，也不替换/覆盖已有 system 消息。
 export function injectTimeContext(messages, now, timeZone) {
   const list = Array.isArray(messages) ? messages.slice() : []
   const ctx = buildTimeContext(now, timeZone)
-  return [{ role: 'system', content: timeContextText(ctx) }, ...list]
+  const dynamic = { role: 'system', content: timeContextText(ctx) }
+  let prefixEnd = 0
+  while (prefixEnd < list.length && (list[prefixEnd]?.role === 'system' || list[prefixEnd]?.role === 'developer')) prefixEnd += 1
+  return [...list.slice(0, prefixEnd), dynamic, ...list.slice(prefixEnd)]
 }

@@ -1,3 +1,4 @@
+import { recallExcerpt } from './contextCompression.mjs'
 // 本地模式后端垫片（LocalBackend）：未配置服务器地址时，浏览器/WebView 内
 // 直接应答全部 /api/* 请求，让 App 开箱即用——不依赖任何云端或本机后端进程。
 //
@@ -224,7 +225,7 @@ function searchLocalMemory({ person, query, exclude, limit = 5 }) {
         if (!message || (message.role !== 'user' && message.role !== 'assistant')) return
         const content = typeof message.content === 'string' ? message.content.trim().slice(0, 5000) : ''
         if (content.length < 2) return
-        rows.push({ conversationId: conversation.id, title, messageIndex: index, role: message.role, content })
+        rows.push({ conversationId: conversation.id, title, messageIndex: index, messageId: message.id || null, role: message.role, at: message.at || '', content })
       })
     }
   }
@@ -236,7 +237,7 @@ function searchLocalMemory({ person, query, exclude, limit = 5 }) {
     .sort((a, b) => b.score - a.score)
     .slice(0, Math.min(30, Math.max(1, limit * 6)))
   return scored
-    .map(r => ({ ...r, content: r.content.slice(0, 700) }))
+    .map(r => ({ ...r, content: recallExcerpt(r.content, r.content.indexOf(terms.find(t => r.content.includes(t))), 700) }))
     .sort((a, b) => b.score - a.score)
     .slice(0, limit)
 }
@@ -293,7 +294,7 @@ function createNativeStream(url, headers, body) {
 
 function subscriptionSink(controller, streaming) {
   const encoder = new TextEncoder()
-  const usage = { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 }
+  const usage = { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0, prompt_tokens_details: { cached_tokens: 0 }, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 }
   let text = ''
   let tools = []
   let finish = 'stop'
@@ -316,9 +317,15 @@ function subscriptionSink(controller, streaming) {
     },
     setUsage(value) {
       if (!value) return
-      usage.prompt_tokens = Number(value.prompt_tokens) || 0
-      usage.completion_tokens = Number(value.completion_tokens) || 0
-      usage.total_tokens = Number(value.total_tokens) || usage.prompt_tokens + usage.completion_tokens
+      if (value.prompt_tokens != null) usage.prompt_tokens = Number(value.prompt_tokens) || 0
+      if (value.completion_tokens != null) usage.completion_tokens = Number(value.completion_tokens) || 0
+      if (value.cached_tokens != null) usage.prompt_tokens_details.cached_tokens = Number(value.cached_tokens) || 0
+      if (value.cache_creation_input_tokens != null) usage.cache_creation_input_tokens = Number(value.cache_creation_input_tokens) || 0
+      if (value.cache_read_input_tokens != null) {
+        usage.cache_read_input_tokens = Number(value.cache_read_input_tokens) || 0
+        usage.prompt_tokens_details.cached_tokens = usage.cache_read_input_tokens
+      }
+      usage.total_tokens = value.total_tokens != null ? (Number(value.total_tokens) || 0) : usage.prompt_tokens + usage.completion_tokens
     },
     finish() {
       if (!streaming || !controller) return
@@ -1066,7 +1073,7 @@ export async function localHandle(path, init) {
       const b = await readBody(init)
       const task = makeLocalTask({
         person: b.person, title: b.title, prompt: b.prompt, runAt: b.runAt,
-        recurrence: b.recurrence, conversationId: b.conversationId,
+        recurrence: b.recurrence, intervalMinutes: b.intervalMinutes, conversationId: b.conversationId,
       }, uuid())
       if (!task) return json(400, { error: '请填写任务名称、执行内容和有效执行时间' })
       const all = readJSON(K.tasks, [])
@@ -1134,7 +1141,7 @@ export async function localHandle(path, init) {
       const list = Array.isArray(all) ? all : []
       if (b.action === 'create') {
         const task = makeLocalTask({
-          person, title: b.title, prompt: b.prompt, runAt: b.runAt, recurrence: b.recurrence,
+          person, title: b.title, prompt: b.prompt, runAt: b.runAt, recurrence: b.recurrence, intervalMinutes: b.intervalMinutes,
           createdBy: person, temporary: b.temporary === true, conversationId: b.conversationId,
         }, uuid())
         if (!task) return json(400, { error: '工作流内容或时间无效' })

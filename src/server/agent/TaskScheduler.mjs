@@ -15,6 +15,7 @@
 // starve other due tasks inside one tick.
 import { createAgentRun } from './AgentRunStore.mjs'
 import { isValidAssistantId } from '../identity.mjs'
+import { isScheduledConversationTask } from './scheduledConversation.mjs'
 
 // Boot recovery: re-schedule once-tasks interrupted by a crash/restart. The
 // next tick (within 15s) retries them; their dead run rows are already marked
@@ -41,7 +42,7 @@ function claimDueTask(db, nowIso) {
       if (claimed.changes) return task
     } else {
       const next = new Date(task.run_at)
-      do { next.setTime(next.getTime() + (task.recurrence === 'daily' ? 86400000 : 604800000)) } while (next <= new Date(nowIso))
+      do { next.setTime(next.getTime() + (Number(task.interval_minutes) > 0 ? Number(task.interval_minutes) * 60000 : task.recurrence === 'daily' ? 86400000 : 604800000)) } while (next <= new Date(nowIso))
       const claimed = db.prepare(`UPDATE scheduled_tasks SET last_run_at=?, run_at=?, updated_at=?
         WHERE id=? AND status='scheduled'`).run(nowIso, next.toISOString(), nowIso, task.id)
       if (claimed.changes) return task
@@ -62,7 +63,7 @@ export function createTaskScheduler(ctx) {
     inFlight.add(task.id)
     const run = createAgentRun(db, {
       assistantId: task.person,
-      source: 'scheduled',
+      source: isScheduledConversationTask(task.prompt, task.title) ? 'scheduled_chat' : 'scheduled',
       prompt: task.prompt,
       taskId: task.id,
       // Timer tasks write back into the conversation they were created from;

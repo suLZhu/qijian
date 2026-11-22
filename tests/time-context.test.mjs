@@ -87,7 +87,7 @@ test('非法或空时区回退 Asia/Shanghai', () => {
 
 // --- 纯函数：注入形态与文案 -------------------------------------------------
 
-test('injectTimeContext 追加独立 system 消息，不覆盖原 system、不改动原数组', () => {
+test('injectTimeContext 追加独立 system 消息，保留稳定前缀用于缓存且不改动原数组', () => {
   const original = [
     { role: 'system', content: '【当前扮演角色】你是测试角色。' },
     { role: 'user', content: '你好' },
@@ -97,10 +97,10 @@ test('injectTimeContext 追加独立 system 消息，不覆盖原 system、不�
   const out = injectTimeContext(frozen, new Date('2026-10-26T16:30:00Z'), 'Asia/Shanghai')
   assert.equal(JSON.stringify(original), snapshot) // 原数组未被修改
   assert.equal(out.length, 3)
-  assert.equal(out[0].role, 'system')
-  assert.match(out[0].content, /【当前时间上下文】/)
-  assert.match(out[0].content, /2026-10-27/) // 当前（该时区）日期
-  assert.equal(out[1].content, '【当前扮演角色】你是测试角色。') // 原 system 原样保留
+  assert.equal(out[0].content, '【当前扮演角色】你是测试角色。') // 稳定 system 保持请求前缀，便于 Prompt Cache 命中
+  assert.equal(out[1].role, 'system')
+  assert.match(out[1].content, /【当前时间上下文】/)
+  assert.match(out[1].content, /2026-10-27/) // 当前（该时区）日期
   assert.equal(out[2].content, '你好')
 })
 
@@ -113,7 +113,7 @@ test('injectTimeContext 对空/非数组消息也返回合法数组', () => {
 test('时间上下文文案含星期、时段与「补觉/上夜班以对话为准」，且不含天气/位置数据', () => {
   const text = timeContextText(buildTimeContext(new Date('2026-10-27T01:00:00Z'), 'Asia/Shanghai'))
   assert.match(text, /星期二/)
-  assert.match(text, /时段：上午/)
+  assert.match(text, /当前时间：.*（上午，Asia\/Shanghai UTC\+08:00）/)
   assert.match(text, /24 小时制/)
   assert.match(text, /补觉/)
   assert.match(text, /上夜班/)
@@ -229,9 +229,9 @@ test('相邻两轮请求刷新分钟时间，不把旧时间永久写入会话',
   const messages = [{ role: 'user', content: '现在几点？' }]
   const first = injectTimeContext(messages, new Date('2026-11-16T12:59:00Z'), 'Asia/Shanghai')
   const second = injectTimeContext(messages, new Date('2026-11-16T13:01:00Z'), 'Asia/Shanghai')
-  assert.match(first[0].content, /本地时间：20:59/)
-  assert.match(second[0].content, /本地时间：21:01/)
-  assert.match(second[0].content, /本轮请求时实时生成/)
+  assert.match(first[0].content, /当前时间：2026-11-16 星期一 20:59/)
+  assert.match(second[0].content, /当前时间：2026-11-16 星期一 21:01/)
+  assert.match(second[0].content, /本轮请求实时生成/)
   assert.equal(messages.length, 1)
   assert.doesNotMatch(second[0].content, /天气预报|用户位置|GPS/)
 })

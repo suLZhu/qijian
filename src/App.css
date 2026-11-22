@@ -4251,3 +4251,27 @@ body.has-pack .settings-screen{
 .shell .model-sheet .model-vendor-heading small{color:var(--muted,#888)!important;font-weight:400!important}
 .shell .model-sheet .model-sheet-main{min-width:0!important}
 .shell .model-sheet .model-sheet-pick .model-sheet-main b{white-space:normal;overflow-wrap:anywhere}
+
+/* 设置一级入口：主标题已经足够明确时不再重复解释，条目同步收紧。 */
+.settings-screen .settings-flat-list .settings-row{
+  min-height:46px!important;
+  padding:7px 11px!important;
+  gap:9px!important;
+}
+.settings-screen .settings-flat-list .settings-row-icon{
+  width:30px!important;
+  height:30px!important;
+  flex-basis:30px!important;
+  border-radius:9px!important;
+}
+.settings-screen .settings-flat-list .settings-row-text{
+  justify-content:center!important;
+  gap:0!important;
+}
+.settings-screen .settings-flat-list .settings-row-text b{
+  font-size:12.5px!important;
+  line-height:1.2!important;
+}
+.settings-screen .settings-flat-list .settings-row-text small{
+  display:none!important;
+}

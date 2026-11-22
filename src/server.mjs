@@ -3,6 +3,7 @@ import { randomBytes, createHash, timingSafeEqual, createCipheriv, createDeciphe
 import { isIP } from 'node:net'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
+import { createMcpConnectionPool } from './server/mcpConnectionPool.mjs'
 import { DatabaseSync } from 'node:sqlite'
 import { mkdirSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
@@ -115,6 +116,7 @@ if (!workflowColumns.includes('created_by')) db.exec("ALTER TABLE scheduled_task
 if (!workflowColumns.includes('temporary')) db.exec('ALTER TABLE scheduled_tasks ADD COLUMN temporary INTEGER NOT NULL DEFAULT 0')
 // Timer tasks must write back into the conversation they were created from.
 if (!workflowColumns.includes('conversation_id')) db.exec('ALTER TABLE scheduled_tasks ADD COLUMN conversation_id TEXT')
+if (!workflowColumns.includes('interval_minutes')) db.exec('ALTER TABLE scheduled_tasks ADD COLUMN interval_minutes INTEGER NOT NULL DEFAULT 0')
 migrateDatabase(db)
 
 // 启动滚动备份：见 server/backup.mjs（VACUUM INTO 一致性快照，保留 5 份，
@@ -242,18 +244,32 @@ function validateRemoteUrl(raw) {
   }
   return u
 }
+const mcpConnectionPool = createMcpConnectionPool({
+  createClient: async row => {
+    const saved = (() => {
+      try { return JSON.parse(decryptSecret(row.token_enc)) }
+      catch { return { token: decryptSecret(row.token_enc), headers: {} } }
+    })()
+    const token = typeof saved.token === 'string' ? saved.token : ''
+    const headers = { ...(token ? { Authorization: `Bearer ${token}` } : {}), ...(saved.headers && typeof saved.headers === 'object' ? saved.headers : {}) }
+    const transport = new StreamableHTTPClientTransport(new URL(row.url), { requestInit: { headers, redirect: 'error' } })
+    const client = new Client({ name: 'ai-home', version: '0.1.0' }, { capabilities: {} })
+    try { await client.connect(transport); return { client } }
+    catch (error) { await client.close().catch(() => {}); throw error }
+  },
+})
 async function withMcpClient(row, operation) {
   if (!row || !row.enabled) throw Object.assign(new Error('找不到已启用且绑定当前人物的 MCP 服务'), { status: 404 })
   validateRemoteUrl(row.url)
-  let saved
-  try { saved = JSON.parse(decryptSecret(row.token_enc)) } catch { saved = { token: decryptSecret(row.token_enc), headers: {} } }
-  const token = typeof saved.token === 'string' ? saved.token : ''
-  const headers = { ...(token ? { Authorization: `Bearer ${token}` } : {}), ...(saved.headers && typeof saved.headers === 'object' ? saved.headers : {}) }
-  const transport = new StreamableHTTPClientTransport(new URL(row.url), { requestInit: { headers, redirect: 'error' } })
-  const client = new Client({ name: 'ai-home', version: '0.1.0' }, { capabilities: {} })
-  try { await client.connect(transport); return await operation(client) }
-  finally { await client.close().catch(() => {}) }
+  // 临时测试连接不进入长期池；已保存配置按 id / updated_at 复用。
+  if (!row.id) {
+    const tempId = 'test-' + randomUUID()
+    try { return await mcpConnectionPool.use(tempId, 'test', row, operation) }
+    finally { await mcpConnectionPool.drop(tempId) }
+  }
+  return mcpConnectionPool.use(row.id, row.updated_at, row, operation)
 }
+
 function getClientKey(req) {
   return String(req.headers['cf-connecting-ip'] || req.headers['x-forwarded-for'] || req.socket.remoteAddress || 'unknown').split(',')[0].trim()
 }
@@ -425,13 +441,12 @@ const apiServer = createServer(async (req, res) => {
       const accountId = String(b.accountId || '').trim()
       const headers = {
         Authorization: 'Bearer ' + token,
-        originator: 'qijian',
-        version: '0.159.0',
-        'User-Agent': 'qijian/2.2',
+        originator: 'codex_cli_rs',
+        'User-Agent': 'codex_cli_rs/0.167.1 (Qijian Android)',
         Accept: 'application/json',
       }
       if (accountId) headers['chatgpt-account-id'] = accountId
-      const upstream = await fetch('https://chatgpt.com/backend-api/codex/models?client_version=0.159.0', {
+      const upstream = await fetch('https://chatgpt.com/backend-api/codex/models?client_version=0.167.1', {
         headers, redirect: 'error', signal: AbortSignal.timeout(15000),
       })
       const text = await upstream.text()
@@ -890,6 +905,7 @@ const apiServer = createServer(async (req, res) => {
     const body = await readBody(req).catch(() => ({}))
     if (!isValidAssistantId(body.person)) return send(res, 400, { error: '必须指定人物身份' })
     const result = db.prepare('DELETE FROM mcp_connections WHERE id=? AND person=?').run(mcpMatch[1], body.person)
+    if (result.changes) void mcpConnectionPool.drop(mcpMatch[1])
     return result.changes ? send(res, 200, { ok: true }) : send(res, 404, { error: '未找到该人物绑定的 MCP 服务' })
   }
   if (mcpMatch && req.method === 'PUT' && !mcpMatch[2]) {
@@ -911,6 +927,7 @@ const apiServer = createServer(async (req, res) => {
       } else {
         db.prepare('UPDATE mcp_connections SET name=?, url=?, enabled=?, token_enc=?, updated_at=? WHERE id=? AND person=?').run(name, remote.toString(), enabled, encryptSecret(JSON.stringify({ token, headers: {} })), updatedAt, mcpMatch[1], person)
       }
+      void mcpConnectionPool.drop(mcpMatch[1])
       const next = db.prepare('SELECT * FROM mcp_connections WHERE id=? AND person=?').get(mcpMatch[1], person)
       return send(res, 200, { connection: publicMcp(next) })
     } catch (error) { return send(res, error.status || 400, { error: error.message || '更新 MCP 配置失败' }) }
@@ -923,7 +940,9 @@ const apiServer = createServer(async (req, res) => {
       const row = db.prepare('SELECT * FROM mcp_connections WHERE id=? AND person=?').get(mcpMatch[1], person)
       if (!row) return send(res, 404, { error: '此 MCP 没有绑定到当前人物' })
       if (mcpMatch[2] === 'tools') {
-        const result = await withMcpClient(row, client => client.listTools())
+        if (!row.enabled) return send(res, 404, { error: 'MCP 服务未启用' })
+        validateRemoteUrl(row.url)
+        const result = await mcpConnectionPool.listTools(row.id, row.updated_at, row)
         return send(res, 200, { tools: result.tools.map(t => ({ name: t.name, description: t.description || '', inputSchema: t.inputSchema })) })
       }
       const toolName = String(body.name || '')
@@ -953,11 +972,12 @@ const apiServer = createServer(async (req, res) => {
         const title = String(body.title || '').trim().slice(0, 160)
         const prompt = String(body.prompt || '').trim().slice(0, 12000)
         const runAt = String(body.runAt || '')
-        const recurrence = ['once','daily','weekly'].includes(body.recurrence) ? body.recurrence : 'once'
+        const intervalMinutes = Number(body.intervalMinutes) === 120 ? 120 : 0
+        const recurrence = intervalMinutes ? 'daily' : (['once','daily','weekly'].includes(body.recurrence) ? body.recurrence : 'once')
         if (!title || !prompt || !Number.isFinite(Date.parse(runAt))) return send(res, 400, { error: '工作流内容或时间无效' })
         const id = randomUUID()
         const conversationId = typeof body.conversationId === 'string' && body.conversationId.length <= 120 ? body.conversationId : null
-        db.prepare("INSERT INTO scheduled_tasks (id,person,title,prompt,run_at,recurrence,status,created_at,updated_at,created_by,temporary,conversation_id) VALUES (?,?,?,?,?,?,'scheduled',?,?,?,?,?)").run(id,person,title,prompt,new Date(runAt).toISOString(),recurrence,now,now,person,body.temporary === true ? 1 : 0,conversationId)
+        db.prepare("INSERT INTO scheduled_tasks (id,person,title,prompt,run_at,recurrence,status,created_at,updated_at,created_by,temporary,conversation_id,interval_minutes) VALUES (?,?,?,?,?,?,'scheduled',?,?,?,?,?,?)").run(id,person,title,prompt,new Date(runAt).toISOString(),recurrence,now,now,person,body.temporary === true ? 1 : 0,conversationId,intervalMinutes)
         return send(res, 201, { task: db.prepare('SELECT * FROM scheduled_tasks WHERE id=?').get(id) })
       }
       if (!['pause','resume','delete'].includes(action)) return send(res, 400, { error: '不支持的操作' })
@@ -989,11 +1009,12 @@ const apiServer = createServer(async (req, res) => {
       const title = String(body.title || '').trim().slice(0, 160)
       const prompt = String(body.prompt || '').trim().slice(0, 12000)
       const runAt = String(body.runAt || '')
-      const recurrence = ['once','daily','weekly'].includes(body.recurrence) ? body.recurrence : 'once'
+      const intervalMinutes = Number(body.intervalMinutes) === 120 ? 120 : 0
+        const recurrence = intervalMinutes ? 'daily' : (['once','daily','weekly'].includes(body.recurrence) ? body.recurrence : 'once')
       if (!title || !prompt || !runAt || !Number.isFinite(Date.parse(runAt))) return send(res, 400, { error: '请填写任务名称、执行内容和有效执行时间' })
       const now = new Date().toISOString(), id = randomUUID()
       const conversationId = typeof body.conversationId === 'string' && body.conversationId.length <= 120 ? body.conversationId : null
-      db.prepare("INSERT INTO scheduled_tasks (id,person,title,prompt,run_at,recurrence,status,created_at,updated_at,conversation_id) VALUES (?,?,?,?,?,?,'scheduled',?,?,?)").run(id,person,title,prompt,new Date(runAt).toISOString(),recurrence,now,now,conversationId)
+      db.prepare("INSERT INTO scheduled_tasks (id,person,title,prompt,run_at,recurrence,status,created_at,updated_at,conversation_id,interval_minutes) VALUES (?,?,?,?,?,?,'scheduled',?,?,?,?)").run(id,person,title,prompt,new Date(runAt).toISOString(),recurrence,now,now,conversationId,intervalMinutes)
       return send(res, 201, { task: db.prepare('SELECT * FROM scheduled_tasks WHERE id=?').get(id) })
     } catch (error) { return send(res, error.status || 400, { error: error.message || '创建任务失败' }) }
   }
@@ -1244,7 +1265,7 @@ const apiServer = createServer(async (req, res) => {
     const results = searchMemoryIndex(db, { person, query, exclude, limit: 5 })
     // 向量结果作为附加通道返回，不改变原有 results 结构（旧客户端不受影响）。
     let vectorResults = []
-    const vectorConfig = memoryVectorConfig(person)
+    const vectorConfig = url.searchParams.get('vectors') === '0' ? null : memoryVectorConfig(person)
     if (vectorConfig) {
       try {
         const [queryVector] = await embedTexts(vectorConfig, [query])
@@ -1343,7 +1364,7 @@ const apiServer = createServer(async (req, res) => {
       db.exec('BEGIN IMMEDIATE')
       try {
         db.prepare('INSERT INTO app_state (id,payload,updated_at) VALUES (1,?,?) ON CONFLICT(id) DO UPDATE SET payload=excluded.payload, updated_at=excluded.updated_at').run(payload, updatedAt)
-        rebuildMemoryIndex(db, body.state)
+        rebuildMemoryIndex(db, JSON.parse(payload))
         db.exec('COMMIT')
       } catch (error) { db.exec('ROLLBACK'); throw error }
       return send(res, 200, { ok: true, updatedAt })

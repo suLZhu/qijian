@@ -47,7 +47,7 @@ test('协议白名单', () => {
 
 test('Anthropic 请求：system 独立、工具转 input_schema、工具结果转 tool_result', () => {
   const req = toAnthropicRequest(chatBody)
-  assert.equal(req.system, '你是未晞')
+  assert.deepEqual(req.system, [{ type: 'text', text: '你是未晞', cache_control: { type: 'ephemeral' } }])
   assert.equal(req.max_tokens, 8192)
   assert.equal(req.stream, true)
   assert.equal(req.messages.length, 3)
