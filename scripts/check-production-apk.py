@@ -13,3 +13,8 @@ with ZipFile(sys.argv[1]) as apk:
         content = apk.read(name)
         if any(marker.encode() in content for marker in ("qj-preview-label", "UI 原型 · 虚拟内容", "页面布局测试版 · 仅演示")):
             raise SystemExit(f"Layout prototype detected in {name}")
+
+    bundle = b"".join(apk.read(name) for name in scripts)
+    for marker in (b"qj-drawer-layer", b"qj-compose-input", b"qj-section-head", b"qj-room-hero"):
+        if marker not in bundle:
+            raise SystemExit(f"Production APK is missing a November 21 layout component: {marker!r}")

@@ -1,6 +1,6 @@
 /* Production layout, using the real page components and their theme tokens. */
 .production-layout {
-  --primary-nav-height: 66px;
+  --primary-nav-height: 59px;
   --layout-line: var(--line, #e7e9e4);
   --layout-surface: var(--surface, #fff);
   --layout-muted: var(--muted, #777e75);
@@ -8,90 +8,23 @@
 .production-layout.with-primary-navigation > .screen {
   padding-bottom: calc(var(--primary-nav-height) + var(--app-safe-bottom) + 16px) !important;
 }
-.primary-navigation {
+.production-layout > .qj-bottom {
   position: fixed;
   inset: auto var(--app-safe-right) 0 var(--app-safe-left);
   z-index: 24;
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 8px;
-  min-height: calc(var(--primary-nav-height) + var(--app-safe-bottom));
-  padding: 4px 14px calc(6px + var(--app-safe-bottom));
+  height: calc(var(--primary-nav-height) + var(--app-safe-bottom));
+  padding-bottom: calc(4px + var(--app-safe-bottom));
   box-sizing: border-box;
-  background: var(--layout-surface);
-  border-top: 1px solid var(--layout-line);
 }
-.primary-navigation button {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 2px;
-  min-width: 48px;
-  min-height: 48px;
-  border: 0;
-  border-radius: 12px;
-  color: var(--layout-muted);
-  background: transparent;
-  font-size: 12px;
-}
-.primary-navigation button[aria-current="page"] {
-  color: var(--ink, #40553f);
-  background: var(--accent-soft, #edf2ea);
-}
-.production-layout .production-settings-hub {
-  padding: 14px 4px 24px;
-}
-.production-settings-hub > header {
-  padding: 4px 4px 14px;
-}
-.production-settings-hub h3 {
-  margin: 0 0 5px;
-  font-size: 20px;
-}
-.production-settings-hub p {
-  margin: 0;
-  color: var(--layout-muted);
-}
-.production-layout .production-row-group {
-  border: 1px solid var(--layout-line);
-  border-radius: 17px;
-  background: var(--layout-surface);
-  overflow: hidden;
-}
-.production-layout .production-row-group .settings-row {
-  width: 100%;
-  min-height: 68px !important;
-  justify-content: space-between;
-  text-align: start;
-  padding: 12px 16px !important;
-  border-radius: 0 !important;
-}
-.production-layout .production-row-group .settings-row:last-child {
-  border-bottom: 0 !important;
-}
-.production-layout .production-row-group .settings-row small {
-  display: block;
-  color: var(--layout-muted);
-}
-.production-layout .home-status-list {
-  display: grid;
-  gap: 10px;
-}
-.production-layout .home-status-list .home-status {
-  min-height: 96px;
-  padding: 12px 14px !important;
-  border: 1px solid var(--layout-line) !important;
-  border-radius: 17px !important;
-  background: var(--layout-surface) !important;
-}
-.production-layout .home-today-card,
-.production-layout .production-room-card {
-  border: 1px solid var(--layout-line);
-  border-radius: 17px;
-  overflow: hidden;
-}
-.production-layout .production-room-card .room-header {
+.production-layout .qj-bottom button { min-height: 48px }
+.production-layout > .qj-topbar { margin-top: var(--app-safe-top) }
+.production-layout .qj-drawer-layer { position: fixed; z-index: 50 }
+.production-layout .qj-drawer { overflow-y: auto; padding-top: calc(16px + var(--app-safe-top)); padding-bottom: calc(16px + var(--app-safe-bottom)) }
+.production-layout .qj-composer { position: relative; box-sizing: border-box }
+.qj-composer-field { flex: 1; min-width: 0 }
+.qj-compose-input { display: block; width: 100%; box-sizing: border-box; resize: none; border-radius: 18px; border: 1px solid var(--layout-line); padding: 9px 12px; color: inherit; background: var(--layout-surface); font: inherit }
+.production-layout .qj-composer > button { min-width: 48px; min-height: 48px }
+.production-layout .qj-room-hero .room-header {
   padding: 14px;
 }
 .production-section-title {

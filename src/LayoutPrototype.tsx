@@ -1,6 +1,6 @@
 import { useLayoutEffect, useRef, useState } from 'react'
 import './LayoutPrototype.css'
-import { settingItems } from './layout/sections'
+import { SettingsIndex, BottomNav } from './layout/PageChrome'
 import { SubscriptionPreview, UsageLedgerPreview } from './ProviderUsagePreview'
 import { RealProviderPreview } from './RealProviderPreview'
 import { SettingsSectionsPreview } from './SettingsSectionsPreview'
@@ -114,9 +114,7 @@ export default function LayoutPrototype() {
             section === '房间与助手' ? <RoomAssistantPreview /> :
             <SettingsSectionsPreview section={section} onTheme={() => go('theme')} />}
         </> : <>
-          <div className="qj-section-head"><h2>设置中心</h2><p>常用功能在前，其他功能集中管理。</p></div>
-          <div className="qj-row-group">{settingItems.map(([name, desc]) => <button key={name} className="qj-row" onClick={() => openSection(name)}>
-            <span>{name}</span><small>{desc}</small><i>›</i></button>)}</div>
+          <SettingsIndex open={openSection}/>
         </>}
       </div>}
       {view === 'theme' && <div className="qj-page">
@@ -130,11 +128,7 @@ export default function LayoutPrototype() {
       </div>}
     </main>
     {view === 'chat' && <div className="qj-composer"><button className="qj-icon" aria-label="添加附件" onClick={() => setToolsOpen(v=>!v)}>＋</button><div className="qj-compose-placeholder">输入消息…（仅预览）</div><button className="qj-send" aria-label="发送，仅预览">➤</button></div>}
-    <nav className="qj-bottom" aria-label="主要导航">
-      <button className={view === 'home'||view === 'chat'?'active':''} onClick={() => go('home')}><span>▤</span>主页</button>
-      <button className={view === 'room'?'active':''} onClick={() => go('room')}><span>⌂</span>房间</button>
-      <button className={view === 'settings'||view==='theme'?'active':''} onClick={() => go('settings')}><span>⚙</span>设置</button>
-    </nav>
+    <BottomNav current={view==='room'?'room':view==='settings'||view==='theme'?'settings':'home'} go={go}/>
     {toolsOpen && <div className="qj-tool-tray"><strong>聊天工具（占位）</strong><p>以后在这里添加图片、附件和网页功能；不改变聊天页面框架。</p><button onClick={() => setToolsOpen(false)}>收起</button></div>}
     {drawer && <div className="qj-drawer-layer"><button className="qj-scrim" aria-label="关闭菜单" onClick={() => setDrawer(false)} /><aside className="qj-drawer">
       <div className="qj-drawer-title"><b>栖间</b><button className="qj-icon" aria-label="关闭侧边栏" onClick={()=>setDrawer(false)}>×</button></div>
