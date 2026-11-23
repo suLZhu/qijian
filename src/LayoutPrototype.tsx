@@ -30,13 +30,13 @@ export default function LayoutPrototype() {
   const people = data.assistants.map(a=>a.id)
   const [person, setPerson] = useState<Person>(()=>readAssistantState().assistants[0]?.id || LEGACY_ASSISTANTS[0].id)
   const displayName = (id:string)=>data.assistants.find(a=>a.id===id)?.name || id
-  const availableConversations = data.conversations[person] || []
-  const activeConversation = availableConversations.find(c=>c.title===conversation) || availableConversations.find(c=>c.id===data.activeIds[person]) || availableConversations[0]
-  const actualMessages = activeConversation?.messages || []
   const [drawer, setDrawer] = useState(false)
   const [section, setSection] = useState<string | null>(null)
   const [toolsOpen, setToolsOpen] = useState(false)
   const [conversation, setConversation] = useState('')
+  const availableConversations = data.conversations[person] || []
+  const activeConversation = availableConversations.find(c=>c.id===conversation) || availableConversations.find(c=>c.id===data.activeIds[person]) || availableConversations[0]
+  const actualMessages = stored<Record<string,Array<{role:string;content:string}>>>('ai-home.messages', {})[activeConversation?.id || ''] || []
   const [theme, setTheme] = useState('银杏奶灰')
   const mainRef = useRef<HTMLElement>(null)
   const settingsScrollRef = useRef(0)
@@ -74,8 +74,8 @@ export default function LayoutPrototype() {
          if (section) setSection(null)
          else if (view === 'theme') go('settings')
          else go('home')
-       }}>‹</button>}
-      {view === 'chat' ? <button className="qj-chat-identity" aria-label="查看当前助手详情" onClick={() => go('profile')}><span className="qj-avatar">{person.slice(0,1)}</span><span className="qj-top-title"><strong>{title}</strong><small>{conversation}</small></span></button> : <div className="qj-top-title"><strong>{title}</strong><small>页面布局测试版 · 仅演示</small></div>}
+       }}><svg aria-hidden="true" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="m15 18-6-6 6-6"/></svg></button>}
+      {view === 'chat' ? <button className="qj-chat-identity" aria-label="查看当前助手详情" onClick={() => go('profile')}><span className="qj-avatar">{person.slice(0,1)}</span><span className="qj-top-title"><strong>{title}</strong><small>{conversation}</small></span></button> : <div className="qj-top-title"><strong>{title}</strong></div>}
       {view === 'chat' && <div className="qj-chat-switch" aria-label="快速切换聊天助手">
         {people.map(p => <button key={p} className={p === person ? 'selected' : ''} onClick={() => setPerson(p)} aria-pressed={p === person}>{displayName(p)}</button>)}
       </div>}
@@ -153,13 +153,13 @@ export default function LayoutPrototype() {
     {drawer && <div className="qj-drawer-layer"><button className="qj-scrim" aria-label="关闭菜单" onClick={() => setDrawer(false)} /><aside className="qj-drawer">
       <div className="qj-drawer-title"><b>栖间</b><button className="qj-icon" aria-label="关闭侧边栏" onClick={()=>setDrawer(false)}>×</button></div>
       <h3 className="qj-label">我的助手</h3>
-      {people.map(p => <button className={'qj-assistant '+(p === person?'selected':'')} key={p} onClick={()=>{setPerson(p);setConversation('今天的聊天');setDrawer(false);setView('chat')}}><span className="qj-avatar">{displayName(p).slice(0,1)}</span><span>{displayName(p)}</span><small>›</small></button>)}
+      {people.map(p => <button className={'qj-assistant '+(p === person?'selected':'')} key={p} onClick={()=>{setPerson(p);setConversation('');setDrawer(false);setView('chat')}}><span className="qj-avatar">{displayName(p).slice(0,1)}</span><span>{displayName(p)}</span><small>›</small></button>)}
       <h3 className="qj-label">当前会话</h3>
-      {availableConversations.map(item => { const c=item.title; return <button className={'qj-drawer-conv '+(conversation===c?'selected':'')} key={c} onClick={()=>{setConversation(c);setView('chat');setDrawer(false)}}>{c}</button>})}
+      {availableConversations.map(item => { const c=item.title; return <button className={'qj-drawer-conv '+(activeConversation?.id===item.id?'selected':'')} key={c} onClick={()=>{setConversation(item.id);setView('chat');setDrawer(false)}}>{c}</button>})}
       <button className="qj-new" onClick={()=>{setConversation('新会话');setView('chat');setDrawer(false)}}>＋ 新建会话</button>
       <div className="qj-drawer-spacer" />
       <button className="qj-drawer-settings" onClick={()=>go('settings')}>⚙　设置</button>
     </aside></div>}
-    <div className="qj-preview-label">UI 原型 · 虚拟内容 · 不连接任何账号或数据</div>
+    
   </div>
 }
