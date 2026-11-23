@@ -71,7 +71,7 @@ body.has-pack .shell::before{display:none!important}
   padding-right:0!important;
 }
 .shell .fullscreen-chat{
-  min-height:100dvh!important;
+  min-height:0;
   background:#fff!important;
 }
 

@@ -68,7 +68,7 @@ try {
   }
   await clickText('.qj-home-person-info b','验收助手甲')
   await page.waitForSelector('[data-message-id="fixture-message"]')
-  await clickText('.production-assistant-switch button','验收助手乙')
+  await clickText('.qj-chat-switch button','验收助手乙')
   await page.waitForSelector('[data-message-id="second-message"]')
   assert.equal(await page.$('[data-message-id="fixture-message"]'),null)
   await page.click('.qj-composer [aria-label="更多"]')

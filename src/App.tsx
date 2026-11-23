@@ -685,11 +685,7 @@ export default function App() {
   useEffect(()=>{ const on=()=>{const id=getActivePackId();setActivePack([...BUILTIN_THEME_PACKS,...loadThemePacks()].find(p=>p.id===id)||null)}; window.addEventListener('aihome:theme-pack',on); return ()=>window.removeEventListener('aihome:theme-pack',on) },[])
   useEffect(()=>{
     if(!sidebarOpen)return
-    const inside=(target:EventTarget|null)=>target instanceof Element&&!!target.closest('.app-sidebar,.sidebar-edge-handle')
-    const onDown=(e:PointerEvent)=>{if(!inside(e.target))setSidebarOpen(false)}
-    document.addEventListener('pointerdown',onDown)
-  const unregister=pushBackHandler(()=>{setSidebarOpen(false);return true})
-    return ()=>{document.removeEventListener('pointerdown',onDown);unregister()}
+    return pushBackHandler(()=>{setSidebarOpen(false);return true})
   },[sidebarOpen])
   // 工具/设置之间的返回：从设置页打开的工具，关闭后回到设置；其余回到房间。
   // 注意：这两个 effect 必须留在 App 顶层，不能写进上面的抽屉 effect 里（会触发 Invalid hook call）。
@@ -3785,7 +3781,16 @@ function Chat(p: any) {
     </div>
   }
   return <div className="fullscreen-chat">
-    <header className="chat-header chat-header-simple"><IconButton icon={IconMenu} label="打开侧边栏" className="qj-icon" touch onClick={p.onMenu}/><span className="chat-header-title qj-chat-identity"><button type="button" className="chat-avatar avatar-link" title="打开助手档案与用户设置" aria-label="打开助手档案" onClick={()=>p.openAssistantProfile(true)}>{personAvatar?<img src={personAvatar} alt=""/>:<img src={DEFAULT_AVATAR} alt=""/>}</button><span className="qj-top-title"><strong>{p.displayName(p.person)}</strong><small>{summaryConversation?.title}</small></span></span><span className="chat-header-actions"><span className="production-assistant-switch qj-chat-switch" role="group" aria-label="切换助手">{p.assistants.map(({id}:AssistantRecord)=><button type="button" key={id} aria-pressed={p.person===id} onClick={()=>{p.setPerson(id);p.setChatError('')}}>{p.displayName(id)}</button>)}</span><IconButton icon={IconPlus} label="新对话" className="btn-icon" iconSize="var(--ui-icon-action)" touch onClick={createConversation}/></span></header>
+    <header className="qj-topbar">
+      <IconButton icon={IconMenu} label="打开侧边栏" className="qj-icon" touch onClick={p.onMenu}/>
+      <button type="button" className="qj-chat-identity" aria-label="打开助手档案" onClick={()=>p.openAssistantProfile(true)}>
+        <span className="qj-avatar"><img src={personAvatar||DEFAULT_AVATAR} alt=""/></span>
+        <span className="qj-top-title"><strong>{p.displayName(p.person)}</strong><small>{summaryConversation?.title}</small></span>
+      </button>
+      <div className="qj-chat-switch" role="group" aria-label="切换助手">{p.assistants.map(({id}:AssistantRecord)=>
+        <button type="button" key={id} className={p.person===id?'selected':''} aria-pressed={p.person===id} onClick={()=>{p.setPerson(id);p.setChatError('')}}>{p.displayName(id)}</button>
+      )}</div>
+    </header>
     {searchOpen&&<div className="chat-search"><input autoFocus value={searchQuery} onChange={e=>{setSearchQuery(e.target.value);setSearchActiveIdx(-1)}} onKeyDown={e=>{if(e.key==='Enter'){e.preventDefault();stepMatch(1)}if(e.key==='Escape'){closeSearch()}}} placeholder="搜索当前会话的聊天记录……" aria-label="搜索当前会话的聊天记录"/>{searchQuery.trim()&&<span className="chat-search-count" aria-live="polite">{searchActiveIdx>=0?`${searchActiveIdx+1}/${searchResult.total}`:`共 ${searchResult.total} 条`}</span>}<button type="button" aria-label="上一条匹配" title="上一条匹配" disabled={!searchResult.items.length} onClick={()=>stepMatch(-1)}><IconArrowUp size={15}/></button><button type="button" aria-label="下一条匹配" title="下一条匹配（Enter 同效）" disabled={!searchResult.items.length} onClick={()=>stepMatch(1)}><IconArrowDown size={15}/></button>{searchQuery.trim()&&<button type="button" onClick={()=>setSearchQuery('')}>清除</button>}</div>}
     {searchOpen&&searchQuery.trim()&&<div className="chat-search-results" role="list">{searchResult.items.length?searchResult.items.map((x:any,i:number)=><button type="button" role="listitem" className={i===searchActiveIdx?'current':''} key={(x.messageId||'idx-'+x.index)+'-'+i} onClick={()=>{setSearchActiveIdx(i);if(x.messageId)scrollToMatch(x.messageId)}}><b>{x.role==='user'?'你':'助手'} · 第 {x.index+1} 条{x.count>1?` · ${x.count} 处匹配`:''}</b><span>{x.snippet}</span></button>):<p>没有找到匹配的消息。</p>}{searchResult.total>searchResult.items.length&&<p className="chat-search-overflow">仅显示前 {searchResult.items.length} 条，共 {searchResult.total} 条匹配。</p>}</div>}
     {/* 会话切换已收进顶栏下拉，这里不再铺头像卡片。 */}
@@ -3868,6 +3873,7 @@ function Chat(p: any) {
       {toolHint&&<div className="compose-tool-hint" role="status">{toolHint}</div>}
       {plusOpen&&<div className="compose-plus-panel" role="dialog" aria-label="更多功能">
         <div className="cp-grid">
+        <button type="button" className="cp-item" onClick={()=>{setPlusOpen(false);createConversation()}}>新对话</button>
         <button type="button" className="compose-model-select" onClick={()=>{setPlusOpen(false);setEmojiOpen(false);openTray('model')}} onPointerDown={keepComposerFocus} aria-label="选择模型"><IconSparkles className="ui-icon-inline" size={14}/> {(()=>{const fixedId=fixedRouteId(p.routeState,chatPerson);const route=p.routeState.routes.find((r:any)=>r.id===fixedId);if(route){const vendor=p.vendors?.find((v:Vendor)=>v.id===route.vendorId);return `${vendor?.name||route.label||'独立线路'} · ${route.model}`}const profile=p.modelProfiles?.find((m:ModelProfile)=>m.id===quickBinding.modelProfileId)||p.modelProfiles?.find((m:ModelProfile)=>m.id===p.defaultModelId);if(!profile)return '选择模型';const vendor=p.vendors?.find((v:Vendor)=>v.id===profile.vendorId);return `${vendor?.name||profile.vendor||'未命名来源'} · ${profile.name||profile.model}`})()} <span><IconChevronDown size={13}/></span></button>
         <button type="button" className={'cw-circle'+(emojiOpen?' active':'')} onPointerDown={keepComposerFocus} aria-label="表情包" onClick={()=>{setTray('');setAttachOpen(false);setPlusOpen(false);setEmojiTab('emoji');setEmojiOpen(v=>!v)}}><IconEmoji size={17}/></button>
         <IconButton icon={IconMic} label="语音输入" className="cw-circle" iconSize={17} onClick={()=>showToolHint('语音输入待接入')}/>
