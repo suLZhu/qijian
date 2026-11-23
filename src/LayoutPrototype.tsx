@@ -13,7 +13,24 @@ import { RoomAssistantPreview } from './RoomAssistantPreview'
 type View = 'home' | 'chat' | 'room' | 'settings' | 'theme' | 'profile'
 type Person = string
 type AssistantView = { id: string; name: string }
-type ConversationView = { id: string; title: string; messages: Array<{role:string;content:string}>; updatedAt?:string }
+type MessageView = { role:string; content:string; id?:string; reasoning?:string }
+type ConversationView = { id: string; title: string; messages: MessageView[]; updatedAt?:string }
+type LayoutPrototypeProps = {
+  assistants?: AssistantView[]
+  conversations?: Record<string,ConversationView[]>
+  activeIds?: Record<string,string>
+  person?: string
+  messages?: MessageView[]
+  draft?: string
+  sending?: boolean
+  chatError?: string
+  onPersonChange?: (id:string)=>void
+  onConversationChange?: (id:string)=>void
+  onCreateConversation?: ()=>void
+  onDeleteConversation?: (id:string)=>void|Promise<void>
+  onDraftChange?: (value:string)=>void
+  onSend?: (text:string)=>void|Promise<unknown>
+}
 function stored<T>(key:string, fallback:T):T { try { return JSON.parse(localStorage.getItem(key) || '') as T } catch { return fallback } }
 function readAssistantState() {
   migrateLocalStorage()
@@ -24,11 +41,14 @@ function readAssistantState() {
 }
 
 
-export default function LayoutPrototype() {
+export default function LayoutPrototype(props:LayoutPrototypeProps = {}) {
   const [view, setView] = useState<View>('home')
-  const [data] = useState(readAssistantState)
+  const [storedData] = useState(readAssistantState)
+  const data = { assistants: props.assistants || storedData.assistants, conversations: props.conversations || storedData.conversations, activeIds: props.activeIds || storedData.activeIds }
   const people = data.assistants.map(a=>a.id)
-  const [person, setPerson] = useState<Person>(()=>readAssistantState().assistants[0]?.id || LEGACY_ASSISTANTS[0].id)
+  const [localPerson, setLocalPerson] = useState<Person>(()=>readAssistantState().assistants[0]?.id || LEGACY_ASSISTANTS[0].id)
+  const person = props.person || localPerson
+  const setPerson = (id:string) => { if(props.onPersonChange) props.onPersonChange(id); else setLocalPerson(id) }
   const displayName = (id:string)=>data.assistants.find(a=>a.id===id)?.name || id
   const [drawer, setDrawer] = useState(false)
   const [section, setSection] = useState<string | null>(null)
@@ -36,7 +56,9 @@ export default function LayoutPrototype() {
   const [conversation, setConversation] = useState('')
   const availableConversations = data.conversations[person] || []
   const activeConversation = availableConversations.find(c=>c.id===conversation) || availableConversations.find(c=>c.id===data.activeIds[person]) || availableConversations[0]
-  const actualMessages = stored<Record<string,Array<{role:string;content:string}>>>('ai-home.messages', {})[activeConversation?.id || ''] || []
+  const actualMessages = props.messages || activeConversation?.messages || stored<Record<string,MessageView[]>>('ai-home.messages', {})[activeConversation?.id || ''] || []
+  const draft = props.draft ?? ''
+  const submit = async () => { const text=draft.trim(); if(!text || props.sending || !props.onSend)return; await props.onSend(text) }
   const [theme, setTheme] = useState('银杏奶灰')
   const mainRef = useRef<HTMLElement>(null)
   const settingsScrollRef = useRef(0)
@@ -143,7 +165,8 @@ export default function LayoutPrototype() {
         <div className="qj-row-group"><button className="qj-row" onClick={() => go('room')}><span>进入房间</span><i>›</i></button><button className="qj-row" onClick={() => {go('settings');setSection('房间与助手')}}><span>专属设置</span><i>›</i></button></div>
       </div>}
     </main>
-    {view === 'chat' && <div className="qj-composer"><button className="qj-icon" aria-label="添加附件" onClick={() => setToolsOpen(v=>!v)}>＋</button><div className="qj-compose-placeholder">输入消息…（仅预览）</div><button className="qj-send" aria-label="发送，仅预览">➤</button></div>}
+    {view === 'chat' && <div className="qj-composer"><button className="qj-icon" aria-label="添加附件" onClick={() => setToolsOpen(v=>!v)}>＋</button><textarea className="qj-compose-input" value={draft} onChange={e=>props.onDraftChange?.(e.target.value)} onKeyDown={e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();void submit()}}} placeholder="输入消息…" rows={1}/><button className="qj-send" aria-label="发送" disabled={!draft.trim()||props.sending} onClick={()=>void submit()}>{props.sending?'…':'➤'}</button></div>}
+    {view === 'chat' && props.chatError && <div className="qj-chat-error" role="status">{props.chatError}</div>}
     <nav className="qj-bottom" aria-label="主要导航">
       <button className={view === 'home'||view === 'chat'?'active':''} onClick={() => go('home')}><span>▤</span>主页</button>
       <button className={view === 'room'?'active':''} onClick={() => go('room')}><span>⌂</span>房间</button>
@@ -155,8 +178,8 @@ export default function LayoutPrototype() {
       <h3 className="qj-label">我的助手</h3>
       {people.map(p => <button className={'qj-assistant '+(p === person?'selected':'')} key={p} onClick={()=>{setPerson(p);setConversation('');setDrawer(false);setView('chat')}}><span className="qj-avatar">{displayName(p).slice(0,1)}</span><span>{displayName(p)}</span><small>›</small></button>)}
       <h3 className="qj-label">当前会话</h3>
-      {availableConversations.map(item => { const c=item.title; return <button className={'qj-drawer-conv '+(activeConversation?.id===item.id?'selected':'')} key={c} onClick={()=>{setConversation(item.id);setView('chat');setDrawer(false)}}>{c}</button>})}
-      <button className="qj-new" onClick={()=>{setConversation('新会话');setView('chat');setDrawer(false)}}>＋ 新建会话</button>
+      {availableConversations.map(item => { const c=item.title; return <button className={'qj-drawer-conv '+(activeConversation?.id===item.id?'selected':'')} key={c} onClick={()=>{setConversation(item.id);props.onConversationChange?.(item.id);setView('chat');setDrawer(false)}}>{c}</button>})}
+      <button className="qj-new" onClick={()=>{props.onCreateConversation?.();setConversation('');setView('chat');setDrawer(false)}}>＋ 新建会话</button>
       <div className="qj-drawer-spacer" />
       <button className="qj-drawer-settings" onClick={()=>go('settings')}>⚙　设置</button>
     </aside></div>}

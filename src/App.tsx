@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState, useRef, type FormEvent, type ChangeEvent } from 'react'
 import './App.css'
+import LayoutPrototype from './LayoutPrototype'
 import { Ledger } from './Ledger'
 import { Diary } from './Diary'
 import { ThemeSettings } from './ThemeSettings'
@@ -2176,6 +2177,20 @@ export default function App() {
     setChatError('')
     setDrawerRenameId(null)
   }
+  function prototypeSelectPerson(id:string){
+    const target=id as Person
+    if(target===person)return
+    drawerWriteBack()
+    const targetId=activeConversationIds[target]||conversations[target]?.[0]?.id||''
+    const targetConv=(conversations[target]||[]).find(c=>c.id===targetId)
+    setPerson(target)
+    setMessages(old=>({...old,[target]:targetConv?.messages||[]}))
+    setChatError('')
+  }
+  function prototypeSend(text:string){
+    setDraft('')
+    return send(text).then(result=>{ if(result!=='ok') setDraft(text); return result })
+  }
   // 聊天页没有「← 房间」按钮：从抽屉底部或系统返回手势回房间。
   const drawerBackToRoom=()=>{setSidebarOpen(false);setChatOpen(false);setActiveTool('')}
   const beautifyClass=BEAUTIFY_PACKS.find(p=>p.id===beautifyPack)?.cssClass||''
@@ -2201,6 +2216,24 @@ export default function App() {
     '--wallpaper','--wallpaper-opacity','--theme-font-family',
   ])
   const shellVars = activePack ? Object.fromEntries(Object.entries(themeVars).filter(([k]) => !packColorKeys.has(k))) : themeVars
+  const useApprovedLayout = true
+  if(useApprovedLayout) return <LayoutPrototype
+    assistants={assistants.map(a=>({id:a.id,name:a.name}))}
+    conversations={conversations}
+    activeIds={activeConversationIds}
+    person={person}
+    messages={messages[person]||[]}
+    draft={draft}
+    sending={sending}
+    chatError={chatError}
+    onPersonChange={prototypeSelectPerson}
+    onConversationChange={drawerSwitch}
+    onCreateConversation={drawerCreate}
+    onDeleteConversation={drawerDelete}
+    onDraftChange={v=>setDraft(v)}
+    onSend={prototypeSend}
+  />
+
   return <main className={"shell theme-"+themePrefs.theme+" bubble-"+bubbleClass+" chatbg-"+bgClass+chatViewportLock+(beautifyClass?' '+beautifyClass:'')} style={{...shellVars,...(nativeTextZoomAvailable()?{'--font-scale':'1'}:{}),...(bgUrl?{'--chat-bg-image':'url("'+bgUrl+')'}:{}),...(bgClass==='image'?{'--chat-bg-opacity':String((themePrefs.chatBgOpacity??100)/100)}:{}),...(bubbleUrl?{'--bubble-image':'url("'+bubbleUrl+')'}:{})} as any}>
     {/* 全面屏：百宝箱与历史聊天都收进左侧抽屉，默认只露一条贴边细把手，点一下才滑出。 */}
     {/* 全面屏：主页显示完整「菜单」胶囊；进入房间/会话等页面自动收成贴边细把手，点一下才滑出。 */}
