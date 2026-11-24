@@ -77,3 +77,50 @@ test('图标支持 data:image，并限制在 400KB 内', () => {
   const huge = 'data:image/png;base64,' + 'A'.repeat(400001)
   assert.equal(normalizeThemePack({ ...valid, icons: { chat: huge } }).icons, undefined)
 })
+
+test('v2 主题独立保存两个背景、发送图标和手账装饰', () => {
+  const storage = mem()
+  const image = 'data:image/png;base64,AAAA'
+  const first = normalizeThemePack({
+    ...valid,
+    version: 2,
+    background: { color: '#fffdf8', opacity: 0 },
+    chatBackground: { image, opacity: 0.6 },
+    icons: { send: image, unknown: image },
+    appearance: {
+      button: { radius: 24, stroke: 'dashed' },
+      card: { radius: 8, material: 'paper', rotation: -3, decoration: 'tape' },
+      motion: { press: 'compress', duration: 120 },
+    },
+  })
+  upsertThemePack(first, storage)
+  const [pack] = loadThemePacks(storage)
+  assert.deepEqual(pack, first)
+  assert.deepEqual(pack.icons, { send: image })
+  const vars = packCssVars(pack)
+  assert.equal(vars['--wallpaper'], '#fffdf8')
+  assert.equal(vars['--wallpaper-opacity'], '0')
+  assert.equal(vars['--pack-chat-bg'], `url(${image})`)
+  assert.equal(vars['--pack-bg-opacity'], '0.6')
+  assert.equal(vars['--pack-bubble-radius'], '18px')
+  assert.equal(vars['--pack-button-radius'], '24px')
+  assert.equal(vars['--pack-card-rotation'], '-3deg')
+  assert.equal(vars['--pack-card-decoration'], 'tape')
+  assert.equal(vars['--pack-motion-duration'], '120ms')
+})
+
+test('v2 手账参数限制在支持的范围，旧包继续使用同一张背景', () => {
+  const pack = normalizeThemePack({
+    ...valid,
+    version: 2,
+    chatBackground: { image: 'https://example.invalid/remote.png' },
+    appearance: { card: { rotation: 90, material: 'custom' }, motion: { duration: -1 } },
+  })
+  assert.equal(pack.chatBackground.image, undefined)
+  assert.deepEqual(pack.appearance, { card: { rotation: 6 }, motion: { duration: 0 } })
+  const legacy = normalizeThemePack(valid)
+  assert.equal(legacy.version, 1)
+  const vars = packCssVars(legacy)
+  assert.equal(vars['--wallpaper'], vars['--pack-chat-bg'])
+  assert.throws(() => normalizeThemePack({ ...valid, version: 3 }), /版本/)
+})

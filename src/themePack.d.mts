@@ -1,3 +1,6 @@
+type ThemeBackground = { image?: string; color?: string; opacity?: number }
+type ThemeStroke = 'none' | 'solid' | 'dashed' | 'double'
+
 export type ThemePack = {
   format: string
   version: number
@@ -7,7 +10,14 @@ export type ThemePack = {
   description: string
   tokens: Record<string, string>
   bubble?: { style?: string; radius?: number; me?: string; ai?: string }
-  background?: { image?: string; color?: string; opacity?: number }
+  background?: ThemeBackground
+  chatBackground?: ThemeBackground
+  font?: { family?: string; src?: string }
+  appearance?: {
+    button?: { radius?: number; stroke?: ThemeStroke }
+    card?: { radius?: number; stroke?: ThemeStroke; material?: 'flat' | 'paper' | 'glass'; rotation?: number; decoration?: 'none' | 'tape' | 'paper-edge' | 'sticker' }
+    motion?: { press?: 'none' | 'fade' | 'compress'; duration?: number }
+  }
   icons?: Record<string, string>
 }
 
@@ -16,6 +26,7 @@ export const PACK_VERSION: number
 export const PACKS_KEY: string
 export const ACTIVE_PACK_KEY: string
 export const PACK_TOKEN_KEYS: string[]
+export const PACK_ICON_KEYS: string[]
 export const PACK_BUBBLE_STYLES: string[]
 
 export function normalizeThemePack(input: unknown): ThemePack

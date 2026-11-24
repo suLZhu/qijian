@@ -1,5 +1,6 @@
 import { readZip, bytesToDataUrl } from './zip.mjs'
-// 美化包（Theme Pack）格式 v1（向后兼容，现已升级为全局主题）。
+import { UI_ICON_KEYS } from './uiIconKeys.mjs'
+// 主题包支持 v1 和 v2。v2 增加独立聊天背景、统一图标清单和控件样式。
 // 一个包可统一控制整 App 壁纸 / 页面背景 / surface / 控件 / 按钮 / 图标语义色 / 字体 / 聊天气泡。
 // 旧包仍可继续导入；未提供的新 token 会从 accent / surface / field 等基础色自动继承。
 //
@@ -18,7 +19,7 @@ import { readZip, bytesToDataUrl } from './zip.mjs'
 // }
 
 export const PACK_FORMAT = 'qijian-theme-pack'
-export const PACK_VERSION = 1
+export const PACK_VERSION = 2
 export const PACKS_KEY = 'ai-home.themePacks'
 export const ACTIVE_PACK_KEY = 'ai-home.themePackActive'
 
@@ -28,14 +29,58 @@ export const PACK_TOKEN_KEYS = [
   'icon','iconMuted','iconAccent','iconOk','iconWarning','iconDanger',
   'buttonPrimary','buttonPrimaryText','buttonSecondary','buttonSecondaryText','buttonSecondaryBorder','buttonDanger','buttonDangerText',
 ]
-export const PACK_ICON_KEYS = ['world', 'chat', 'mcp', 'skill', 'memory', 'settings', 'assistant', 'models', 'appearance', 'workspace', 'system']
+const LEGACY_ICON_KEYS = ['world', 'chat', 'mcp', 'skill', 'memory', 'settings', 'assistant', 'models', 'appearance', 'workspace', 'system']
+export const PACK_ICON_KEYS = [...new Set([...UI_ICON_KEYS, ...LEGACY_ICON_KEYS])]
 export const PACK_BUBBLE_STYLES = ['soft', 'outlined', 'bare', 'letter', 'frame', 'glass', 'comic', 'note', 'quill', 'pixel']
 
 const isColor = (v) => typeof v === 'string' && /^(#[0-9a-f]{3,8}|rgba?\(|hsla?\(|var\()/i.test(v.trim())
 
+const PACK_APPEARANCE = {
+  button: { radius: [0, 64], stroke: ['none', 'solid', 'dashed', 'double'] },
+  card: { radius: [0, 40], stroke: ['none', 'solid', 'dashed', 'double'], material: ['flat', 'paper', 'glass'], rotation: [-6, 6], decoration: ['none', 'tape', 'paper-edge', 'sticker'] },
+  motion: { press: ['none', 'fade', 'compress'], duration: [0, 500] },
+}
+
+const bounded = (value, min, max) => typeof value === 'number' && Number.isFinite(value)
+  ? Math.min(max, Math.max(min, value)) : undefined
+
+function normalizeAppearance(input) {
+  const appearance = {}
+  for (const [section, rules] of Object.entries(PACK_APPEARANCE)) {
+    const fields = {}
+    for (const [field, choices] of Object.entries(rules)) {
+      const value = input?.[section]?.[field]
+      const normalized = typeof choices[0] === 'number'
+        ? bounded(value, ...choices)
+        : choices.includes(value) ? value : undefined
+      if (normalized !== undefined) fields[field] = normalized
+    }
+    if (Object.keys(fields).length) appearance[section] = fields
+  }
+  return Object.keys(appearance).length ? appearance : undefined
+}
+
+const isImageAsset = (value) => typeof value === 'string' &&
+  /^data:image\/(?:png|jpeg|webp|gif|svg\+xml);base64,[a-z\d+/]+=*$/i.test(value)
+
+function normalizeBackground(background, version) {
+  if (!background || typeof background !== 'object') return undefined
+  const legacy = version === 1
+  const image = background.image
+  return {
+    image: (legacy ? typeof image === 'string' && /^(https?:|data:image\/)/.test(image) : isImageAsset(image)) ? image : undefined,
+    color: isColor(background.color) ? String(background.color).trim() : undefined,
+    opacity: legacy
+      ? (Number.isFinite(Number(background.opacity)) ? Math.min(1, Math.max(0.1, Number(background.opacity))) : undefined)
+      : bounded(background.opacity, 0, 1),
+  }
+}
+
 export function normalizeThemePack(input) {
   if (!input || typeof input !== 'object') throw new Error('美化包必须是 JSON 对象。')
   if (input.format && input.format !== PACK_FORMAT) throw new Error('不是栖间美化包（format 不匹配）。')
+  const version = input.version ?? 1
+  if (version !== 1 && version !== PACK_VERSION) throw new Error('不支持的栖间主题包版本。')
   const name = String(input.name || '').trim()
   if (!name) throw new Error('美化包缺少名字（name）。')
   const tokens = {}
@@ -52,32 +97,40 @@ export function normalizeThemePack(input) {
     me: isColor(input.bubble.me) ? String(input.bubble.me).trim() : undefined,
     ai: isColor(input.bubble.ai) ? String(input.bubble.ai).trim() : undefined,
   } : undefined
-  const background = input.background && typeof input.background === 'object' ? {
-    image: typeof input.background.image === 'string' && /^(https?:|data:image\/)/.test(input.background.image) ? input.background.image : undefined,
-    color: isColor(input.background.color) ? String(input.background.color).trim() : undefined,
-    opacity: Number.isFinite(Number(input.background.opacity)) ? Math.min(1, Math.max(0.1, Number(input.background.opacity))) : undefined,
-  } : undefined
+  const background = normalizeBackground(input.background, version)
+  const chatBackground = version === PACK_VERSION ? normalizeBackground(input.chatBackground, version) : undefined
+  const appearance = version === PACK_VERSION ? normalizeAppearance(input.appearance) : undefined
   const font = input.font && typeof input.font === 'object' ? {
     family: typeof input.font.family === 'string' ? input.font.family.trim().slice(0, 60) : undefined,
-    src: typeof input.font.src === 'string' && /^data:font\//.test(input.font.src) && input.font.src.length < 2_000_000 ? input.font.src : undefined,
+    src: typeof input.font.src === 'string' && input.font.src.length < 2_000_000 &&
+      (version === 1 ? /^data:font\//.test(input.font.src) : /^data:font\/(?:woff2?|ttf|otf);base64,[a-z\d+/]+=*$/i.test(input.font.src))
+      ? input.font.src : undefined,
   } : undefined
   const icons = {}
   if (input.icons && typeof input.icons === 'object') {
+    const allowedKeys = version === 1 ? LEGACY_ICON_KEYS : PACK_ICON_KEYS
     for (const [key, value] of Object.entries(input.icons)) {
-      if (typeof value !== 'string' || !value.trim() || !PACK_ICON_KEYS.includes(String(key))) continue
+      if (typeof value !== 'string' || !value.trim() || !allowedKeys.includes(key)) continue
       const icon = value.trim()
-      if (/^data:image\//.test(icon)) { if (icon.length < 400000) icons[String(key)] = icon }
-      else icons[String(key)] = icon.slice(0, 4)
+      if (version === PACK_VERSION) {
+        if (icon.length < 400_000 && isImageAsset(icon)) icons[key] = icon
+      } else if (/^data:image\//.test(icon)) {
+        if (icon.length < 400_000) icons[key] = icon
+      } else {
+        icons[key] = icon.slice(0, 4)
+      }
     }
   }
   return {
     format: PACK_FORMAT,
-    version: PACK_VERSION,
+    version,
     id: String(input.id || 'pack-' + hash(name + JSON.stringify(tokens))),
     name,
     author: String(input.author || '').slice(0, 40),
     description: String(input.description || '').slice(0, 120),
     tokens, bubble, background,
+    ...(chatBackground && { chatBackground }),
+    ...(appearance && { appearance }),
     font: font && (font.family || font.src) ? font : undefined,
     icons: Object.keys(icons).length ? icons : undefined,
   }
@@ -145,28 +198,41 @@ export function packCssVars(pack) {
   for (const [key, cssVar] of Object.entries(map)) if (pack.tokens[key]) vars[cssVar] = pack.tokens[key]
   if (pack.tokens.accent) vars['--accent-ink'] = pack.tokens.accent
   if (pack.tokens.pageBg) vars['--app-bg'] = pack.tokens.pageBg
-  if (pack.background?.image) {
-    vars['--wallpaper'] = `url(${pack.background.image})`
-    vars['--pack-chat-bg'] = `url(${pack.background.image})`
-  } else if (pack.background?.color) {
-    vars['--wallpaper'] = pack.background.color
-    vars['--pack-chat-bg'] = pack.background.color
-  }
-  if (pack.background?.opacity) {
-    vars['--wallpaper-opacity'] = String(pack.background.opacity)
-    vars['--pack-bg-opacity'] = String(pack.background.opacity)
-  }
+  const appBackground = pack.background
+  const appPaint = backgroundPaint(appBackground)
+  const chat = pack.version === PACK_VERSION ? pack.chatBackground : undefined
+  const chatPaint = backgroundPaint(chat)
+  if (appPaint) vars['--wallpaper'] = appPaint
+  if (chatPaint || appPaint) vars['--pack-chat-bg'] = chatPaint || appPaint
+  if (appBackground?.opacity !== undefined) vars['--wallpaper-opacity'] = String(appBackground.opacity)
+  const chatOpacity = chat?.opacity ?? (chatPaint ? 1 : appBackground?.opacity)
+  if (chatOpacity !== undefined) vars['--pack-bg-opacity'] = String(chatOpacity)
   if (pack.font?.family || pack.font?.src) {
-    const family = pack.font.src ? 'pack-' + pack.id : pack.font.family
+    const family = pack.font.src ? packFontName(pack) : pack.font.family
     vars['--theme-font-family'] = family
     vars['--pack-font-family'] = family
   }
   if (pack.bubble?.me) vars['--bubble-me-bg'] = pack.bubble.me
   if (pack.bubble?.ai) vars['--bubble-ai-bg'] = pack.bubble.ai
+  if (pack.version === PACK_VERSION) {
+    if (pack.bubble?.radius !== undefined) vars['--pack-bubble-radius'] = pack.bubble.radius + 'px'
+    for (const [section, fields] of Object.entries(pack.appearance ?? {})) {
+      for (const [field, value] of Object.entries(fields)) {
+        const unit = { radius: 'px', rotation: 'deg', duration: 'ms' }[field] ?? ''
+        vars[`--pack-${section}-${field}`] = String(value) + unit
+      }
+    }
+  }
   return vars
 }
 
+function backgroundPaint(background) {
+  return background?.image ? `url(${background.image})` : background?.color
+}
+
 const PACK_VAR_NAMES=[
+  ...Object.entries(PACK_APPEARANCE).flatMap(([section, fields]) => Object.keys(fields).map(field => `--pack-${section}-${field}`)),
+  '--pack-bubble-radius',
   '--accent','--accent-soft','--accent-contrast','--accent-ink','--page-bg','--app-bg','--surface','--surface-elevated','--card','--field',
   '--ink','--muted','--line','--ok','--warning','--danger',
   '--control-bg','--control-bg-hover','--control-border',
@@ -185,23 +251,28 @@ export function applyPackVars(pack){
   const shellEl=globalThis.document?.querySelector('.shell')
   for(const [k,v] of Object.entries(vars)){root.style.setProperty(k,v);if(shellEl?.style)shellEl.style.setProperty(k,v,'important')}
   globalThis.document.body?.classList.toggle('has-pack',!!pack)
-  // 背景取色是异步的（图片要解码），先铺包自带的 token，取完再覆盖成「跟壁纸走」的配色。
-  if(pack) void applyDerivedPalette(pack)
+  if (pack?.version === 1 || (pack && pack.version === undefined)) {
+    void applyDerivedPalette(pack)
+  } else {
+    paletteSeq++
+    globalThis.document.body?.classList.remove('pack-dark')
+  }
 }
 
 const FONT_STYLE_ID='qijian-pack-font'
+const packFontName = (pack) => 'pack-' + hash(pack.id)
 function applyPackFont(pack){
   const doc=globalThis.document
   if(!doc)return
   let el=doc.getElementById(FONT_STYLE_ID)
   if(pack?.font?.src){
     if(!el){el=doc.createElement('style');el.id=FONT_STYLE_ID;doc.head.appendChild(el)}
-    el.textContent='@font-face{font-family:pack-'+pack.id+';src:url('+pack.font.src+');font-display:swap}'
+    el.textContent='@font-face{font-family:'+packFontName(pack)+';src:url('+pack.font.src+');font-display:swap}'
   }else if(el){el.remove()}
 }
 
 // ── ZIP 美化包：pack.json + 同目录资源（图片 / 字体）──
-const MIME_BY_EXT = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', webp: 'image/webp', gif: 'image/gif', woff: 'font/woff', woff2: 'font/woff2', ttf: 'font/ttf', otf: 'font/otf' }
+const MIME_BY_EXT = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', webp: 'image/webp', gif: 'image/gif', svg: 'image/svg+xml', woff: 'font/woff', woff2: 'font/woff2', ttf: 'font/ttf', otf: 'font/otf' }
 function mimeOf(name) { const ext = String(name).split('.').pop()?.toLowerCase() || ''; return MIME_BY_EXT[ext] || 'application/octet-stream' }
 
 export async function packFromZip(buffer) {
@@ -215,11 +286,15 @@ export async function packFromZip(buffer) {
   const resolve = (ref) => {
     if (typeof ref !== 'string' || !ref || /^(data:|https?:)/i.test(ref)) return ref
     const bytes = files.get(base + ref) || files.get(ref)
-    return bytes ? bytesToDataUrl(bytes, mimeOf(ref)) : ref
+    if (bytes) return bytesToDataUrl(bytes, mimeOf(ref))
+    if (raw?.version === PACK_VERSION) throw new Error('ZIP 里缺少主题素材：' + ref)
+    return ref
   }
-  if (raw.background && typeof raw.background === 'object') raw.background.image = resolve(raw.background.image)
-  if (raw.icons && typeof raw.icons === 'object') for (const key of Object.keys(raw.icons)) raw.icons[key] = resolve(raw.icons[key])
-  if (raw.font && typeof raw.font === 'object') raw.font.src = resolve(raw.font.src)
+  for (const background of [raw?.background, raw?.chatBackground]) {
+    if (background && typeof background === 'object') background.image = resolve(background.image)
+  }
+  if (raw?.icons && typeof raw.icons === 'object') for (const key of Object.keys(raw.icons)) raw.icons[key] = resolve(raw.icons[key])
+  if (raw?.font && typeof raw.font === 'object') raw.font.src = resolve(raw.font.src)
   return normalizeThemePack(raw)
 }
 

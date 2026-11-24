@@ -86,3 +86,30 @@ test('ZIP 包内 icons 相对路径会转成 data URL', async () => {
   const pack = await packFromZip(zip)
   assert.match(pack.icons.chat, /^data:image\/png;base64,/)
 })
+
+test('v2 ZIP 可同时装入 App 背景、聊天背景、发送图标和字体', async () => {
+  const manifest = {
+    format: 'qijian-theme-pack',
+    version: 2,
+    name: '纸本手账',
+    tokens: { accent: '#665544' },
+    background: { image: 'assets/paper.webp' },
+    chatBackground: { image: 'assets/chat.png' },
+    icons: { send: 'assets/send.svg' },
+    font: { src: 'assets/body.woff2' },
+  }
+  const files = [
+    { name: 'notebook/pack.json', data: enc.encode(JSON.stringify(manifest)) },
+    { name: 'notebook/assets/paper.webp', data: new Uint8Array([1, 2]) },
+    { name: 'notebook/assets/chat.png', data: new Uint8Array([3, 4]) },
+    { name: 'notebook/assets/send.svg', data: enc.encode('<svg xmlns="http://www.w3.org/2000/svg"/>') },
+    { name: 'notebook/assets/body.woff2', data: new Uint8Array([5, 6]) },
+  ]
+  const pack = await packFromZip(makeStoredZip(files))
+  assert.equal(pack.background.image, 'data:image/webp;base64,AQI=')
+  assert.equal(pack.chatBackground.image, 'data:image/png;base64,AwQ=')
+  assert.match(pack.icons.send, /^data:image\/svg\+xml;base64,/)
+  assert.equal(pack.font.src, 'data:font/woff2;base64,BQY=')
+
+  await assert.rejects(() => packFromZip(makeStoredZip(files.slice(0, 2))), /缺少主题素材.*chat\.png/)
+})
