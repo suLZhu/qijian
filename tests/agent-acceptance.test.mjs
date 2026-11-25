@@ -1,3 +1,4 @@
+import { ensureMcpSchema } from '../src/server/mcpStore.mjs'
 // Agent Runner acceptance suite (stage 8): the 15 scenarios from the spec,
 // run in-process against an in-memory SQLite database.
 //
@@ -44,6 +45,7 @@ function makeDb() {
       last_run_at TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
       created_by TEXT NOT NULL DEFAULT 'user', temporary INTEGER NOT NULL DEFAULT 0, conversation_id TEXT);
   `)
+  ensureMcpSchema(db)
   initAgentRuns(db)
   initToolLogs(db)
   initToolPolicies(db)

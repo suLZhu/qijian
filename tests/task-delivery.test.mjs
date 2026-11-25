@@ -1,3 +1,4 @@
+import { ensureMcpSchema } from '../src/server/mcpStore.mjs'
 // P0-3 acceptance suite: 定时任务结果投递闭环。
 // 任务到期 → Runner 执行 → 生成结果 → 投递 inbox → 写入指定会话 → 前端显示。
 //
@@ -40,6 +41,7 @@ function makeDb() {
       last_run_at TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
       created_by TEXT NOT NULL DEFAULT 'user', temporary INTEGER NOT NULL DEFAULT 0, conversation_id TEXT);
   `)
+  ensureMcpSchema(db)
   initAgentRuns(db)
   initToolLogs(db)
   initToolPolicies(db)

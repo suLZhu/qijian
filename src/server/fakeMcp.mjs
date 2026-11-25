@@ -76,7 +76,9 @@ export function createFakeMcpServer() {
 // it exactly like a real MCP connection (namespacing, policy, logging).
 export function fakeMcpConnection(db, person, fake) {
   const id = 'fmcp' + randomUUID().slice(0, 8)
-  db.prepare('INSERT INTO mcp_connections (id,person,name,url,transport,enabled,token_enc,updated_at) VALUES (?,?,?,?,?,1,?,?)')
-    .run(id, person, fake.serverName, 'https://fake-mcp.invalid/mcp', 'streamablehttp', '', new Date().toISOString())
+  const now = new Date().toISOString()
+  db.prepare('INSERT INTO mcp_connections (id,name,url,transport,enabled,token_enc,updated_at) VALUES (?,?,?,?,1,?,?)')
+    .run(id, fake.serverName, 'https://fake-mcp.invalid/mcp', 'streamablehttp', '', now)
+  db.prepare('INSERT INTO mcp_bindings (person,connection_id,created_at) VALUES (?,?,?)').run(person, id, now)
   return { row: db.prepare('SELECT * FROM mcp_connections WHERE id=?').get(id), id }
 }

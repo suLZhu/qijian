@@ -1,3 +1,4 @@
+import { ensureMcpSchema } from '../src/server/mcpStore.mjs'
 // 记忆自动整理验收：策略默认值/上下限、新材料统计、确定性触发规则、
 // 调度器派发 → 模型调用 memory_add → 候选区（createdBy='model'）→ 用户确认生效。
 //
@@ -33,6 +34,7 @@ function makeDb() {
     CREATE TABLE mcp_connections (id TEXT PRIMARY KEY, person TEXT NOT NULL, name TEXT NOT NULL, url TEXT NOT NULL,
       transport TEXT NOT NULL, enabled INTEGER NOT NULL DEFAULT 1, token_enc TEXT NOT NULL, updated_at TEXT NOT NULL);
   `)
+  ensureMcpSchema(db)
   initAgentRuns(db)
   initToolLogs(db)
   initToolPolicies(db)

@@ -1,3 +1,4 @@
+import { ensureMcpSchema } from '../src/server/mcpStore.mjs'
 // 动态时间上下文验收套件。
 // 覆盖：跨日、时区换算、上午/下午/深夜边界、非法时区回退、
 // 独立 system 消息注入（不覆盖原有 system）、Runner 每轮携带当前时间、
@@ -142,6 +143,7 @@ function makeDb(timeZonePayload) {
   `)
   db.prepare('INSERT INTO app_state (id,payload,updated_at) VALUES (1,?,?)')
     .run(JSON.stringify(timeZonePayload || {}), new Date().toISOString())
+  ensureMcpSchema(db)
   initAgentRuns(db)
   initToolLogs(db)
   initToolPolicies(db)
