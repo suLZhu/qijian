@@ -273,3 +273,33 @@ test('本地提醒结果已入收件箱但任务未结算时，恢复不重复�
     globalThis.fetch = originalFetch
   }
 })
+
+test('到期提醒使用原助手的订阅令牌，代理错误时保留任务', async t => {
+  localStorage.clear()
+  const person = 'assistant-001'
+  const save = (key, value) => localStorage.setItem('ai-home.' + key, JSON.stringify(value))
+  await put('/api/state', { state: { conversations: { [person]: [{ id: 'work', messages: [{ role: 'user', content: '刚开完会' }] }] } } })
+  save('modelConfig', { [person]: { model: 'shared-model', vendorId: 'shared', endpoint: '' } })
+  save('vendors', [{ id: 'shared', subscription: true, keys: [{ id: 'api', value: 'ordinary' }, { id: 'oauth', value: 'subscriber' }] }])
+  save('subscriptions', [{ id: 'sub', channelId: 'claude', vendorId: 'shared', vendorKeyId: 'oauth', loggedIn: true }])
+  let request
+  t.mock.method(globalThis, 'fetch', () => { throw new Error('unexpected direct request') })
+  globalThis.AiHomeSystem = {
+    status: () => '{}',
+    modelHttp(id, policy, method, url, headers, body) {
+      request = { policy, headers: JSON.parse(headers), body }
+      globalThis.__aihomeHttpStream(id, JSON.stringify({ type: 'error', message: '订阅代理不可用' }))
+    },
+  }
+  t.after(() => { delete globalThis.AiHomeSystem })
+  await post('/api/workflows/manage', { person, action: 'create', title: '提醒喝水', prompt: '提醒我喝水', runAt: iso(T0 - 1000), temporary: true, conversationId: 'work' })
+  await post('/api/tasks/run', { now: iso(T0), conversationIds: { [person]: ['work'] } })
+  assert.equal(request?.policy, 'subscription')
+  assert.equal(request.headers.authorization, 'Bearer subscriber')
+  assert.match(request.body, /刚开完会/)
+  const [task] = (await call('/api/tasks?person=' + person)).data.tasks
+  assert.equal(task.status, 'paused')
+  assert.match(task.last_error, /订阅代理不可用/)
+  assert.equal((await call('/api/inbox')).data.messages.length, 0)
+  assert.equal(globalThis.fetch.mock.callCount(), 0)
+})

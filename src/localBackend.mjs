@@ -17,13 +17,14 @@
 // 纯 ESM、无框架依赖；apiBase.mjs 在 local 模式下把 apiFetch 路由到这里。
 import { mcpMigrationKey } from './mcpMigration.mjs'
 import { injectTimeContext } from './timeContext.mjs'
-import { readKeyCandidates, isRetryableKeyStatus, resolveKeyCandidates, chatRequestUrl } from './vendors.mjs'
+import { readKeyCandidates, isRetryableKeyStatus, resolveChatAccess, chatRequestUrl } from './vendors.mjs'
 import { resolveModelConfig } from './resourceBindings.mjs'
 import { scheduledConversationInstructions, isScheduledConversationTask, scheduledConversationContext, scheduledConversationAnswer } from './server/agent/scheduledConversation.mjs'
 import { taskResultEnvelope } from './taskResult.mjs'
 import { buildRoutePlan, logicalModelId } from './modelRoutes.mjs'
 import { normalizeRouteState, activeLogicalId, fixedRouteId } from './routeState.mjs'
 import { normalizeLocalTask, makeLocalTask, dueLocalTasks, advanceLocalTask } from './localTasks.mjs'
+import { normalizeSubscriptions, SUBSCRIPTION_STORAGE_KEY } from './subscriptionChannels.mjs'
 import { subscriptionOperations } from './subscriptionOperations.mjs'
 import { runRouteChat } from './chatRouteRunner.mjs'
 import { subscriptionProtocolConfig } from './server/subscriptionChat.mjs'
@@ -569,19 +570,31 @@ async function runLocalConversationTask(task, nowMs) {
       const model = resolveModelConfig(binding.modelProfileId || defaultModel, profiles, legacy[task.person] || {})
       const vendors = readJSON('ai-home.vendors', [])
       const vendor = vendors.find(item => item.id === model.vendorId)
-      const keys = resolveKeyCandidates(vendors, binding.keyId || '', readJSON('ai-home.apiKey', {})[task.person] || '', model.vendorId || '')
       const routeState = normalizeRouteState(readJSON('ai-home.routeState', null))
       const logicalId = activeLogicalId(routeState, task.person, logicalModelId(model.model || ''))
       const routes = buildRoutePlan({ routes: routeState.routes, logicalId, vendors, binding: { fixedRouteId: fixedRouteId(routeState, task.person) } })
-      if (!routes.length && vendor?.subscriptionChannel) throw new Error('订阅代理尚未接入本地任务，任务已暂停')
-      if (!model.model || (!routes.length && (!model.endpoint || !keys.length))) throw new Error('请先为助手配置可用模型，任务已暂停')
+      let access = { routes }
+      if (!routes.length) {
+        const subscriptions = normalizeSubscriptions(readJSON(SUBSCRIPTION_STORAGE_KEY, []))
+        const legacyKey = readJSON('ai-home.apiKey', {})[task.person] || ''
+        const credentials = resolveChatAccess(vendors, subscriptions, model.vendorId || '', binding.keyId || '', legacyKey)
+        if (credentials.error) throw new Error(credentials.error)
+        if (!credentials.apiKeys.length || (!credentials.protocol && !model.endpoint)) {
+          throw new Error('请先为助手配置可用模型，任务已暂停')
+        }
+        access = {
+          apiKey: credentials.apiKeys[0], apiKeys: credentials.apiKeys,
+          subscriptionProtocol: credentials.protocol, subscriptionAccountId: credentials.accountId,
+        }
+      }
+      if (!model.model) throw new Error('请先为助手配置可用模型，任务已暂停')
       const messages = [
         { role: 'system', content: scheduledConversationInstructions() },
         ...scheduledConversationContext(state, task.person, conversation),
         { role: 'user', content: task.prompt },
       ]
       const body = { model: model.model, stream: false, messages }
-      const response = await handleChat({ signal: AbortSignal.timeout(45000), body: JSON.stringify({ endpoint: model.endpoint, chatUrl: vendor ? chatRequestUrl(vendor) : '', apiKeys: keys, timeZone: state.timeZone, body, ...(routes.length ? { routes } : {}) }) })
+      const response = await handleChat({ signal: AbortSignal.timeout(45000), body: JSON.stringify({ endpoint: model.endpoint, chatUrl: vendor ? chatRequestUrl(vendor) : '', timeZone: state.timeZone, body, ...access }) })
       const data = await response.json().catch(() => ({}))
       if (!response.ok) throw new Error(data.error || '模型请求失败')
       const answer = scheduledConversationAnswer(data.choices?.[0]?.message?.content, task.prompt)
