@@ -86,6 +86,12 @@ function migratePersonValues(db) {
       db.prepare(`UPDATE ${table} SET person=? WHERE person=?`).run(id, name)
     }
   }
+  if (tableSql(db, 'mcp_bindings')) {
+    for (const [name, id] of Object.entries(LEGACY_NAME_TO_ID)) {
+      db.prepare('INSERT OR IGNORE INTO mcp_bindings (person,connection_id,created_at) SELECT ?,connection_id,created_at FROM mcp_bindings WHERE person=?').run(id, name)
+      db.prepare('DELETE FROM mcp_bindings WHERE person=?').run(name)
+    }
+  }
   if (tableSql(db, 'ledger_entries')) {
     for (const [name, id] of Object.entries(LEGACY_NAME_TO_ID)) {
       db.prepare('UPDATE ledger_entries SET created_by=? WHERE created_by=?').run(id, name)
