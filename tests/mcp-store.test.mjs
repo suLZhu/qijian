@@ -16,14 +16,23 @@ test('旧 MCP person 行迁移为全局服务 + 助手绑定，并去重相同�
   insert.run('m2', 'assistant-b', 'Garden', 'https://example.com/mcp', 'httpStream', 1, 'secret-b', '2026-01-01')
   insert.run('m3', 'assistant-b', 'GitHub', 'https://github.example/mcp', 'httpStream', 0, 'secret-c', '2026-01-03')
 
-  const result = ensureMcpSchema(db)
-  assert.equal(result.migrated, true)
-  assert.equal(listMcpServices(db).length, 2)
-  const garden = listMcpServices(db).find(row => row.name === 'Garden')
-  assert.ok(garden)
-  assert.deepEqual(boundMcpIds(db, 'assistant-a'), [garden.id])
-  assert.deepEqual(boundMcpIds(db, 'assistant-b').sort(), [garden.id, 'm3'].sort())
-  assert.deepEqual(boundMcpServices(db, 'assistant-b').map(row => row.name), ['Garden'])
+  insert.run('m4', 'assistant-c', 'Garden', 'https://example.com/mcp', 'httpStream', 1, 'secret-copy', '2025-12-31')
+  insert.run('m5', 'assistant-d', 'Garden', 'https://example.com/mcp', 'httpStream', 0, 'secret-a', '2025-12-31')
+  insert.run('m6', 'assistant-e', 'Garden', 'https://example.com/mcp', 'httpStream', 1, 'unreadable', '2025-12-30')
+  const result = ensureMcpSchema(db, row => {
+    if (row.token_enc === 'unreadable') throw new Error('unreadable')
+    return row.token_enc === 'secret-copy' ? 'secret-a' : row.token_enc
+  })
+  assert.equal(result.serviceCount, 5)
+  assert.deepEqual(boundMcpIds(db, 'assistant-a'), ['m1'])
+  assert.deepEqual(boundMcpIds(db, 'assistant-b').sort(), ['m2', 'm3'])
+  assert.deepEqual(boundMcpIds(db, 'assistant-c'), ['m1'])
+  assert.deepEqual(boundMcpIds(db, 'assistant-d'), ['m5'])
+  assert.deepEqual(boundMcpServices(db, 'assistant-d'), [])
+  assert.equal(boundMcpServices(db, 'assistant-b')[0].token_enc, 'secret-b')
+  assert.equal(boundMcpServices(db, 'assistant-e')[0].token_enc, 'unreadable')
+  assert.equal(ensureMcpSchema(db).migrated, false)
+  assert.equal(listMcpServices(db).length, 5)
 })
 
 test('显式绑定只接受存在且已启用的全局服务，删除服务同步删除绑定', () => {

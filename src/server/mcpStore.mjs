@@ -1,4 +1,6 @@
-export function ensureMcpSchema(db) {
+import { mcpMigrationKey } from '../mcpMigration.mjs'
+
+export function ensureMcpSchema(db, readCredentials = row => row.token_enc) {
   const columns = db.prepare('PRAGMA table_info(mcp_connections)').all()
   const hasPerson = columns.some(column => String(column.name) === 'person')
 
@@ -14,7 +16,6 @@ export function ensureMcpSchema(db) {
 
   if (!hasPerson) return { migrated: false }
 
-  const legacyRows = db.prepare('SELECT * FROM mcp_connections ORDER BY updated_at DESC').all()
   db.exec('BEGIN IMMEDIATE')
   try {
     db.exec(`
@@ -28,11 +29,18 @@ export function ensureMcpSchema(db) {
         updated_at TEXT NOT NULL
       );
     `)
+    const legacyRows = db.prepare('SELECT * FROM mcp_connections ORDER BY updated_at DESC').all()
     const byKey = new Map()
     const insertService = db.prepare('INSERT INTO mcp_connections_v2 (id,name,url,transport,enabled,token_enc,updated_at) VALUES (?,?,?,?,?,?,?)')
     const insertBinding = db.prepare('INSERT OR IGNORE INTO mcp_bindings (person,connection_id,created_at) VALUES (?,?,?)')
     for (const row of legacyRows) {
-      const key = [String(row.name || '').trim().toLowerCase(), String(row.url || '').trim(), String(row.transport || 'httpStream')].join('\n')
+      let key
+      try {
+        key = mcpMigrationKey(row, readCredentials(row))
+      } catch {
+        // Preserve unreadable records independently, including their original encrypted bytes.
+        key = Symbol(row.id)
+      }
       let connectionId = byKey.get(key)
       if (!connectionId) {
         connectionId = String(row.id)

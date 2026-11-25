@@ -15,6 +15,7 @@
 //     绝不伪装成功；提示用户配置云服务器后使用。
 //
 // 纯 ESM、无框架依赖；apiBase.mjs 在 local 模式下把 apiFetch 路由到这里。
+import { mcpMigrationKey } from './mcpMigration.mjs'
 import { injectTimeContext } from './timeContext.mjs'
 import { readKeyCandidates, isRetryableKeyStatus } from './vendors.mjs'
 import { normalizeLocalTask, makeLocalTask, dueLocalTasks, advanceLocalTask } from './localTasks.mjs'
@@ -968,12 +969,26 @@ export async function localHandle(path, init) {
       const bindings = readJSON(K.mcpBindings, {})
       const catalog = []
       const bySignature = new Map()
+      const aliases = new Map()
       for (const row of rows) {
         if (!row) continue
-        const signature = [String(row.name || '').toLowerCase(), row.url, row.transport].join('\u0000')
+        if (!row.person) {
+          catalog.push(row)
+          continue
+        }
+        const { person, ...service } = row
+        const signature = mcpMigrationKey(row, [row.token ?? '', row.headers ?? {}])
         let id = bySignature.get(signature)
-        if (!id) { id = row.id; bySignature.set(signature, id); const { person: _person, ...rest } = row; catalog.push(rest) }
-        if (row.person) bindings[row.person] = [...new Set([...(bindings[row.person] || []), id])]
+        if (!id) {
+          id = row.id
+          bySignature.set(signature, id)
+          catalog.push(service)
+        }
+        aliases.set(row.id, id)
+        bindings[person] = [...(bindings[person] || []), id]
+      }
+      for (const person of Object.keys(bindings)) {
+        bindings[person] = [...new Set(bindings[person].map(id => aliases.get(id) ?? id))]
       }
       writeJSON(K.mcpBindings, bindings)
       writeJSON(K.mcp, catalog)

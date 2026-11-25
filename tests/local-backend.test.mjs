@@ -259,3 +259,31 @@ test('路由收敛：未匹配 404、坏 JSON 400、未知异常 500 均为中�
   const badMethod = await localHandle('/api/session', { method: 'DELETE' })
   assert.equal(badMethod.status, 404, '不支持的方法也不能裸抛')
 })
+
+test('旧 MCP 升级按凭据及启用状态保留服务，同名服务可以独立编辑和删除', async t => {
+  const catalog = 'ai-home.local.mcp'
+  const bindings = 'ai-home.local.mcpBindings'
+  t.after(() => { localStorage.removeItem(catalog); localStorage.removeItem(bindings) })
+  const base = { name: 'Garden', url: 'https://example.org/mcp', transport: 'httpStream', enabled: true }
+  const rows = [
+    { ...base, id: 'aa', person: 'A', token: 'first' },
+    { ...base, id: 'bb', person: 'B', token: 'second' },
+    { ...base, id: 'cc', person: 'C', token: 'first' },
+    { ...base, id: 'dd', person: 'D', token: 'first', enabled: false },
+  ]
+  localStorage.setItem(catalog, JSON.stringify(rows))
+  localStorage.setItem(bindings, JSON.stringify({ E: ['cc'] }))
+  const list = () => getJSON('/api/mcp')
+  const ids = async person => (await getJSON('/api/mcp/bindings?person=' + person)).data.connectionIds
+  assert.deepEqual((await list()).data.connections.map(c => c.id), ['aa', 'bb', 'dd'])
+  assert.deepEqual(await ids('C'), ['aa'])
+  assert.deepEqual(await ids('E'), ['aa'])
+  assert.deepEqual(await ids('B'), ['bb'])
+  assert.deepEqual(await ids('D'), [])
+  assert.equal((await body('/api/mcp/bb', { method: 'PUT', body: JSON.stringify({ name: 'B Garden' }) })).status, 200)
+  assert.equal((await body('/api/mcp/aa', { method: 'DELETE' })).status, 200)
+  const saved = JSON.parse(localStorage.getItem(catalog))
+  assert.deepEqual(saved.map(row => [row.id, row.token]), [['bb', 'second'], ['dd', 'first']])
+  assert.deepEqual(await ids('B'), ['bb'])
+  assert.deepEqual(await ids('A'), [])
+})

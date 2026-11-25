@@ -275,7 +275,7 @@ test('MCP 服务改成一行小横条：开关有文字，笔形按钮直接进�
   assert.match(app, /mcp-card-status/)
   assert.match(app, /className="mcp-card-enable"><span>\{enabled \? '启用' : '停用'\}/)
   assert.match(app, /className="mcp-card-edit"/)
-  assert.match(app, /startEditMcp\(g\)/)
+  assert.match(app, /startEditMcp\(service\)/)
   assert.match(app, /className="mcp-card-delete"/)
   assert.doesNotMatch(app, /mcp-card-toggle/)
   assert.doesNotMatch(app, /mcp-enable-row/)
@@ -288,9 +288,9 @@ test('MCP 服务改成一行小横条：开关有文字，笔形按钮直接进�
   const server = read('src/server.mjs')
   assert.match(local, /method === 'PUT' && !mcpMatch\[2\]/)
   assert.match(server, /req.method === 'PUT' && !mcpMatch\[2\]/)
-  // 添加不再选归属助手；卡片按「名称+地址」合并，显示工具数与连通状态，并有测试链接
+  // 添加不再选归属助手；卡片按全局服务 ID 独立操作，显示工具数与连通状态，并有测试链接
   assert.doesNotMatch(app, /归属助手<SoftSelect value=\{mcpDraft\.owner\}/)
-  assert.match(app, /const mcpGroups = useMemo/)
+  assert.match(app, /mcp-card mcp-card-row" key=\{service\.id\}/)
   assert.match(app, /mcp-card-status/)
   assert.match(app, /'已连通'/)
   assert.match(app, /'测试链接'/)

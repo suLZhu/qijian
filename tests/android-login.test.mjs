@@ -5,6 +5,8 @@
 // 与正式数据隔离：一次性 SQLite（AI_HOME_DB 指到临时目录），测完即删。
 import { test, before, after } from 'node:test'
 import assert from 'node:assert/strict'
+import { DatabaseSync } from 'node:sqlite'
+import { createDecipheriv } from 'node:crypto'
 import { spawn } from 'node:child_process'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { createServer } from 'node:net'
@@ -211,4 +213,35 @@ test('服务端：Bearer 注销后同一 token 立即失效', async () => {
   const out = await fetch(`${BASE}/api/logout`, { method: 'POST', headers: { Authorization: `Bearer ${token}` } })
   assert.equal(out.status, 200)
   assert.equal((await fetch(`${BASE}/api/keys`, { headers: { Authorization: `Bearer ${token}` } })).status, 401)
+})
+
+test('服务端 MCP 改名与换令牌保留同址服务、原有请求头和绑定 ID', async t => {
+  const headers = { Authorization: 'Bearer ' + (await login()).body.token, 'Content-Type': 'application/json' }
+  const request = (path, method, body) => fetch(BASE + '/api/mcp' + path, {
+    method, headers, body: body && JSON.stringify(body),
+  })
+  const config = { name: 'Garden', url: 'https://example.org/mcp', headers: { 'X-Workspace': 'garden' } }
+  const ids = []
+  for (const token of ['alpha', 'beta']) {
+    const res = await request('', 'POST', { ...config, token })
+    assert.equal(res.status, 201)
+    ids.push((await res.json()).connection.id)
+  }
+  t.after(async () => { for (const id of ids) await request('/' + id, 'DELETE') })
+  const person = 'assistant-yanweixi'
+  assert.equal((await request('/bindings', 'PUT', { person, connectionIds: [ids[1]] })).status, 200)
+  assert.equal((await request('/' + ids[1], 'PUT', { name: 'B Garden' })).status, 200)
+  assert.equal((await request('/' + ids[1], 'PUT', { token: 'new-beta' })).status, 200)
+  assert.equal((await request('/' + ids[0], 'DELETE')).status, 200)
+  assert.deepEqual((await (await request('/bindings?person=' + person, 'GET')).json()).connectionIds, [ids[1]])
+  const db = new DatabaseSync(join(dbDir, 'test.sqlite'), { readOnly: true })
+  try {
+    const row = db.prepare('SELECT name, token_enc FROM mcp_connections WHERE id=?').get(ids[1])
+    assert.equal(row.name, 'B Garden')
+    const [iv, tag, ciphertext] = row.token_enc.split(':').map(value => Buffer.from(value, 'hex'))
+    const cipher = createDecipheriv('aes-256-gcm', Buffer.from(SECRET, 'hex'), iv)
+    cipher.setAuthTag(tag)
+    const saved = JSON.parse(Buffer.concat([cipher.update(ciphertext), cipher.final()]).toString())
+    assert.deepEqual(saved, { token: 'new-beta', headers: config.headers })
+  } finally { db.close() }
 })

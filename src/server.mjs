@@ -61,6 +61,8 @@ if (!password || password.length < 16) {
   console.error('AI_HOME_PASSWORD must be set to a password of at least 16 characters.')
   process.exit(1)
 }
+const secretKey = Buffer.from(process.env.AI_HOME_SECRET_KEY || '', 'hex')
+if (secretKey.length !== 32) { console.error('AI_HOME_SECRET_KEY must be a 32-byte hex key.'); process.exit(1) }
 const dbPath = resolve(process.env.AI_HOME_DB || './data/ai-home.sqlite')
 mkdirSync(dirname(dbPath), { recursive: true, mode: 0o700 })
 const db = new DatabaseSync(dbPath)
@@ -119,7 +121,7 @@ if (!workflowColumns.includes('temporary')) db.exec('ALTER TABLE scheduled_tasks
 if (!workflowColumns.includes('conversation_id')) db.exec('ALTER TABLE scheduled_tasks ADD COLUMN conversation_id TEXT')
 if (!workflowColumns.includes('interval_minutes')) db.exec('ALTER TABLE scheduled_tasks ADD COLUMN interval_minutes INTEGER NOT NULL DEFAULT 0')
 // MCP 5.0：旧版按 person 复制服务；启动时一次性迁移成全局服务 + 独立助手绑定。
-ensureMcpSchema(db)
+ensureMcpSchema(db, readMcpCredentials)
 migrateDatabase(db)
 
 // 启动滚动备份：见 server/backup.mjs（VACUUM INTO 一致性快照，保留 5 份，
@@ -148,8 +150,6 @@ const COOKIE_SAMESITE = ['Strict', 'Lax', 'None'].includes((process.env.AI_HOME_
 const MAX_BODY = 2 * 1024 * 1024
 const SESSION_TTL = 7 * 24 * 60 * 60 * 1000
 const passwordHash = createHash('sha256').update(password).digest()
-const secretKey = Buffer.from(process.env.AI_HOME_SECRET_KEY || '', 'hex')
-if (secretKey.length !== 32) { console.error('AI_HOME_SECRET_KEY must be a 32-byte hex key.'); process.exit(1) }
 
 function send(res, status, body, headers = {}) {
   res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff', ...(res.corsHeaders || {}), ...headers })
@@ -235,7 +235,19 @@ function decryptSecret(value) {
   decipher.setAuthTag(Buffer.from(tag, 'hex'))
   return Buffer.concat([decipher.update(Buffer.from(ciphertext, 'hex')), decipher.final()]).toString('utf8')
 }
-function publicMcp(row) { let hasToken = false; try { const saved = JSON.parse(decryptSecret(row.token_enc)); hasToken = typeof saved.token === 'string' && saved.token.length > 0 } catch { hasToken = decryptSecret(row.token_enc).length > 0 }; return { id: row.id, name: row.name, url: row.url, transport: row.transport, enabled: !!row.enabled, updatedAt: row.updated_at, hasToken } }
+function readMcpCredentials(row) {
+  const raw = decryptSecret(row.token_enc)
+  try {
+    const saved = JSON.parse(raw)
+    if (saved && typeof saved === 'object' && typeof saved.token === 'string') return saved
+  } catch { /* older records store the token as plain text inside the encrypted field */ }
+  return { token: raw, headers: {} }
+}
+function publicMcp(row) {
+  const service = { id: row.id, name: row.name, url: row.url, transport: row.transport, enabled: !!row.enabled, updatedAt: row.updated_at }
+  try { return { ...service, hasToken: !!readMcpCredentials(row).token } }
+  catch { return { ...service, hasToken: null, credentialError: '已保存的 MCP 凭据无法解密' } }
+}
 function validateRemoteUrl(raw) {
   let u
   try { u = new URL(raw) } catch { throw Object.assign(new Error('MCP 地址格式无效'), { status: 400 }) }
@@ -249,10 +261,7 @@ function validateRemoteUrl(raw) {
 }
 const mcpConnectionPool = createMcpConnectionPool({
   createClient: async row => {
-    const saved = (() => {
-      try { return JSON.parse(decryptSecret(row.token_enc)) }
-      catch { return { token: decryptSecret(row.token_enc), headers: {} } }
-    })()
+    const saved = readMcpCredentials(row)
     const token = typeof saved.token === 'string' ? saved.token : ''
     const headers = { ...(token ? { Authorization: `Bearer ${token}` } : {}), ...(saved.headers && typeof saved.headers === 'object' ? saved.headers : {}) }
     const transport = new StreamableHTTPClientTransport(new URL(row.url), { requestInit: { headers, redirect: 'error' } })
@@ -925,14 +934,14 @@ const apiServer = createServer(async (req, res) => {
       const name = String(body.name ?? row.name).trim().slice(0, 120)
       if (!name) return send(res, 400, { error: '请填写服务名称' })
       const remote = validateRemoteUrl(String(body.url ?? row.url).trim())
-      const enabled = body.enabled === undefined ? row.enabled !== 0 : (body.enabled ? 1 : 0)
+      const enabled = body.enabled === undefined ? row.enabled : Number(Boolean(body.enabled))
       const token = body.token === undefined ? null : String(body.token || '').trim()
       if (token !== null && token.length > 8192) return send(res, 400, { error: 'Token 长度超出限制' })
       const updatedAt = new Date().toISOString()
       if (token === null) {
         db.prepare('UPDATE mcp_connections SET name=?, url=?, enabled=?, updated_at=? WHERE id=?').run(name, remote.toString(), enabled, updatedAt, mcpMatch[1])
       } else {
-        db.prepare('UPDATE mcp_connections SET name=?, url=?, enabled=?, token_enc=?, updated_at=? WHERE id=?').run(name, remote.toString(), enabled, encryptSecret(JSON.stringify({ token, headers: {} })), updatedAt, mcpMatch[1])
+        db.prepare('UPDATE mcp_connections SET name=?, url=?, enabled=?, token_enc=?, updated_at=? WHERE id=?').run(name, remote.toString(), enabled, encryptSecret(JSON.stringify({ ...readMcpCredentials(row), token })), updatedAt, mcpMatch[1])
       }
       void mcpConnectionPool.drop(mcpMatch[1])
       const next = db.prepare('SELECT * FROM mcp_connections WHERE id=?').get(mcpMatch[1])
