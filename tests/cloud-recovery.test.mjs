@@ -4,7 +4,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import {
-  RECOVERY_BACKUP_KEY, classifyCloudLoadError, conversationsHaveData,
+  restoreConversationLists, RECOVERY_BACKUP_KEY, classifyCloudLoadError, conversationsHaveData,
   countConversationMessages, decideCloudLoadAction, shouldBackupBeforeApply,
   buildRecoveryBackup, pickActiveConversationIds, pickActiveMessagesFromSnapshot,
 } from '../src/cloudRecovery.mjs'
@@ -216,4 +216,21 @@ test('快照字段守卫：缺 conversations 的部分快照不会清掉本地�
   assert.deepEqual(ids, {})
   const view = pickActiveMessagesFromSnapshot(undefined, {})
   assert.deepEqual(view, {})
+})
+
+test('部分会话快照逐助手恢复，空列表、第三助手和旧任务会话 ID 均保留', () => {
+  const history = [msg('user', '在写报告')]
+  const original = [conv('reminder-thread', history)]
+  const other = [conv('third-thread', [])]
+  const previous = { 'assistant-third': other }
+  const recovered = restoreConversationLists({
+    conversations: { [A]: original, [B]: [] },
+    messages: { [A]: [], [B]: history, 'assistant-yanshuo': history },
+  }, previous)
+  assert.equal(recovered[A], original)
+  assert.deepEqual(recovered[B], [])
+  assert.equal(recovered['assistant-third'], other)
+  assert.equal(recovered['assistant-yanshuo'][0].id, 'legacy-yanshu')
+  assert.equal(recovered['assistant-yanshuo'][0].messages, history)
+  assert.deepEqual(Object.keys(previous), ['assistant-third'])
 })

@@ -95,6 +95,21 @@ export function buildRecoveryBackup(localConvs, localActiveIds) {
   }
 }
 
+// Recover each owner's conversation list independently. An explicit empty list is authoritative.
+export function restoreConversationLists({ conversations, messages }, previous = {}, now = new Date().toISOString()) {
+  const lists = { ...previous }
+  const entries = value => value && typeof value === 'object' && !Array.isArray(value) ? Object.entries(value) : []
+  for (const [person, history] of entries(messages)) {
+    if (!Array.isArray(history) || Array.isArray(conversations?.[person])) continue
+    const id = person === 'assistant-yanweixi' ? 'legacy-yanweixi' : person === 'assistant-yanshuo' ? 'legacy-yanshu' : 'legacy-' + person
+    lists[person] = [{ id, title: '旧聊天', messages: history, updatedAt: now }]
+  }
+  for (const [person, list] of entries(conversations)) {
+    if (Array.isArray(list)) lists[person] = list
+  }
+  return lists
+}
+
 // 云端快照 → 各助手活跃会话 id（不存在则回退该助手第一个会话）。
 export function pickActiveConversationIds(convs, activeIds) {
   const source = convs && typeof convs === 'object' ? convs : {}

@@ -49,7 +49,7 @@ import { messageWithVision, historyVisionMessageIndexes, historicalMessageWithou
 // 会话内消息搜索（微信式）：纯字符串匹配 + 上一条/下一条循环 + messageId 定位。
 import { searchMessages, stepMatchIndex, type ChatSearchResult } from './chatSearch.mjs'
 // 云端恢复决策（数据安全）：启动动作判定、覆盖前本地备份、快照→视图提取。
-import { RECOVERY_BACKUP_KEY, decideCloudLoadAction, classifyCloudLoadError, shouldBackupBeforeApply, buildRecoveryBackup, pickActiveConversationIds, pickActiveMessagesFromSnapshot } from './cloudRecovery.mjs'
+import { restoreConversationLists, RECOVERY_BACKUP_KEY, decideCloudLoadAction, classifyCloudLoadError, shouldBackupBeforeApply, buildRecoveryBackup, pickActiveConversationIds, pickActiveMessagesFromSnapshot } from './cloudRecovery.mjs'
 // 模型请求诊断（黑匣子）：只旁路观察最终 payload，绝不改请求、绝不记录凭证。
 // 资源库绑定层：设置区一次性添加模型/MCP/世界书，聊天窗口按助手选择由哪个使用。
 import { createToolExecutionBudget } from './toolExecutionBudget.mjs'
@@ -185,11 +185,10 @@ function read<T>(key: string, fallback: T): T {
   try { return JSON.parse(localStorage.getItem(key) || '') as T } catch { return fallback }
 }
 function initialConversations():Record<Person,Conversation[]> {
-  const saved=read<any>('ai-home.conversations',null)
-  if(saved&&ASSISTANT_PEOPLE.every(id=>Array.isArray(saved[id]))) return Object.fromEntries(ASSISTANT_PEOPLE.map(id=>[id,saved[id]])) as Record<Person,Conversation[]>
-  const old=readMessages();const now=new Date().toISOString()
-  const legacyId:Record<Person,string>={[YWX]:'legacy-yanweixi',[YS]:'legacy-yanshu'}
-  return Object.fromEntries(ASSISTANT_PEOPLE.map(id=>[id,[{id:legacyId[id],title:'旧聊天',messages:old[id],updatedAt:now}]])) as Record<Person,Conversation[]>
+  return restoreConversationLists({
+    conversations: read('ai-home.conversations', null),
+    messages: readMessages(),
+  }) as Record<Person,Conversation[]>
 }
 
 // 真实工具调用事件统一由 src/toolCalls.ts 的事件层上报（见 send() 内调用点）；
@@ -339,9 +338,9 @@ export default function App() {
   const [person, setPerson] = useState<Person>(YWX)
   const [chatOpen, setChatOpen] = useState(false)
   const [drafts, setDrafts] = useState<Record<string,string>>(() => read<Record<string,string>>('ai-home.chatDrafts', {}))
-  const [messages, setMessages] = useState<Record<Person, ChatMessage[]>>(readMessages)
   const [conversations,setConversations] = useState<Record<Person,Conversation[]>>(initialConversations)
-  const [activeConversationIds,setActiveConversationIds] = useState<Record<Person,string>>(()=>{const saved=read<Record<string,string>>('ai-home.activeConversationIds',{});const all=initialConversations();return Object.fromEntries(ASSISTANT_PEOPLE.map(id=>[id,all[id].some(c=>c.id===saved[id])?saved[id]:all[id][0]?.id||''])) as Record<Person,string>})
+  const [activeConversationIds,setActiveConversationIds] = useState(() => pickActiveConversationIds(conversations, read('ai-home.activeConversationIds', {})))
+  const [messages, setMessages] = useState(() => pickActiveMessagesFromSnapshot(conversations, activeConversationIds) as Record<Person, ChatMessage[]>)
   // Drafts are isolated by assistant AND conversation, including during background generation.
   const [sendingScopes, setSendingScopes] = useState<Record<string,boolean>>({})
   const [generationStages, setGenerationStages] = useState<Record<string,''|'preparing'|'connecting'|'streaming'|'tools'>>({})
@@ -763,8 +762,8 @@ export default function App() {
     if (data.themePrefs && typeof data.themePrefs==='object' && ['lavender','paper','forest','night'].includes(data.themePrefs.theme)) setThemePrefs({...DEFAULT_THEME,...data.themePrefs})
     const restoredNames = Array.isArray(data.assistants)&&data.assistants.length?applyDefaultDisplayNames(data.assistants):[]
     if (restoredNames.length) setAssistants(restoredNames)
-    if (data.conversations && ASSISTANT_PEOPLE.every(id=>Array.isArray(data.conversations[id]))) {
-      const convs:Record<Person,Conversation[]>=Object.fromEntries(ASSISTANT_PEOPLE.map(id=>[id,data.conversations[id]])) as Record<Person,Conversation[]>
+    if (data.conversations || data.messages) {
+      const convs = restoreConversationLists(data, conversationsRef.current) as Record<Person,Conversation[]>
       // 数据安全（云端优先恢复的冲突保护）：本快照即将覆盖本地会话。若本地持有
       // 云端没有的内容（典型：上次会话末尾云保存失败，本地新、云端旧），先把本地
       // 整体备份到 localStorage——产品行为仍是云端优先，但本地不会静默消失。
@@ -775,15 +774,9 @@ export default function App() {
         } catch { /* 备份失败不阻断恢复流程 */ }
       }
       setConversations(convs)
-      const ids=data.activeConversationIds||{}
+      const ids={...activeConversationIdsRef.current, ...data.activeConversationIds}
       setActiveConversationIds(pickActiveConversationIds(convs, ids) as Record<Person,string>)
       setMessages(pickActiveMessagesFromSnapshot(convs, ids) as Record<Person,ChatMessage[]>)
-    } else if (data.messages && typeof data.messages === 'object') {
-      const legacy=Object.fromEntries(ASSISTANT_PEOPLE.map(id=>[id,Array.isArray(data.messages[id])?data.messages[id]:[]])) as Record<Person,ChatMessage[]>
-      setMessages(legacy)
-      const now=new Date().toISOString();const legacyConvId:Record<Person,string>={[YWX]:'legacy-yanweixi',[YS]:'legacy-yanshu'}
-      const convs=Object.fromEntries(ASSISTANT_PEOPLE.map(id=>[id,[{id:legacyConvId[id],title:'旧聊天',messages:legacy[id],updatedAt:now}]])) as Record<Person,Conversation[]>
-      setConversations(convs);setActiveConversationIds({...legacyConvId})
     }
     if (data.modelConfig && typeof data.modelConfig === 'object') { const saved:any=data.modelConfig; if(!saved.endpoint&&ASSISTANT_PEOPLE.every(id=>saved[id])) setModelConfig(saved); else setModelConfig(Object.fromEntries(ASSISTANT_PEOPLE.map(id=>[id,saved])) as Record<Person,ModelConfig>) }
     if (data.memory && typeof data.memory === 'object') setMemory(Object.fromEntries(ASSISTANT_PEOPLE.map(id=>[id,data.memory[id]||''])) as Record<Person,string>)

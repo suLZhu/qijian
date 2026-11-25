@@ -37,3 +37,5 @@ export declare function shouldBackupBeforeApply(localConvs: ConversationsMap | n
 export declare function buildRecoveryBackup(localConvs: ConversationsMap, localActiveIds: Record<string, string>): RecoveryBackup
 export declare function pickActiveConversationIds(convs: ConversationsMap, activeIds: Record<string, string> | null | undefined): Record<string, string>
 export declare function pickActiveMessagesFromSnapshot(convs: ConversationsMap, activeIds: Record<string, string> | null | undefined): Record<string, RecoveryMessageLike[]>
+
+export declare function restoreConversationLists(snapshot: { conversations?: unknown; messages?: unknown }, previous?: ConversationsMap, now?: string): ConversationsMap
