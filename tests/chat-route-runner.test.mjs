@@ -131,3 +131,19 @@ test('流式成功即锁定：上游 ok 之后不会再有任何换线重试', a
   assert.equal(r.routeId, 'a')
   assert.equal(r.report.usedRouteLabel, '线路 A')
 })
+
+
+test('订阅线路未接入代理时拒绝直连和后续线路', async () => {
+  let calls = 0
+  const result = await runRouteChat({
+    routes: [
+      { routeId: 'sub', source: 'subscription', endpoint: 'https://example.test/v1', apiKeys: ['token'] },
+      { routeId: 'api', endpoint: 'https://relay.test/v1', apiKeys: ['key'] },
+    ],
+    body: { model: 'model', messages: [] },
+    fetchImpl: async () => { calls++; return new Response('{}') },
+  })
+  assert.equal(result.ok, false)
+  assert.match(result.error, /订阅线路/)
+  assert.equal(calls, 0)
+})

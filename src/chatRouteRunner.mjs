@@ -21,6 +21,7 @@ export function normalizeChatRoutes(raw) {
     .filter((r) => r && typeof r === 'object')
     .map((r) => ({
       routeId: str(r.routeId) || 'route',
+      source: r.source === 'subscription' ? 'subscription' : 'api',
       label: str(r.label) || str(r.routeId) || '线路',
       endpoint: str(r.endpoint),
       chatUrl: str(r.chatUrl),
@@ -56,6 +57,11 @@ export async function runRouteChat({
 
   for (let ri = 0; ri < list.length && ri < limit; ri++) {
     const r = list[ri]
+    if (r.source === 'subscription') {
+      const error = '订阅线路尚未接入代理协议，请选择订阅账号直接聊天'
+      report = finishRouteReport(report, { failureReason: error })
+      return { ok: false, error, report, routeId: r.routeId, routeLabel: r.label, status: 400 }
+    }
     const target = routeChatTarget(r)
     if (!target || !/^https?:\/\//i.test(target)) {
       report = recordRouteAttempt(report, { routeId: r.routeId, label: r.label, status: 0, responseText: '线路地址无效' })

@@ -1,5 +1,6 @@
 export type ChatRoute = {
   routeId: string
+  source: 'api' | 'subscription'
   label: string
   endpoint: string
   chatUrl: string

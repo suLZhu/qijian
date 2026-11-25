@@ -109,3 +109,11 @@ test('buildRoutePlan：只把「有地址且有 Key」的线路送进请求链�
   assert.equal(plan[0].label, 'a')
   assert.ok(plan.every(r => r.apiKeys.length > 0))
 })
+
+
+test('订阅供应商的线路按账号类型识别', () => {
+  const vendors = [{ id: 'sub', subscriptionChannel: 'gpt', keys: [{ id: 'sub-key', value: 'token' }] }]
+  assert.equal(routeRequestParams(route('a', { vendorId: 'sub' }), vendors).source, 'subscription')
+  assert.equal(routeRequestParams(route('b', { keyId: 'sub-key' }), vendors).source, 'subscription')
+  assert.equal(routeRequestParams(route('c', { apiKey: 'relay-key' }), vendors).source, 'api')
+})

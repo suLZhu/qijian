@@ -192,10 +192,13 @@ export function routeRequestParams(route, vendors = [], fallbackKeys = []) {
     for (const k of Array.isArray(v?.keys) ? v.keys : []) push(k?.value)
   }
   for (const k of Array.isArray(fallbackKeys) ? fallbackKeys : []) push(k)
+  const subscriptionVendor = (Array.isArray(vendors) ? vendors : []).find(v =>
+    v?.subscriptionChannel && (v.id === route.vendorId || (route.keyId && v.keys?.some(k => k.id === route.keyId)))
+  )
   return {
     routeId: route.id,
     label: route.label,
-    source: route.source,
+    source: route.source === 'subscription' || subscriptionVendor ? 'subscription' : 'api',
     endpoint: route.baseUrl,
     chatUrl: route.chatUrl,
     apiPath: route.apiPath,
