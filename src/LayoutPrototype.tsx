@@ -1,5 +1,7 @@
-import { useLayoutEffect, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import { apiFetch, assetUrl } from './apiBase.mjs'
+import { RichText } from './RichText'
+import { cleanupMessageText } from './messageCleanup.mjs'
 import { extractDocumentText, supportedDocumentName } from './documentText'
 import { LEGACY_ASSISTANTS, migrateLocalStorage } from './assistantIdentity'
 import './LayoutPrototype.css'
@@ -8,7 +10,7 @@ import { settingItems } from './layout/sections'
 import { RealProviderPreview } from './RealProviderPreview'
 import type { Vendor } from './vendors.mjs'
 import { SettingsSectionsPreview } from './SettingsSectionsPreview'
-import { ModelFunctionsPreview, ScheduledTasksPreview } from './FeaturePagesPreview'
+import { ModelFunctionsPreview } from './FeaturePagesPreview'
 import { AdvancedSettingsPreview } from './AdvancedSettingsPreview'
 import { ContentSettingsPreview } from './ContentSettingsPreview'
 import { RoomAssistantPreview } from './RoomAssistantPreview'
@@ -16,12 +18,15 @@ import { RoomAssistantPreview } from './RoomAssistantPreview'
 type View = 'home' | 'chat' | 'room' | 'settings' | 'theme' | 'profile'
 type Person = string
 type AssistantView = { id: string; name: string }
-type MessageView = { role:string; content:string; id?:string; reasoning?:string; attachments?:Attachment[] }
+type MessageView = { role:string; content:string; id?:string; reasoning?:string; taskRunId?:string; contextNote?:string; taskDetails?:string; attachments?:Attachment[] }
 type ConversationView = { id: string; title: string; messages: MessageView[]; updatedAt?:string }
 type Attachment = { name:string; type:string; size:number; preview?:string; dataUrl?:string; textContent?:string; assetId?:string }
 type LayoutPrototypeProps = {
+  openChatSignal?:number
+  onViewChange?:(view:View)=>void
   renderSubscription?:()=>ReactNode
   renderUsage?:()=>ReactNode
+  renderTasks?:(person:string)=>ReactNode
   vendors?:Vendor[]
   onSaveVendors?:(next:Vendor[])=>void
   renderBinding?: (kind:'world'|'mcp')=>ReactNode
@@ -60,6 +65,15 @@ function readAssistantState() {
 
 export default function LayoutPrototype(props:LayoutPrototypeProps = {}) {
   const [view, setView] = useState<View>('home')
+  useEffect(() => { props.onViewChange?.(view) }, [view])
+  useEffect(() => {
+    if (!props.openChatSignal) return
+    setView('chat')
+    setSection(null)
+    setDrawer(false)
+    setToolsOpen(false)
+    setBindingPanel(null)
+  }, [props.openChatSignal])
   const [storedData] = useState(readAssistantState)
   const data = { assistants: props.assistants || storedData.assistants, conversations: props.conversations || storedData.conversations, activeIds: props.activeIds || storedData.activeIds }
   const people = data.assistants.map(a=>a.id)
@@ -185,7 +199,7 @@ export default function LayoutPrototype(props:LayoutPrototypeProps = {}) {
       </div>}
       {view === 'chat' && <div className="qj-chat">
         <div className="qj-chat-date">{activeConversation?.title || '暂无会话'}</div>
-        {actualMessages.map((m,i)=><div key={m.id||i} className={'qj-message '+(m.role==='user'?'mine':'from')+(m.id&&selected.includes(m.id)?' qj-message-selected':'')} onPointerDown={e=>{if(!m.id||selection?.scope===scope|| (e.target as HTMLElement).closest('button,input,textarea'))return;cancelPress();pressStart.current={x:e.clientX,y:e.clientY};pressTimer.current=setTimeout(()=>{setMessageAction({scope,id:m.id!});pressTimer.current=null},500)}} onPointerMove={e=>{if(Math.hypot(e.clientX-pressStart.current.x,e.clientY-pressStart.current.y)>10)cancelPress()}} onPointerUp={cancelPress} onPointerCancel={cancelPress} onContextMenu={e=>{if(m.id){e.preventDefault();setMessageAction({scope,id:m.id})}}} onClick={()=>{if(m.id&&selection?.scope===scope)toggleSelected(m.id)}}>{m.role!=='user'&&<span className="qj-avatar">{displayName(person).slice(0,1)}</span>}<div className="qj-message-content"><p>{m.content}</p>{m.attachments?.map((a,j)=><div key={j} className="qj-message-attachment">{a.type?.startsWith('image/')&&(a.preview||a.dataUrl)?<img src={assetUrl(a.preview||a.dataUrl||'')} alt={a.name}/>:<span>{a.name}</span>}</div>)}{m.id&&messageAction?.scope===scope&&messageAction.id===m.id&&selection?.scope!==scope&&<div className="qj-message-actions"><button onClick={()=>{setMessageEdit({scope,id:m.id!,text:m.content});setMessageAction(null)}}>编辑</button><button onClick={()=>{setSelection({scope,ids:[m.id!]});setMessageAction(null)}}>多选</button>{m.role==='assistant'&&i===actualMessages.length-1&&<button disabled={props.sending} onClick={()=>{setMessageAction(null);void props.onRegenerateMessage?.(m.id!)}}>重新生成</button>}<button onClick={()=>setMessageAction(null)}>关闭</button></div>}{m.id&&messageEdit?.scope===scope&&messageEdit.id===m.id&&<div className="qj-pending-edit"><textarea value={messageEdit.text} onChange={e=>setMessageEdit({...messageEdit,text:e.target.value})}/><button disabled={!messageEdit.text.trim()} onClick={()=>{if(props.onEditMessage?.(m.id!,messageEdit.text))setMessageEdit(null)}}>保存</button><button onClick={()=>setMessageEdit(null)}>取消</button></div>}</div></div>)}
+        {actualMessages.map((m,i)=><div key={m.id||i} className={'qj-message '+(m.role==='user'?'mine':'from')+(m.id&&selected.includes(m.id)?' qj-message-selected':'')} onPointerDown={e=>{if(!m.id||selection?.scope===scope|| (e.target as HTMLElement).closest('button,input,textarea,summary'))return;cancelPress();pressStart.current={x:e.clientX,y:e.clientY};pressTimer.current=setTimeout(()=>{setMessageAction({scope,id:m.id!});pressTimer.current=null},500)}} onPointerMove={e=>{if(Math.hypot(e.clientX-pressStart.current.x,e.clientY-pressStart.current.y)>10)cancelPress()}} onPointerUp={cancelPress} onPointerCancel={cancelPress} onContextMenu={e=>{if(m.id){e.preventDefault();setMessageAction({scope,id:m.id})}}} onClick={()=>{if(m.id&&selection?.scope===scope)toggleSelected(m.id)}}>{m.role!=='user'&&<span className="qj-avatar">{displayName(person).slice(0,1)}</span>}<div className="qj-message-content">{m.taskRunId&&<details className="reasoning"><summary>定时任务</summary><div className="reasoning-body">{m.taskDetails||m.contextNote||'定时任务'}</div></details>}{m.role==='assistant'&&m.reasoning&&<details className="reasoning"><summary>思考过程</summary><div className="reasoning-body">{cleanupMessageText(m.reasoning)}</div></details>}{m.role==='assistant'?<RichText text={cleanupMessageText(m.content||'')}/>:<p>{m.content}</p>}{m.attachments?.map((a,j)=><div key={j} className="qj-message-attachment">{a.type?.startsWith('image/')&&(a.preview||a.dataUrl)?<img src={assetUrl(a.preview||a.dataUrl||'')} alt={a.name}/>:<span>{a.name}</span>}</div>)}{m.id&&messageAction?.scope===scope&&messageAction.id===m.id&&selection?.scope!==scope&&<div className="qj-message-actions"><button onClick={()=>{setMessageEdit({scope,id:m.id!,text:m.content});setMessageAction(null)}}>编辑</button><button onClick={()=>{setSelection({scope,ids:[m.id!]});setMessageAction(null)}}>多选</button>{m.role==='assistant'&&i===actualMessages.length-1&&<button disabled={props.sending} onClick={()=>{setMessageAction(null);void props.onRegenerateMessage?.(m.id!)}}>重新生成</button>}<button onClick={()=>setMessageAction(null)}>关闭</button></div>}{m.id&&messageEdit?.scope===scope&&messageEdit.id===m.id&&<div className="qj-pending-edit"><textarea value={messageEdit.text} onChange={e=>setMessageEdit({...messageEdit,text:e.target.value})}/><button disabled={!messageEdit.text.trim()} onClick={()=>{if(props.onEditMessage?.(m.id!,messageEdit.text))setMessageEdit(null)}}>保存</button><button onClick={()=>setMessageEdit(null)}>取消</button></div>}</div></div>)}
         {selection?.scope===scope&&<div className="qj-message-actions"><button disabled={!selected.length} onClick={()=>{if(window.confirm('删除选中的 '+selected.length+' 条消息？')){props.onDeleteMessages?.(selected);setSelection(null)}}}>删除（{selected.length}）</button><button onClick={()=>setSelection(null)}>取消多选</button></div>}
       </div>}
       {view === 'room' && <div className="qj-page">
@@ -204,7 +218,7 @@ export default function LayoutPrototype(props:LayoutPrototypeProps = {}) {
             section === '订阅' ? props.renderSubscription?.() :
             section === 'AI 用量账本' ? props.renderUsage?.() :
             section === '模型功能' ? <ModelFunctionsPreview /> :
-            section === '定时任务' ? <ScheduledTasksPreview /> :
+            section === '定时任务' ? <><div className="qj-feature-intro"><h2>定时任务</h2></div><div className="qj-row-group">{people.map(id=><button key={id} className="qj-row" onClick={()=>setPerson(id)}><span>{displayName(id)}</span><small>{id===person?'当前助手':'切换助手'}</small><i><IconChevronRight size={15}/></i></button>)}</div>{props.renderTasks?.(person)}</> :
             section === '工具与扩展' ? <AdvancedSettingsPreview kind="tools" /> :
             section === '应用与设备' ? <AdvancedSettingsPreview kind="device" /> :
             section === '记忆与上下文' ? <ContentSettingsPreview type="memory" /> :

@@ -14,21 +14,28 @@ const STATUS = ['scheduled', 'paused', 'completed']
 const DAY = 86_400_000
 const WEEK = 604_800_000
 
+export function normalizeIntervalMinutes(value) {
+  const minutes = Number(value)
+  return Number.isSafeInteger(minutes) && minutes > 0 && minutes <= 144000000000 ? minutes : 0
+}
+
 // 把任意来源（旧数据、请求体、存储）收敛成结构固定的任务；无效时间直接丢弃。
 export function normalizeLocalTask(raw) {
   if (!raw || typeof raw !== 'object' || !str(raw.id)) return null
   const at = Date.parse(str(raw.run_at))
   if (!Number.isFinite(at)) return null
+  const intervalMinutes = normalizeIntervalMinutes(raw.interval_minutes)
   return {
     id: str(raw.id),
     person: str(raw.person),
     title: str(raw.title).slice(0, 160),
     prompt: str(raw.prompt).slice(0, 12000),
     run_at: new Date(at).toISOString(),
-    recurrence: RECURRENCE.includes(raw.recurrence) ? raw.recurrence : 'once',
-    interval_minutes: Number(raw.interval_minutes) === 120 ? 120 : 0,
+    recurrence: intervalMinutes ? 'daily' : (RECURRENCE.includes(raw.recurrence) ? raw.recurrence : 'once'),
+    interval_minutes: intervalMinutes,
     status: STATUS.includes(raw.status) ? raw.status : 'scheduled',
     last_run_at: str(raw.last_run_at) || null,
+    last_error: str(raw.last_error).slice(0, 1000),
     created_at: str(raw.created_at) || new Date().toISOString(),
     updated_at: str(raw.updated_at) || new Date().toISOString(),
     created_by: str(raw.created_by) || '',

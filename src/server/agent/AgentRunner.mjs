@@ -16,7 +16,7 @@ import { createToolRegistry } from './ToolRegistry.mjs'
 import { executeToolCall } from './ToolExecutor.mjs'
 import { getAgentRun, finishAgentRun } from './AgentRunStore.mjs'
 import { buildTimeContext, timeContextText, normalizeTimeZone, DEFAULT_TIME_ZONE } from '../../timeContext.mjs'
-import { scheduledConversationInstructions } from './scheduledConversation.mjs'
+import { scheduledConversationInstructions, scheduledConversationContext, scheduledConversationAnswer } from './scheduledConversation.mjs'
 
 export const MAX_ROUNDS = 5
 
@@ -46,6 +46,19 @@ function readTimeZone(db) {
     return tz ? normalizeTimeZone(tz) : DEFAULT_TIME_ZONE
   } catch {
     return DEFAULT_TIME_ZONE
+  }
+}
+
+function recentConversation(db, run) {
+  if (run.source !== 'scheduled_chat' || !run.conversationId) return []
+  try {
+    const row = db.prepare('SELECT payload FROM app_state WHERE id=1').get()
+    const state = JSON.parse(row?.payload || '{}')
+    const conversations = state?.conversations?.[run.assistantId]
+    const conversation = Array.isArray(conversations) ? conversations.find(item => item?.id === run.conversationId) : null
+    return scheduledConversationContext(state, run.assistantId, conversation)
+  } catch {
+    return []
   }
 }
 
@@ -109,6 +122,7 @@ export async function runAgent(ctx, run, { signal, timedOut } = {}) {
     })
     const messages = [
       { role: 'system', content: buildSystemPrompt(run, displayName) },
+      ...recentConversation(db, run),
       { role: 'user', content: run.prompt },
     ]
     const timeZone = readTimeZone(db)
@@ -135,7 +149,9 @@ export async function runAgent(ctx, run, { signal, timedOut } = {}) {
       messages.splice(1, 1)
 
       if (!reply.toolCalls.length) {
-        answer = reply.content || ''
+        answer = run.source === 'scheduled_chat'
+          ? scheduledConversationAnswer(reply.content, run.prompt)
+          : reply.content || ''
         break
       }
 
@@ -159,6 +175,7 @@ export async function runAgent(ctx, run, { signal, timedOut } = {}) {
       if (controller.signal.aborted) { settleAbort(); break }
       // Last round already spent: stop rather than exceed the hard cap.
       if (rounds === MAX_ROUNDS) {
+        if (run.source === 'scheduled_chat') throw new Error('达到工具调用上限，未生成提醒正文')
         status = 'succeeded'
         answer = '(已达最大执行轮数上限，任务在工具调用后停止，请根据以上工具结果回答用户)'
       }

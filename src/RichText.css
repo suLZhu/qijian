@@ -1,5 +1,5 @@
 /* 聊天富文本：只作用于气泡内部，不改气泡本身的排版变量。 */
-.bubble .rich-text{white-space:normal;overflow-wrap:anywhere;word-break:break-word}
+.rich-text{white-space:normal;overflow-wrap:anywhere;word-break:break-word}
 .rich-text > :first-child{margin-top:0}
 .rich-text > :last-child{margin-bottom:0}
 .rich-text p{margin:.45em 0;line-height:1.68}

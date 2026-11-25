@@ -8,6 +8,7 @@ export type AlarmTask = {
   body: string
   at: number
   recurrence: string
+  intervalMinutes: number
   status: string
   kind: string
   channelId: string
@@ -17,7 +18,7 @@ export type AlarmTask = {
 export declare const MAX_ALARMS: number
 export declare const RESTORE_GRACE_MS: number
 export declare function alarmRunId(task: Record<string, unknown>): string
-export declare function normalizeAlarmTask(raw: unknown): Record<string, string> | null
+export declare function normalizeAlarmTask(raw: unknown): Record<string, string | number> | null
 export declare function buildAlarmPlan(tasks: unknown[], now?: number): AlarmTask[]
 export declare function restoreAlarmPlan(tasks: unknown[], now?: number, delivered?: unknown, graceMs?: number): AlarmTask[]
 export declare function syncSummary(plan: unknown[], exact: boolean): { registered: number; exact: boolean; degraded: boolean; at: number }

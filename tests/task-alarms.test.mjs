@@ -122,3 +122,29 @@ test('精确定时权限有 / 无两条路径都能登记任务，只是标注�
   assert.equal(syncSummary(plan, false).registered, 1, '缺精确权限不能让整个主动任务失效')
   assert.equal(syncSummary([], false).registered, 0)
 })
+
+
+test('十分钟重复闹钟恢复时保留间隔', () => {
+  const t = task({ recurrence: 'daily', interval_minutes: 10, run_at: new Date(NOW - 60000).toISOString() })
+  const plan = restoreAlarmPlan([t], NOW)
+  assert.equal(plan[0].at, NOW + 9 * 60000)
+  assert.equal(plan[0].intervalMinutes, 10)
+  assert.equal(plan[0].runId, 'local-t1-' + (NOW + 9 * 60000))
+  const restored = restoreAlarmPlan([t], NOW, new Set([alarmRunId(t)]))
+  assert.equal(restored.length, 1)
+  assert.equal(restored[0].runId, plan[0].runId)
+})
+
+test('聊天提醒的原生通知只显示到点状态，任务原文留在会话折叠详情', () => {
+  const prompt = '10分钟后提醒阿懒喝水，起来走动'
+  const reminder = task({ title: prompt, prompt })
+  for (const plan of [buildAlarmPlan([reminder], NOW), restoreAlarmPlan([reminder], NOW)]) {
+    assert.equal(plan.length, 1)
+    const [alarm] = plan
+    assert.equal(alarm.conversationId, 'conv-1')
+    assert.equal(alarm.key, 'task:' + alarmRunId(reminder))
+    assert.equal(alarm.title, '定时提醒')
+    assert.match(alarm.body, /提醒时间到了/)
+    assert.ok(!JSON.stringify(alarm).includes(prompt))
+  }
+})

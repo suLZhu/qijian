@@ -86,7 +86,6 @@ final class SystemAlarms {
             String runId = item.optString("runId", "");
             if (runId.isEmpty() || seen.contains(runId)) continue;
             if (!"scheduled".equals(item.optString("status", "scheduled"))) continue;
-            if (SystemStore.wasDelivered(c, "task:" + runId)) continue;
             long at = item.optLong("at", 0);
             String recurrence = item.optString("recurrence", "once");
             if (at <= now) {
@@ -95,13 +94,21 @@ final class SystemAlarms {
                     if (now - at > RESTORE_GRACE_MS) continue;
                     at = now + 30_000L;
                 } else {
-                    long step = "weekly".equals(recurrence) ? WEEK : DAY;
+                    long minutes = item.optLong("intervalMinutes", 0);
+                    long step = minutes > 0 ? minutes * 60_000L : ("weekly".equals(recurrence) ? WEEK : DAY);
                     long jumps = (now - at + step) / step;
                     at += jumps * step;
                     if (at <= now) at += step;
                 }
-                try { item.put("at", at); } catch (Exception ignored) { }
+                try {
+                    item.put("at", at);
+                    if (!"once".equals(recurrence)) {
+                        runId = "local-" + item.optString("taskId", "") + "-" + at;
+                        item.put("runId", runId);
+                    }
+                } catch (Exception ignored) { }
             }
+            if (seen.contains(runId) || SystemStore.wasDelivered(c, "task:" + runId)) continue;
             seen.add(runId);
             out.put(item);
         }
@@ -109,7 +116,7 @@ final class SystemAlarms {
     }
 
     /** 用已过滤的计划重新登记；返回值直接喂给 JS 侧 normalizeAlarm()。 */
-    static JSONObject register(Context c, JSONArray clean) {
+    static synchronized JSONObject register(Context c, JSONArray clean) {
         long now = System.currentTimeMillis();
         AlarmManager am = manager(c);
         cancelRegistered(c);
@@ -166,25 +173,53 @@ final class SystemAlarms {
     }
 
     /** 重复任务触发后，在原生层续排下一次（App 可能长期不打开）。 */
-    static void scheduleNext(Context c, JSONObject item) {
+    static synchronized void scheduleNext(Context c, JSONObject item) {
+        String previousRunId = item.optString("runId", "");
+        JSONArray plan = SystemStore.plan(c);
+        int planIndex = -1;
+        for (int i = 0; i < plan.length(); i++) {
+            JSONObject planned = plan.optJSONObject(i);
+            if (planned != null && previousRunId.equals(planned.optString("runId", ""))) {
+                planIndex = i;
+                break;
+            }
+        }
+        if (planIndex < 0) return;
         String recurrence = item.optString("recurrence", "once");
         if ("once".equals(recurrence)) return;
         AlarmManager am = manager(c);
         if (am == null) return;
-        long step = "weekly".equals(recurrence) ? WEEK : DAY;
+        long minutes = item.optLong("intervalMinutes", 0);
+        long step = minutes > 0 ? minutes * 60_000L : ("weekly".equals(recurrence) ? WEEK : DAY);
         long base = item.optLong("at", 0);
         long now = System.currentTimeMillis();
         if (base <= 0) return;
         long jumps = (now - base + step) / step;
         long next = base + jumps * step;
         if (next <= now) next += step;
-        try { item.put("at", next); } catch (Exception ignored) { }
+        try {
+            item.put("at", next);
+            item.put("runId", "local-" + item.optString("taskId", "") + "-" + next);
+        } catch (Exception ignored) { }
         PendingIntent pi = pending(c, item);
+        boolean registered = false;
         try {
             if (canScheduleExact(c)) am.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, next, pi);
             else am.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, next, pi);
+            registered = true;
         } catch (SecurityException e) {
-            try { am.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, next, pi); } catch (Exception ignored) { }
+            try { am.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, next, pi); registered = true; } catch (Exception ignored) { }
         }
+        if (!registered) return;
+        JSONArray ids = SystemStore.registered(c);
+        JSONArray nextIds = new JSONArray();
+        for (int i = 0; i < ids.length(); i++) {
+            String id = ids.optString(i, "");
+            if (!id.isEmpty() && !previousRunId.equals(id)) nextIds.put(id);
+        }
+        nextIds.put(item.optString("runId", ""));
+        SystemStore.setRegistered(c, nextIds);
+        try { plan.put(planIndex, item); } catch (Exception ignored) { }
+        SystemStore.setPlan(c, plan);
     }
 }

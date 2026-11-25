@@ -9,13 +9,14 @@
 // consume-decision logic is the SAME code in production and in node tests.
 
 // Build the JSON envelope stored in assistant_inbox.content for kind='task_result'.
-export function taskResultEnvelope({ runId, taskId, conversationId, title, answer }) {
+export function taskResultEnvelope({ runId, taskId, conversationId, title, prompt, answer }) {
   return JSON.stringify({
     v: 1,
     runId: String(runId || ''),
     taskId: String(taskId || ''),
     conversationId: String(conversationId || ''),
     title: String(title || '').slice(0, 160),
+    prompt: String(prompt || '').slice(0, 12000),
     answer: String(answer || '').slice(0, 3600),
   })
 }
@@ -31,6 +32,7 @@ export function parseTaskEnvelope(content) {
       taskId: typeof env.taskId === 'string' ? env.taskId : '',
       conversationId: typeof env.conversationId === 'string' ? env.conversationId : '',
       title: typeof env.title === 'string' ? env.title : '',
+      prompt: typeof env.prompt === 'string' ? env.prompt : '',
       answer: typeof env.answer === 'string' ? env.answer : '',
     }
   } catch { return null }

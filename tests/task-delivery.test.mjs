@@ -550,7 +550,7 @@ test('17 坏信封安全跳过', () => {
   assert.equal(decideTaskConsumption(null, null).action, 'skip_invalid')
   // 正常信封解析
   const env = parseTaskEnvelope(taskResultEnvelope({ runId: 'r1', taskId: 't1', conversationId: 'c1', title: 'T', answer: 'A' }))
-  assert.deepEqual(env, { runId: 'r1', taskId: 't1', conversationId: 'c1', title: 'T', answer: 'A' })
+  assert.deepEqual(env, { runId: 'r1', taskId: 't1', conversationId: 'c1', title: 'T', prompt: '', answer: 'A' })
 })
 
 // ============================================================================
@@ -707,4 +707,58 @@ test('每两小时重复任务运行后推进两小时，错过多轮也只补�
   assert.equal((Date.parse(updated.run_at)-Date.parse(original))%(120*60000),0)
   assert.equal(scheduler.tick(),0)
   assert.equal(listInbox(db).filter(x=>x.kind==='task_result').length,1)
+})
+
+
+test('一次性喝水提醒读取绑定会话，成功投递后删除助手临时任务', async () => {
+  const db = makeDb()
+  const state = { characters: { [PERSON]: { definition: '温柔自然地聊天' } }, userSettings: { [PERSON]: { callName: '阿懒' } }, conversations: { [PERSON]: [{ id: 'conv-water', messages: [
+    { role: 'user', content: '今天上班有点累' },
+    { role: 'assistant', content: '忙完记得休息' },
+  ] }, { id: 'other', messages: [{ role: 'user', content: '其他会话的内容' }] }] } }
+  db.prepare('INSERT INTO app_state(id,payload,updated_at) VALUES(1,?,?)').run(JSON.stringify(state), new Date().toISOString())
+  const requests = installModel([textReply('阿懒，工作辛苦啦，起来喝口水吧。')])
+  const taskId = insertTask(db, { conversationId: 'conv-water', title: '提醒喝水' })
+  db.prepare('UPDATE scheduled_tasks SET prompt=?, created_by=?, temporary=1 WHERE id=?').run('十分钟后提醒阿懒喝水，起来走动', PERSON, taskId)
+  const bus = new AgentEventBus()
+  let runId = null
+  bus.subscribe(event => { if (event.type === 'run_created' && event.taskId === taskId) runId = event.runId })
+  createTaskScheduler({ db, runner: new AgentRunner(makeCtx(db)), bus, deliverTask: entry => addTaskResult(db, entry) }).tick()
+  assert.ok(await waitFor(() => runId && listInbox(db).some(row => row.kind === 'task_result')))
+  assert.equal(getAgentRun(db, runId).source, 'scheduled_chat')
+  assert.ok(requests[0].messages.some(message => message.content.includes('温柔自然地聊天') && message.content.includes('阿懒')))
+  assert.ok(requests[0].messages.some(message => message.content === '今天上班有点累'))
+  assert.ok(!requests[0].messages.some(message => message.content === '其他会话的内容'))
+  assert.equal(db.prepare('SELECT id FROM scheduled_tasks WHERE id=?').get(taskId), undefined)
+  const result = parseTaskEnvelope(listInbox(db)[0].content)
+  assert.equal(result.answer, '阿懒，工作辛苦啦，起来喝口水吧。')
+  assert.equal(result.prompt, '十分钟后提醒阿懒喝水，起来走动')
+})
+
+
+test('服务端十分钟重复任务推进到下一次', async () => {
+  const db = makeDb()
+  db.exec('ALTER TABLE scheduled_tasks ADD COLUMN interval_minutes INTEGER NOT NULL DEFAULT 0')
+  const taskId = insertTask(db, { title: '每十分钟聊天', recurrence: 'daily' })
+  const original = db.prepare('SELECT run_at FROM scheduled_tasks WHERE id=?').get(taskId).run_at
+  db.prepare('UPDATE scheduled_tasks SET interval_minutes=10 WHERE id=?').run(taskId)
+  installModel([textReply('在忙什么呀？')])
+  const scheduler = createTaskScheduler({ db, runner: new AgentRunner(makeCtx(db)), bus: new AgentEventBus(), deliverTask: entry => addTaskResult(db, entry) })
+  assert.equal(scheduler.tick(), 1)
+  assert.ok(await waitFor(() => listInbox(db).some(row => row.kind === 'task_result')))
+  const next = db.prepare('SELECT run_at FROM scheduled_tasks WHERE id=?').get(taskId).run_at
+  assert.equal((Date.parse(next) - Date.parse(original)) % 600000, 0)
+  assert.ok(Date.parse(next) > Date.now())
+})
+
+test('喝水提醒被原样复述时，服务端保留一次性任务且不会发送原文', async () => {
+  const db = makeDb()
+  const prompt = '10分钟后提醒我喝水，起来走动'
+  installModel([textReply(prompt + '。')])
+  const taskId = insertTask(db, { title: '提醒喝水', conversationId: 'conv-water' })
+  db.prepare('UPDATE scheduled_tasks SET prompt=?, created_by=?, temporary=1 WHERE id=?').run(prompt, PERSON, taskId)
+  const scheduler = createTaskScheduler({ db, runner: new AgentRunner(makeCtx(db)), bus: new AgentEventBus(), deliverTask: entry => addTaskResult(db, entry) })
+  assert.equal(scheduler.tick(), 1)
+  assert.ok(await waitFor(() => db.prepare('SELECT status FROM scheduled_tasks WHERE id=?').get(taskId)?.status === 'paused'))
+  assert.equal(listInbox(db).length, 0)
 })

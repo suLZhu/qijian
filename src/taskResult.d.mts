@@ -3,10 +3,11 @@ export type TaskResultEnvelope = {
   taskId: string
   conversationId: string
   title: string
+  prompt: string
   answer: string
 }
 
-export function taskResultEnvelope(input: { runId?: string; taskId?: string; conversationId?: string; title?: string; answer?: string }): string
+export function taskResultEnvelope(input: { runId?: string; taskId?: string; conversationId?: string; title?: string; prompt?: string; answer?: string }): string
 export function parseTaskEnvelope(content: unknown): TaskResultEnvelope | null
 
 export type TaskConsumptionDecision =

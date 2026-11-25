@@ -17,7 +17,12 @@
 // 纯 ESM、无框架依赖；apiBase.mjs 在 local 模式下把 apiFetch 路由到这里。
 import { mcpMigrationKey } from './mcpMigration.mjs'
 import { injectTimeContext } from './timeContext.mjs'
-import { readKeyCandidates, isRetryableKeyStatus } from './vendors.mjs'
+import { readKeyCandidates, isRetryableKeyStatus, resolveKeyCandidates, chatRequestUrl } from './vendors.mjs'
+import { resolveModelConfig } from './resourceBindings.mjs'
+import { scheduledConversationInstructions, isScheduledConversationTask, scheduledConversationContext, scheduledConversationAnswer } from './server/agent/scheduledConversation.mjs'
+import { taskResultEnvelope } from './taskResult.mjs'
+import { buildRoutePlan, logicalModelId } from './modelRoutes.mjs'
+import { normalizeRouteState, activeLogicalId, fixedRouteId } from './routeState.mjs'
 import { normalizeLocalTask, makeLocalTask, dueLocalTasks, advanceLocalTask } from './localTasks.mjs'
 import { performSubscriptionLogin } from './subscriptionLogin.mjs'
 import { exchangeOAuthCode } from './subscriptionOAuth.mjs'
@@ -564,6 +569,71 @@ function sseKeepAlive() {
   })
 }
 
+// The lock only protects the live WebView. The deterministic inbox id protects
+// a completed result if the process stops between writing it and advancing the task.
+const activeLocalTasks = new Set()
+
+async function runLocalConversationTask(task, nowMs) {
+  if (activeLocalTasks.has(task.id)) return
+  activeLocalTasks.add(task.id)
+  try {
+    const runId = 'local-' + task.id + '-' + Date.parse(task.run_at)
+    const inboxId = 'task-' + runId
+    let inbox = readJSON(K.inbox, [])
+    let result = inbox.find(item => item && item.id === inboxId)
+    if (!result) {
+      const state = readJSON(K.state, {}) || {}
+      const conversations = state.conversations?.[task.person] || []
+      const conversation = conversations.find(item => item?.id === task.conversation_id)
+      if (!conversation) return
+      const bindings = readJSON('ai-home.bindings', state.bindings || {}) || {}
+      const binding = bindings[task.person] || {}
+      const profiles = readJSON('ai-home.modelProfiles', state.modelProfiles || [])
+      const defaultModel = readJSON('ai-home.defaultModel', '')
+      const legacy = readJSON('ai-home.modelConfig', state.modelConfig || {})
+      const model = resolveModelConfig(binding.modelProfileId || defaultModel, profiles, legacy[task.person] || {})
+      const vendors = readJSON('ai-home.vendors', [])
+      const vendor = vendors.find(item => item.id === model.vendorId)
+      const keys = resolveKeyCandidates(vendors, binding.keyId || '', readJSON('ai-home.apiKey', {})[task.person] || '', model.vendorId || '')
+      const routeState = normalizeRouteState(readJSON('ai-home.routeState', null))
+      const logicalId = activeLogicalId(routeState, task.person, logicalModelId(model.model || ''))
+      const routes = buildRoutePlan({ routes: routeState.routes, logicalId, vendors, binding: { fixedRouteId: fixedRouteId(routeState, task.person) } })
+      if (!routes.length && vendor?.subscriptionChannel) throw new Error('订阅代理尚未接入本地任务，任务已暂停')
+      if (!model.model || (!routes.length && (!model.endpoint || !keys.length))) throw new Error('请先为助手配置可用模型，任务已暂停')
+      const messages = [
+        { role: 'system', content: scheduledConversationInstructions() },
+        ...scheduledConversationContext(state, task.person, conversation),
+        { role: 'user', content: task.prompt },
+      ]
+      const body = { model: model.model, stream: false, messages }
+      const response = await handleChat({ signal: AbortSignal.timeout(45000), body: JSON.stringify({ endpoint: model.endpoint, chatUrl: vendor ? chatRequestUrl(vendor) : '', apiKeys: keys, timeZone: state.timeZone, body, ...(routes.length ? { routes } : {}) }) })
+      const data = await response.json().catch(() => ({}))
+      if (!response.ok) throw new Error(data.error || '模型请求失败')
+      const answer = scheduledConversationAnswer(data.choices?.[0]?.message?.content, task.prompt)
+      const current = readJSON(K.tasks, []).find(item => item?.id === task.id)
+      if (!current || current.status !== 'scheduled' || current.run_at !== task.run_at) return
+      const latestState = readJSON(K.state, {}) || {}
+      if (!latestState.conversations?.[task.person]?.some(item => item?.id === task.conversation_id)) throw new Error('绑定会话不可用，任务已暂停')
+      result = { id: inboxId, person: task.person, kind: 'task_result', content: taskResultEnvelope({ runId, taskId: task.id, conversationId: task.conversation_id, title: task.title, prompt: task.prompt, answer }), created_at: new Date(nowMs).toISOString(), read_at: null }
+      inbox = readJSON(K.inbox, [])
+      writeJSON(K.inbox, [result, ...inbox.filter(item => item?.id !== inboxId)])
+    }
+    const latest = readJSON(K.tasks, [])
+    const current = latest.find(item => item?.id === task.id)
+    if (!current || current.status !== 'scheduled' || current.run_at !== task.run_at) return
+    const remove = task.recurrence === 'once' && task.temporary && task.created_by === task.person
+    writeJSON(K.tasks, remove ? latest.filter(item => item.id !== task.id) : latest.map(item => item.id === task.id ? advanceLocalTask(task, nowMs) : item))
+  } catch (error) {
+    const latest = readJSON(K.tasks, [])
+    const current = latest.find(item => item?.id === task.id)
+    if (current && current.status === 'scheduled' && current.run_at === task.run_at) {
+      writeJSON(K.tasks, latest.map(item => item.id === task.id ? { ...item, status: 'paused', last_error: String(error?.message || '任务执行失败'), updated_at: nowISO() } : item))
+    }
+  } finally {
+    activeLocalTasks.delete(task.id)
+  }
+}
+
 // ── 路由分发 ────────────────────────────────────────────────────────────────
 // 入口：apiBase.mjs 在 local 模式把所有 /api/* 请求转发到这里。
 // 任何未捕获异常都收敛成 500 JSON，绝不让请求裸奔失败。
@@ -1103,10 +1173,18 @@ export async function localHandle(path, init) {
       const nowMs = Number.isFinite(parsed) ? parsed : Date.now()
       const all = readJSON(K.tasks, [])
       const list = (Array.isArray(all) ? all : []).map(normalizeLocalTask).filter(Boolean)
-      const due = dueLocalTasks(list, nowMs)
+      const due = dueLocalTasks(list, nowMs).filter(task => {
+        if (!task.conversation_id || !b.conversationIds || typeof b.conversationIds !== 'object') return true
+        const ids = b.conversationIds[task.person]
+        return Array.isArray(ids) && ids.includes(task.conversation_id)
+      })
       if (!due.length) return json(200, { fired: [], tasks: list })
+      const natural = due.filter(task => isScheduledConversationTask(task.prompt, task.title))
+      await Promise.all(natural.map(task => runLocalConversationTask(task, nowMs)))
+      const ordinary = due.filter(task => !natural.includes(task))
+      if (!ordinary.length) return json(200, { fired: [], alarmsChanged: natural.length > 0, tasks: readJSON(K.tasks, []) })
       const fired = [], notices = [], advanced = new Map()
-      for (const t of due) {
+      for (const t of ordinary) {
         const answer = '⏰ ' + t.title + (t.prompt ? '\n' + t.prompt : '')
         fired.push({
           runId: 'local-' + t.id + '-' + Date.parse(t.run_at), taskId: t.id, person: t.person,
@@ -1118,9 +1196,12 @@ export async function localHandle(path, init) {
       const inboxAll = readJSON(K.inbox, [])
       try {
         writeJSON(K.inbox, [...notices].reverse().concat(Array.isArray(inboxAll) ? inboxAll : []).slice(0, 200))
-        writeJSON(K.tasks, list.map(t => advanced.get(t.id) || t))
+        writeJSON(K.tasks, readJSON(K.tasks, []).map(t => {
+          const original = ordinary.find(item => item.id === t.id)
+          return original && t.status === 'scheduled' && t.run_at === original.run_at ? advanced.get(t.id) : t
+        }))
       } catch { return json(500, { error: '本地存储写入失败' }) }
-      return json(200, { fired, tasks: list.map(t => advanced.get(t.id) || t) })
+      return json(200, { fired, alarmsChanged: natural.length > 0, tasks: readJSON(K.tasks, []) })
     }
     const taskMatch = p.match(/^\/api\/tasks\/([^/]+)$/)
     if (taskMatch && method === 'PUT') {
@@ -1135,7 +1216,7 @@ export async function localHandle(path, init) {
         if (!Number.isFinite(Date.parse(String(b.runAt)))) return json(400, { error: '执行时间无效' })
         runAt = new Date(b.runAt).toISOString()
       }
-      const task = { ...row, status: ['scheduled', 'paused', 'completed'].includes(b.status) ? b.status : row.status, run_at: runAt, updated_at: nowISO() }
+      const task = { ...row, status: ['scheduled', 'paused', 'completed'].includes(b.status) ? b.status : row.status, last_error: b.status === 'scheduled' ? '' : row.last_error, run_at: runAt, updated_at: nowISO() }
       list[i] = task
       try { writeJSON(K.tasks, list) } catch { return json(500, { error: '本地存储写入失败' }) }
       return json(200, { task })
@@ -1173,7 +1254,7 @@ export async function localHandle(path, init) {
         if (!row.temporary) return json(403, { error: '长期工作流禁止自动永久删除，请手动处理' })
         next = list.filter(t => t.id !== row.id)
       } else {
-        next = list.map(t => t.id === row.id ? { ...t, status: b.action === 'pause' ? 'paused' : 'scheduled', updated_at: nowISO() } : t)
+        next = list.map(t => t.id === row.id ? { ...t, status: b.action === 'pause' ? 'paused' : 'scheduled', last_error: b.action === 'resume' ? '' : t.last_error, updated_at: nowISO() } : t)
       }
       try { writeJSON(K.tasks, next) } catch { return json(500, { error: '本地存储写入失败' }) }
       return json(200, { ok: true, ...(b.action === 'delete' ? {} : { task: next.find(t => t.id === row.id) }) })

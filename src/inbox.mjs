@@ -21,11 +21,11 @@ export function addInboxMessage(db,{person,content,kind='message'}) {
 // INSERT OR IGNORE 让同一次运行的重复结算（轮询/刷新/重启后的重放）永远只落一行——
 // 幂等由 SQLite 主键保障，不依赖任何内存去重。content 是结构化信封（见 taskResult.mjs），
 // 前端凭 conversationId 精确写回原会话、凭 runId 做持久化幂等判定。
-export function addTaskResult(db,{person,runId,taskId,conversationId,title,answer}) {
+export function addTaskResult(db,{person,runId,taskId,conversationId,title,prompt,answer}) {
  if(!isValidAssistantId(person))throw Error('无效人物')
  if(typeof runId!=='string'||!runId.trim())throw Error('运行标识无效')
- const content=taskResultEnvelope({runId,taskId,conversationId,title,answer})
- if(!content.trim()||content.length>4000)throw Error('消息内容无效')
+ const content=taskResultEnvelope({runId,taskId,conversationId,title,prompt,answer})
+ if(!content.trim()||content.length>17000)throw Error('消息内容无效')
  const id='task-'+runId.trim(),created_at=new Date().toISOString()
  const res=db.prepare('INSERT OR IGNORE INTO assistant_inbox(id,person,content,kind,created_at) VALUES(?,?,?,\'task_result\',?)').run(id,person,content,created_at)
  const row=db.prepare('SELECT id,person,content,kind,created_at,read_at FROM assistant_inbox WHERE id=?').get(id)

@@ -14,6 +14,7 @@
 // to re-schedule it — recovery is explicit, and a live 'ready' row can never
 // starve other due tasks inside one tick.
 import { createAgentRun } from './AgentRunStore.mjs'
+import { nextRunAt } from '../../localTasks.mjs'
 import { isValidAssistantId } from '../identity.mjs'
 import { isScheduledConversationTask } from './scheduledConversation.mjs'
 
@@ -41,10 +42,10 @@ function claimDueTask(db, nowIso) {
         WHERE id=? AND status='scheduled'`).run(nowIso, nowIso, task.id)
       if (claimed.changes) return task
     } else {
-      const next = new Date(task.run_at)
-      do { next.setTime(next.getTime() + (Number(task.interval_minutes) > 0 ? Number(task.interval_minutes) * 60000 : task.recurrence === 'daily' ? 86400000 : 604800000)) } while (next <= new Date(nowIso))
+      const next = nextRunAt(task, Date.parse(nowIso))
+      if (!next) continue
       const claimed = db.prepare(`UPDATE scheduled_tasks SET last_run_at=?, run_at=?, updated_at=?
-        WHERE id=? AND status='scheduled'`).run(nowIso, next.toISOString(), nowIso, task.id)
+        WHERE id=? AND status='scheduled'`).run(nowIso, next, nowIso, task.id)
       if (claimed.changes) return task
     }
   }
@@ -100,6 +101,7 @@ export function createTaskScheduler(ctx) {
               taskId: task.id,
               conversationId: task.conversation_id || '',
               title: task.title || '',
+              prompt: task.prompt || '',
               answer: finished?.answer || '',
             })
             delivered = !!(result && result.inserted)
@@ -108,6 +110,9 @@ export function createTaskScheduler(ctx) {
             // auditable in agent_runs and the event reports delivered=false.
             console.error('[scheduler] deliver failed', task.id, error?.message || error)
           }
+        }
+        if (task.recurrence === 'once' && task.temporary && task.created_by === task.person && delivered && String(finished?.answer || '').trim() && task.conversation_id) {
+          db.prepare('DELETE FROM scheduled_tasks WHERE id=? AND person=? AND status=?').run(task.id, task.person, 'completed')
         }
         bus.publish({ type: 'task_finished', taskId: task.id, runId: run.id, status, delivered })
       })

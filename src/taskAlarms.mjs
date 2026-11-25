@@ -11,7 +11,9 @@
 // - 重复任务从过期点推算下一次，只保留一个未来时刻；
 // - 按 runId 去重并限量，配合原生层「同 requestCode 先 cancel 再 set」不会重复注册。
 
-import { nextRunAt } from './localTasks.mjs'
+import { nextRunAt, normalizeIntervalMinutes } from './localTasks.mjs'
+
+import { isScheduledConversationTask } from './server/agent/scheduledConversation.mjs'
 
 export const MAX_ALARMS = 60
 export const RESTORE_GRACE_MS = 6 * 60 * 60 * 1000
@@ -39,13 +41,15 @@ export function normalizeAlarmTask(raw) {
     prompt: String(raw.prompt ?? '').trim().slice(0, 1200),
     run_at: new Date(runAt).toISOString(),
     recurrence: ['once', 'daily', 'weekly'].includes(raw.recurrence) ? raw.recurrence : 'once',
+    interval_minutes: normalizeIntervalMinutes(raw.interval_minutes),
     status: String(raw.status ?? '').trim(),
     conversation_id: String(raw.conversation_id ?? raw.conversationId ?? '').trim().slice(0, 120),
   }
 }
 
 function planItem(task, at, runId) {
-  const body = '⏰ ' + task.title + (task.prompt ? '\n' + task.prompt : '')
+  const conversational = isScheduledConversationTask(task.prompt, task.title)
+  const body = conversational ? '提醒时间到了，点此打开会话。' : '⏰ ' + task.title + (task.prompt ? '\n' + task.prompt : '')
   return {
     taskId: task.id,
     runId,
@@ -56,10 +60,11 @@ function planItem(task, at, runId) {
     // 同步到原生时会补上当前显示名，锁屏期间的原生提醒也能显示助手名。
     assistantName: '',
     conversationId: task.conversation_id,
-    title: task.title,
+    title: conversational ? '定时提醒' : task.title,
     body,
     at,
     recurrence: task.recurrence,
+    intervalMinutes: task.interval_minutes,
     status: 'scheduled',
     kind: 'task',
     channelId: SYSTEM_CHANNEL_ID,
@@ -109,8 +114,8 @@ export function restoreAlarmPlan(tasks, now = Date.now(), delivered = {}, graceM
     const t = normalizeAlarmTask(raw)
     if (!t || t.status !== 'scheduled') continue
     const originalAt = Date.parse(t.run_at)
-    const runId = alarmRunId(t)
-    if (!runId || done.has(runId)) continue
+    let runId = alarmRunId(t)
+    if (!runId) continue
     let at = originalAt
     if (at <= now) {
       if (t.recurrence === 'once') {
@@ -121,8 +126,10 @@ export function restoreAlarmPlan(tasks, now = Date.now(), delivered = {}, graceM
         if (!next) continue
         at = Date.parse(next)
         if (!Number.isFinite(at) || at <= now) continue
+        runId = 'local-' + t.id + '-' + at
       }
     }
+    if (done.has(runId)) continue
     items.push(planItem(t, at, runId))
   }
   return finalize(items)

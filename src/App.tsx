@@ -125,7 +125,7 @@ function alignCardNames(cards:Record<string,CharacterCard>|null|undefined, names
 type Tool = '人物设置' | '世界书' | '记忆面板' | '工作流' | '自主生活' | 'MCP' | '模型设置' | 'SKILL 技能库' | '角色外观' | '工具调用看板' | '助手档案'
 type MessageAttachment = { name: string; type: string; size: number; preview?: string; dataUrl?: string; textContent?: string; assetId?: string }
 type TokenUsage = { at?: string; model?: string; promptTokens?: number; completionTokens?: number; cachedTokens?: number; cacheReadTokens?: number; elapsedMs?: number; preflightMs?: number; firstTokenMs?: number; streamMs?: number; tokensPerSecond?: number }
-type ChatMessage = { role: 'user' | 'assistant'; content: string; at?: string; id?: string; contextNote?: string; attachments?: MessageAttachment[]; usage?: TokenUsage; taskRunId?: string; reasoning?: string }
+type ChatMessage = { role: 'user' | 'assistant'; content: string; at?: string; id?: string; contextNote?: string; taskDetails?: string; attachments?: MessageAttachment[]; usage?: TokenUsage; taskRunId?: string; reasoning?: string }
 type Conversation = { id:string; title:string; messages:ChatMessage[]; updatedAt:string; summary?:string; summaryThroughId?:string; summaryThrough?:number; summaryAt?:string }
 
 async function fetchWithSoftTimeout(input:string, init:RequestInit, timeoutMs:number, parentSignal?:AbortSignal):Promise<Response>{
@@ -337,6 +337,7 @@ export default function App() {
   const displayName = (id: Person) => assistants.find(a => a.id === id)?.name || DEFAULT_DISPLAY_NAMES[id] || id
   const [person, setPerson] = useState<Person>(YWX)
   const [chatOpen, setChatOpen] = useState(false)
+  const [openChatSignal, setOpenChatSignal] = useState(0)
   const [drafts, setDrafts] = useState<Record<string,string>>(() => read<Record<string,string>>('ai-home.chatDrafts', {}))
   const [conversations,setConversations] = useState<Record<Person,Conversation[]>>(initialConversations)
   const [activeConversationIds,setActiveConversationIds] = useState(() => pickActiveConversationIds(conversations, read('ai-home.activeConversationIds', {})))
@@ -479,9 +480,10 @@ export default function App() {
   // 每次渲染后把最新状态灌进处理器引用，避免原生回调拿到过期的会话状态。
   useEffect(() => {
     const activateConversation = (personId: string, conversationId: string) => {
+      const target = conversationId ? (conversationsRef.current[personId] || []).find(c => c.id === conversationId) : null
+      if (conversationId && !target) { setChatError('通知对应的会话已不存在'); return }
       setPerson(personId); setPage('room'); setChatOpen(true); setActiveTool(''); setToast(null)
-      if (!conversationId) return
-      const target = (conversationsRef.current[personId] || []).find(c => c.id === conversationId)
+      setOpenChatSignal(value => value + 1)
       if (!target) return
       const prevActive = activeConversationIdsRef.current[personId]
       if (prevActive === target.id) return
@@ -556,10 +558,11 @@ export default function App() {
       for (const a of assistantsRef.current) {
         try {
           const r = await apiFetch('/api/tasks?person=' + encodeURIComponent(a.id))
-          if (!r.ok) continue
+          if (!r.ok) return
           const data: any = await r.json()
-          if (Array.isArray(data.tasks)) collected.push(...data.tasks)
-        } catch { /* 离线时保留上一份已注册的闹钟计划 */ }
+          if (!Array.isArray(data.tasks)) return
+          collected.push(...data.tasks)
+        } catch { return } // 保留上次完整计划，稍后重新同步。
       }
       if (cancelled) return
       // 原生在锁屏 / 后台直接弹提醒，拿不到 React 里的助手名，这里随计划一起下发。
@@ -717,11 +720,17 @@ export default function App() {
       },[authStatus,notifyAfterWrite])
   useEffect(()=>{if(!toast)return;const timer=window.setTimeout(()=>setToast(null),6500);return()=>window.clearTimeout(timer)},[toast])
   async function openInboxMessage(message:InboxMessage) {
+    const envelope = message.kind === 'task_result' ? parseTaskEnvelope(message.content) : null
+    if (envelope?.conversationId && !(conversations[message.person] || []).some(c => c.id === envelope.conversationId)) {
+      setChatError('通知对应的会话已不存在')
+      return
+    }
+    setOpenChatSignal(value => value + 1)
     setPerson(message.person);setPage('room');setChatOpen(true);setActiveTool('');setToast(null)
     if (message.kind === 'task_result') {
       // 任务结果：跳到绑定会话供查看；已读确认交给「持久化成功后 ack」的管线，
       // 点击本身绝不提前确认——否则可能确认一条尚未落盘的消息。
-      const env = parseTaskEnvelope(message.content)
+      const env = envelope
       if (env?.conversationId) {
         const list = conversations[message.person] || []
         const target = list.find(c => c.id === env.conversationId)
@@ -1160,18 +1169,21 @@ export default function App() {
       }
       if(!isLocalMode())return
       try{
-        const r=await apiFetch('/api/tasks/run',{method:'POST',credentials:'include',headers:{'Content-Type':'application/json'},body:JSON.stringify({now:new Date().toISOString()})})
+        const r=await apiFetch('/api/tasks/run',{method:'POST',credentials:'include',headers:{'Content-Type':'application/json'},body:JSON.stringify({now:new Date().toISOString(),conversationIds:Object.fromEntries(Object.entries(conversationsRef.current).map(([id,items])=>[id,items.map(c=>c.id)]))})})
         if(!r.ok)return
         const d=await r.json()
         const fired:any[]=Array.isArray(d.fired)?d.fired:[]
+        if (alive && d.alarmsChanged) setAlarmSyncTick(t=>t+1)
         if(!alive||!fired.length)return
         for(const f of fired){
           const who=String(f.person||''),runId=String(f.runId||''),content=String(f.answer||'')
           if(!ASSISTANT_PEOPLE.includes(who)||!runId||!content)continue
-          genDebug('task_exec_started',{runId,person:who,scheduledAt:String(f.runAt||''),conversationId:String(f.conversationId||'')})
-          updateActiveConversationMessages(who,prev=>prev.some(x=>x&&x.taskRunId===runId)?prev:[...prev,{role:'assistant' as const,content,id:'local-task-'+runId,taskRunId:runId,contextNote:'本地主动任务'}])
+          const conversationId=String(f.conversationId||activeConversationIdsRef.current[who]||'')
+          if (!conversationId || !conversationsRef.current[who]?.some(c=>c.id===conversationId)) continue
+          genDebug('task_exec_started',{runId,person:who,scheduledAt:String(f.runAt||''),conversationId})
+          updateActiveConversationMessages(who,prev=>prev.some(x=>x&&x.taskRunId===runId)?prev:[...prev,{role:'assistant' as const,content,id:'local-task-'+runId,taskRunId:runId,contextNote:'本地主动任务'}],conversationId)
           // 只有写回聊天之后才允许发通知；runId 与原生闹钟共用同一个去重键。
-          notifyAfterWrite({kind:'task',person:who,runId,text:content,conversationId:String(f.conversationId||activeConversationIdsRef.current[who]||''),at:Date.parse(f.runAt)||Date.now()})
+          notifyAfterWrite({kind:'task',person:who,runId,text:content,conversationId,at:Date.parse(f.runAt)||Date.now()})
           genDebug('task_exec_completed',{runId,person:who,notifiedAt:Date.now()})
         }
         if(fired.length)setAlarmSyncTick(t=>t+1)
@@ -1201,10 +1213,10 @@ export default function App() {
       if (m.kind !== 'task_result' || m.read_at) continue
       const decision = decideTaskConsumption(conversationsRef.current[m.person], m.content)
       if (decision.action === 'write') {
-        const { runId, title, answer } = decision.envelope
+        const { runId, title, prompt, answer } = decision.envelope
         const conversationId = decision.conversationId
         genDebug('task_exec_started',{runId,person:m.person,scheduledAt:String(m.created_at||''),conversationId,source:'cloud_inbox'})
-        updateActiveConversationMessages(m.person, prev => prev.some(x => x && x.taskRunId === runId) ? prev : [...prev, { role: 'assistant', content: answer, id: 'task-' + runId, taskRunId: runId, contextNote: title ? '定时任务：' + title : '定时任务结果' }], conversationId)
+        updateActiveConversationMessages(m.person, prev => prev.some(x => x && x.taskRunId === runId) ? prev : [...prev, { role: 'assistant', content: answer, id: 'task-' + runId, taskRunId: runId, contextNote: title ? '定时任务：' + title : '定时任务结果', taskDetails: prompt }], conversationId)
         // 云端任务结果写回原会话后发通知；runId 与本地任务、原生闹钟是同一个稳定键。
         notifyAfterWrite({kind:'task',person:m.person,runId,text:answer,conversationId,messageId:m.id,at:Date.parse(m.created_at)||Date.now()})
         genDebug('task_exec_completed',{runId,person:m.person,notifiedAt:Date.now(),source:'cloud_inbox'})
@@ -1325,7 +1337,7 @@ export default function App() {
     const attachmentLabel = attachments.length ? '\n[附件：'+attachments.map(a=>a.name).join('、')+']' : ''
     // 气泡里只显示用户输入的文字；动态时间上下文由服务端在每次模型请求前
     // 实时生成并作为独立 system 消息注入，前端不再附带任何本地上下文。
-    const userMessage: ChatMessage = {at:new Date().toISOString(),role:'user',content:text,attachments:attachments.map(a=>({...a,preview:a.preview||a.dataUrl,dataUrl:undefined}))}
+    const userMessage: ChatMessage = {id:crypto.randomUUID(),at:new Date().toISOString(),role:'user',content:text,attachments:attachments.map(a=>({...a,preview:a.preview||a.dataUrl,dataUrl:undefined}))}
     // 工具调用事件绑定：一次 send() = 一个 runId；助手消息带 id，调用卡片按 messageId 挂到消息下方。
     // 重新生成复用原回复的 id：流式回写天然落在同一条消息上（= 覆盖旧回复，不新增第二版）。
     const regen = options.regenerate || null
@@ -1528,7 +1540,7 @@ export default function App() {
       openAITools.push({type:'function',function:{name:'ledger_add_entry',description:'仅当用户明确要求记账时，将一笔真实收入或支出写入用户的共享记账单。不得虚构金额；不确定的日期、币种或金额应先询问。写入后向用户确认。',parameters:{type:'object',properties:{kind:{type:'string',enum:['income','expense']},amount:{type:'number',description:'金额，正数'},currency:{type:'string',enum:['CNY','JPY','USD','EUR','HKD'],description:'币种，元默认CNY，日元JPY'},category:{type:'string'},note:{type:'string'},date:{type:'string',description:'YYYY-MM-DD，用户所在日期'},},required:['kind','amount','currency','category','date'],additionalProperties:false}}})
       // 定时任务与工作流：助手可查询/创建/管理「自己名下」的定时任务；归属与临时标记由服务端强制。
       openAITools.push({type:'function',function:{name:'scheduled_task_list',description:'查看当前助手名下所有定时任务与工作流（含标题、执行时间、是否重复、状态）。用户问"我有哪些定时任务/提醒/工作流"时使用。',parameters:{type:'object',properties:{},additionalProperties:false}}})
-      openAITools.push({type:'function',function:{name:'scheduled_task_create',description:'为当前助手创建一条定时任务/工作流。仅当用户明确要求设定提醒、定时或重复任务时使用。若用户没说清时间或到点要做什么，应先询问，不要凭空编造。runAt 用 ISO 时间；recurrence 选 once(仅一次)/daily(每天)/weekly(每周)/every2h(每2小时)。temporary=true 表示这条任务之后可被助手自动删除（适合一次性提醒），重复任务应设为 false。',parameters:{type:'object',properties:{title:{type:'string',description:'任务标题'},prompt:{type:'string',description:'到点要执行的内容或要提醒用户的话'},runAt:{type:'string',description:'ISO 8601 时间，如 2026-01-01T09:00'},recurrence:{type:'string',enum:['once','daily','weekly','every2h']},temporary:{type:'boolean',description:'是否为可自动删除的临时任务，默认 true'}},required:['title','prompt','runAt'],additionalProperties:false}}})
+      openAITools.push({type:'function',function:{name:'scheduled_task_create',description:'为当前助手创建一条定时任务/工作流。仅当用户明确要求设定提醒、定时或重复任务时使用。若用户没说清时间或到点要做什么，应先询问，不要凭空编造。runAt 用 ISO 时间；recurrence 选 once(仅一次)/daily(每天)/weekly(每周)/every2h(每2小时)。任意分钟重复任务填写 intervalMinutes。temporary=true 表示这条任务之后可被助手自动删除（适合一次性提醒），重复任务应设为 false。',parameters:{type:'object',properties:{title:{type:'string',description:'任务标题'},prompt:{type:'string',description:'到点要执行的内容或要提醒用户的话'},runAt:{type:'string',description:'ISO 8601 时间，如 2026-01-01T09:00'},recurrence:{type:'string',enum:['once','daily','weekly','every2h']},intervalMinutes:{type:'integer',description:'重复间隔分钟数，例如每10分钟填10'},temporary:{type:'boolean',description:'是否为可自动删除的临时任务，默认 true'}},required:['title','prompt','runAt'],additionalProperties:false}}})
       openAITools.push({type:'function',function:{name:'scheduled_task_manage',description:'管理当前助手已创建的定时任务：pause 暂停、resume 恢复、delete 删除。仅能操作助手自己创建的任务；用户创建的或长期(非临时)任务会被服务端拒绝，此时应如实告知用户去工作区手动处理。',parameters:{type:'object',properties:{id:{type:'string',description:'任务 ID，来自 scheduled_task_list'},action:{type:'string',enum:['pause','resume','delete']}},required:['id','action'],additionalProperties:false}}})
       // 回顾更早的对话：上下文压缩后，摘要之外的细节用这个只读工具回查原始消息。
       openAITools.push({type:'function',function:{name:'conversation_search',description:'检索当前助手所有会话的原始消息（包括已被上下文压缩的更早对话）。需要核对前情、原话或细节时使用；只读，不会修改任何数据。',parameters:{type:'object',properties:{query:{type:'string',description:'关键词或短句，1 至 60 字'},limit:{type:'number',description:'返回条数，默认 6，最多 12'}},required:['query'],additionalProperties:false}}})
@@ -1802,11 +1814,11 @@ export default function App() {
             if(call.function.name==='scheduled_task_list'){
               const r=await apiFetch('/api/tasks?person='+encodeURIComponent(target),{credentials:'include'})
               const d=await r.json();if(!r.ok)throw new Error(d.error||'查询定时任务失败')
-              resultContent=JSON.stringify({person:target,tasks:(d.tasks||[]).map((t:any)=>({id:t.id,title:t.title,prompt:t.prompt,runAt:t.run_at,recurrence:Number(t.interval_minutes)===120?'every2h':t.recurrence,status:t.status,createdBy:t.created_by,temporary:!!t.temporary}))})
+              resultContent=JSON.stringify({person:target,tasks:(d.tasks||[]).map((t:any)=>({id:t.id,title:t.title,prompt:t.prompt,runAt:t.run_at,recurrence:Number(t.interval_minutes)===120?'every2h':t.recurrence,intervalMinutes:Number(t.interval_minutes)||0,status:t.status,createdBy:t.created_by,temporary:!!t.temporary}))})
             }else if(call.function.name==='scheduled_task_create'){
-              const r=await apiFetch('/api/workflows/manage',{method:'POST',credentials:'include',headers:{'Content-Type':'application/json'},body:JSON.stringify({person:target,action:'create',title:args.title,prompt:args.prompt,runAt:args.runAt,recurrence:args.recurrence==='every2h'?'daily':args.recurrence||'once',intervalMinutes:args.recurrence==='every2h'?120:0,temporary:args.temporary!==false,conversationId:toolConversationId})})
+              const r=await apiFetch('/api/workflows/manage',{method:'POST',credentials:'include',headers:{'Content-Type':'application/json'},body:JSON.stringify({person:target,action:'create',title:args.title,prompt:args.prompt,runAt:args.runAt,recurrence:args.recurrence==='every2h'?'daily':args.recurrence||'once',intervalMinutes:args.recurrence==='every2h'?120:(args.intervalMinutes||0),temporary:args.temporary!==false,conversationId:toolConversationId})})
               const d=await r.json();if(!r.ok)throw new Error(d.error||'创建定时任务失败')
-              resultContent=JSON.stringify({ok:true,message:'定时任务已创建。',task:{id:d.task.id,title:d.task.title,runAt:d.task.run_at,recurrence:Number(d.task.interval_minutes)===120?'every2h':d.task.recurrence,status:d.task.status}});try{window.dispatchEvent(new Event('aihome:alarms-changed'))}catch{}
+              resultContent=JSON.stringify({ok:true,message:'定时任务已创建。',task:{id:d.task.id,title:d.task.title,runAt:d.task.run_at,recurrence:Number(d.task.interval_minutes)===120?'every2h':d.task.recurrence,intervalMinutes:Number(d.task.interval_minutes)||0,status:d.task.status}});try{window.dispatchEvent(new Event('aihome:alarms-changed'))}catch{}
             }else{
               const r=await apiFetch('/api/workflows/manage',{method:'POST',credentials:'include',headers:{'Content-Type':'application/json'},body:JSON.stringify({person:target,action:args.action,id:args.id})})
               const d=await r.json();if(!r.ok)throw new Error(d.error||'管理定时任务失败')
@@ -2218,6 +2230,8 @@ export default function App() {
   const shellVars = activePack ? Object.fromEntries(Object.entries(themeVars).filter(([k]) => !packColorKeys.has(k))) : themeVars
   const useApprovedLayout = true
   if(useApprovedLayout) return <LayoutPrototype
+    openChatSignal={openChatSignal}
+    onViewChange={view=>{setChatOpen(view==='chat');setPage(view==='home'?'home':view==='settings'||view==='theme'?'settings':'room')}}
     assistants={assistants.map(a=>({id:a.id,name:a.name}))}
     conversations={conversations}
     activeIds={activeConversationIds}
@@ -2233,6 +2247,7 @@ export default function App() {
     onDraftChange={v=>setDraft(v)}
     onSend={prototypeSend}
     renderSubscription={()=> <SubscriptionAccounts vendors={vendors} setVendors={setVendors} setModelProfiles={setModelProfiles} subscriptions={subscriptions} setSubscriptions={setSubscriptions}/>}
+    renderTasks={target=> <TaskManager key={target} person={target} personLabel={displayName} conversationId={activeConversationIds[target]||''}/>}
     renderUsage={()=> <UsageStats people={assistants.map(a=>a.id)} conversations={conversations} models={Object.fromEntries(assistants.map(a=>[a.id,resolveModelConfig(bindings[a.id]?.modelProfileId||defaultModelId||'',modelProfiles,modelConfig[a.id]).model]))} displayName={displayName}/>}
     vendors={vendors}
     onSaveVendors={next=>{setVendors(next);setModelProfiles(old=>syncVendorProfiles(next,old))}}
@@ -2824,8 +2839,8 @@ function SkillWorkbench({person, personLabel}:{person:Person;personLabel?:(p:Per
  return <div className="tool-panel skill-workbench"><h3>{who} · SKILL 技能库</h3><p className="muted">启用的技能会按当前助手注入 system 提示（有长度预算，超出的会截断）；停用后不再注入。支持导入 SKILL.md。</p><div className="skill-import"><button type="button" onClick={()=>skillFileRef.current?.click()}>导入 SKILL.md</button><input ref={skillFileRef} type="file" accept=".md,text/markdown,text/plain" aria-label="导入 SKILL.md" onChange={e=>void importSkillFile(e)}/>{skillNotice&&<small>{skillNotice}</small>}</div><input value={query} onChange={e=>setQuery(e.target.value)} placeholder="搜索技能" aria-label="搜索技能"/><form className="memory-create" onSubmit={save}><h4>{editing?'编辑技能':'新增技能'}</h4><label>技能名称<input required maxLength={100} value={name} onChange={e=>setName(e.target.value)} placeholder="例如：旅行日志整理"/></label><label>简介<input value={description} onChange={e=>setDescription(e.target.value)} placeholder="这个技能解决什么问题"/></label><label>工作流程与规则<textarea required rows={5} value={instructions} onChange={e=>setInstructions(e.target.value)} placeholder="写清触发条件、步骤、限制与输出格式"/></label><div className="memory-form-actions"><button disabled={!name.trim()||!instructions.trim()}>{editing?'保存修改':'保存技能'}</button>{editing&&<button type="button" onClick={clear}>取消</button>}</div></form><div className="skill-list">{visible.map(skill=><article key={skill.id} className="skill-card"><div><b>{skill.name}</b><span className={skill.enabled?'skill-enabled':'skill-disabled'}>{skill.enabled?'已启用':'已停用'}</span></div>{skill.description&&<p>{skill.description}</p>}<pre>{skill.instructions}</pre><small>更新于 {new Date(skill.updatedAt).toLocaleString('zh-CN')}</small><div className="memory-form-actions"><button type="button" onClick={()=>{setEditing(skill.id);setName(skill.name);setDescription(skill.description);setInstructions(skill.instructions)}}>编辑</button><button type="button" onClick={()=>setSkills(old=>old.map(s=>s.id===skill.id?{...s,enabled:!s.enabled,updatedAt:new Date().toISOString()}:s))}>{skill.enabled?'停用':'启用'}</button><button type="button" onClick={()=>{void confirmDialog({ title:'删除技能', message:'删除「'+skill.name+'」？', confirmLabel:'删除', danger:true }).then(ok=>{if(ok)setSkills(old=>old.filter(s=>s.id!==skill.id))})}}>删除</button></div></article>)}</div>{visible.length===0&&<p className="muted">还没有匹配的技能，可以先创建一个。</p>}</div>
 }
 
-type ScheduledTask = { id:string; person:Person; title:string; prompt:string; run_at:string; recurrence:'once'|'daily'|'weekly'; interval_minutes?:number; status:'scheduled'|'ready'|'completed'|'paused'; last_run_at:string|null; created_at:string; updated_at:string }
-function TaskManager({person,personLabel}:{person:Person;personLabel?:(p:Person)=>string}) {
+type ScheduledTask = { id:string; person:Person; title:string; prompt:string; run_at:string; recurrence:'once'|'daily'|'weekly'; interval_minutes?:number; status:'scheduled'|'ready'|'completed'|'paused'; last_run_at:string|null; last_error?:string; created_at:string; updated_at:string }
+function TaskManager({person,personLabel,conversationId}:{person:Person;personLabel?:(p:Person)=>string;conversationId?:string}) {
  const who = personLabel ? personLabel(person) : person
   const [tasks,setTasks]=useState<ScheduledTask[]>([])
   const [title,setTitle]=useState('')
@@ -2839,14 +2854,14 @@ function TaskManager({person,personLabel}:{person:Person;personLabel?:(p:Person)
   useEffect(()=>{refresh().catch(e=>setError(e.message))},[refresh])
   // 任务状态由服务端调度器推进；有未完成任务时轻量轮询，避免看到过期状态。
   useEffect(()=>{if(!tasks.some(t=>t.status==='scheduled'||t.status==='ready'))return;const timer=window.setInterval(()=>{if(!document.hidden)refresh().catch(()=>{})},10000);return()=>window.clearInterval(timer)},[tasks,refresh])
-  async function create(e:FormEvent){e.preventDefault();setBusy(true);setError('');setNotice('');try{const r=await apiFetch('/api/tasks',{method:'POST',credentials:'include',headers:{'Content-Type':'application/json'},body:JSON.stringify({person,title,prompt,runAt:new Date(runAt).toISOString(),recurrence:recurrence==='every2h'?'daily':recurrence,intervalMinutes:recurrence==='every2h'?120:0})});const d=await r.json();if(!r.ok)throw new Error(d.error||'创建任务失败');setTitle('');setPrompt('');setNotice(isLocalMode()?'任务已保存到本机，到点会自动提醒。':'任务已保存到云端调度队列。');await refresh();try{window.dispatchEvent(new Event('aihome:alarms-changed'))}catch{}}catch(e){setError(e instanceof Error?e.message:'创建任务失败')}finally{setBusy(false)}}
+  async function create(e:FormEvent){e.preventDefault();setBusy(true);setError('');setNotice('');try{const r=await apiFetch('/api/tasks',{method:'POST',credentials:'include',headers:{'Content-Type':'application/json'},body:JSON.stringify({person,title,prompt,runAt:new Date(runAt).toISOString(),recurrence:recurrence==='every2h'?'daily':recurrence,intervalMinutes:recurrence==='every2h'?120:0,conversationId:conversationId||undefined})});const d=await r.json();if(!r.ok)throw new Error(d.error||'创建任务失败');setTitle('');setPrompt('');setNotice(isLocalMode()?'任务已保存到本机，到点会自动提醒。':'任务已保存到云端调度队列。');await refresh();try{window.dispatchEvent(new Event('aihome:alarms-changed'))}catch{}}catch(e){setError(e instanceof Error?e.message:'创建任务失败')}finally{setBusy(false)}}
   async function update(task:ScheduledTask,patch:Record<string,unknown>){setError('');setNotice('');try{const r=await apiFetch('/api/tasks/'+task.id,{method:'PUT',credentials:'include',headers:{'Content-Type':'application/json'},body:JSON.stringify({person,...patch})});const d=await r.json();if(!r.ok)throw new Error(d.error||'更新任务失败');await refresh();try{window.dispatchEvent(new Event('aihome:alarms-changed'))}catch{}}catch(e){setError(e instanceof Error?e.message:'更新任务失败')}}
   async function remove(task:ScheduledTask){if(!(await confirmDialog({ title:'删除任务', message:'删除「'+task.title+'」？', confirmLabel:'删除', danger:true })))return;try{const r=await apiFetch('/api/tasks/'+task.id,{method:'DELETE',credentials:'include',headers:{'Content-Type':'application/json'},body:JSON.stringify({person})});const d=await r.json();if(!r.ok)throw new Error(d.error||'删除失败');await refresh();try{window.dispatchEvent(new Event('aihome:alarms-changed'))}catch{}}catch(e){setError(e instanceof Error?e.message:'删除失败')}}
   const localDate=(iso:string)=>{const d=new Date(iso);return Number.isNaN(d.getTime())?'时间无效':d.toLocaleString('zh-CN',{month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hour12:false})}
   const statusLabel=(s:ScheduledTask['status'])=>({scheduled:'等待执行',ready:'执行中 · 助手正在跑',completed:'已完成',paused:'已暂停'}[s])
   return <div className="tool-panel task-manager"><h3>{who} · 工作流</h3><p className="muted">{isLocalMode()?'任务只存在这台设备，由 App 内的本地调度器到点把提醒发进聊天，不需要云端或后台常驻服务。App 在前台时执行，切回前台会补跑错过的任务（重复任务只补最近一次）。':'到期任务会由服务端 Agent Runner 真实执行（最多 5 轮工具循环），执行记录见「工具调用看板 · Agent 运行」。'}</p>{error&&<p className="mcp-error">{error}</p>}{notice&&<p className="mcp-notice">{notice}</p>}
     <form className="task-create" onSubmit={create}><label>工作流名称<input required maxLength={160} value={title} onChange={e=>setTitle(e.target.value)} placeholder="例如：早上检查雾潮群岛进度"/></label><label>执行时间<input required type="datetime-local" value={runAt} onChange={e=>setRunAt(e.target.value)}/></label><label>重复规则<SoftSelect value={recurrence} onChange={v=>setRecurrence(v as typeof recurrence)} options={[{value:'once',label:'仅一次'},{value:'every2h',label:'每两小时'},{value:'daily',label:'每天'},{value:'weekly',label:'每周'}]}/></label><label>执行步骤（每行一步）<textarea required rows={5} value={prompt} onChange={e=>setPrompt(e.target.value)} placeholder="第一步：检查状态\n第二步：判断条件\n第三步：执行操作\n第四步：保存结果"/></label><button type="submit" disabled={busy||!title.trim()||!prompt.trim()||!runAt}>{busy?'保存中…':'保存任务'}</button></form>
-    <div className="task-list-heading"><b>任务列表</b><button type="button" onClick={()=>refresh().catch(e=>setError(e.message))}>刷新</button></div>{tasks.length===0?<p className="muted">这里还没有任务。</p>:tasks.map(task=><article className="scheduled-task" key={task.id}><div className="scheduled-task-top"><b>{task.title}</b><span className={'task-status '+task.status}>{statusLabel(task.status)}</span></div><ol className="workflow-steps">{task.prompt.split('\n').filter(line=>line.trim()).map((step,i)=><li key={i}>{step.replace(/^(?:第[一二三四五六七八九十]+步[：:]?|[0-9]+[.、：:]|[-•]\s*)/,'').trim()}</li>)}</ol><small>执行时间：{localDate(task.run_at)} · {Number(task.interval_minutes)===120?'每两小时':task.recurrence==='once'?'仅一次':task.recurrence==='daily'?'每天':'每周'}{task.last_run_at?' · 上次触发：'+localDate(task.last_run_at):''}</small><div className="scheduled-task-actions">{task.status==='scheduled'&&<button type="button" onClick={()=>update(task,{status:'paused'})}>暂停</button>}{task.status==='paused'&&<button type="button" onClick={()=>update(task,{status:'scheduled'})}>恢复</button>}{task.status==='ready'&&<button type="button" onClick={()=>update(task,{status:'completed'})}>标记完成</button>}<button type="button" onClick={()=>remove(task)}>删除</button></div></article>)}</div>
+    <div className="task-list-heading"><b>任务列表</b><button type="button" onClick={()=>refresh().catch(e=>setError(e.message))}>刷新</button></div>{tasks.length===0?<p className="muted">这里还没有任务。</p>:tasks.map(task=><article className="scheduled-task" key={task.id}><div className="scheduled-task-top"><b>{task.title}</b><span className={'task-status '+task.status}>{statusLabel(task.status)}</span></div><ol className="workflow-steps">{task.prompt.split('\n').filter(line=>line.trim()).map((step,i)=><li key={i}>{step.replace(/^(?:第[一二三四五六七八九十]+步[：:]?|[0-9]+[.、：:]|[-•]\s*)/,'').trim()}</li>)}</ol><small>执行时间：{localDate(task.run_at)} · {Number(task.interval_minutes)>0?'每 '+task.interval_minutes+' 分钟':task.recurrence==='once'?'仅一次':task.recurrence==='daily'?'每天':'每周'}{task.last_run_at?' · 上次触发：'+localDate(task.last_run_at):''}</small>{task.last_error&&<p className="mcp-error">{task.last_error}</p>}<div className="scheduled-task-actions">{task.status==='scheduled'&&<button type="button" onClick={()=>update(task,{status:'paused'})}>暂停</button>}{task.status==='paused'&&<button type="button" onClick={()=>update(task,{status:'scheduled'})}>恢复</button>}{task.status==='ready'&&<button type="button" onClick={()=>update(task,{status:'completed'})}>标记完成</button>}<button type="button" onClick={()=>remove(task)}>删除</button></div></article>)}</div>
 }
 
 function ProactivePanel({person,personLabel}:{person:Person;personLabel?:(p:Person)=>string}) {

@@ -1,3 +1,4 @@
+import { normalizeIntervalMinutes } from './localTasks.mjs'
 import { createServer } from 'node:http'
 import { randomBytes, createHash, timingSafeEqual, createCipheriv, createDecipheriv, randomUUID, scryptSync } from 'node:crypto'
 import { isIP } from 'node:net'
@@ -986,7 +987,7 @@ const apiServer = createServer(async (req, res) => {
         const title = String(body.title || '').trim().slice(0, 160)
         const prompt = String(body.prompt || '').trim().slice(0, 12000)
         const runAt = String(body.runAt || '')
-        const intervalMinutes = Number(body.intervalMinutes) === 120 ? 120 : 0
+        const intervalMinutes = normalizeIntervalMinutes(body.intervalMinutes)
         const recurrence = intervalMinutes ? 'daily' : (['once','daily','weekly'].includes(body.recurrence) ? body.recurrence : 'once')
         if (!title || !prompt || !Number.isFinite(Date.parse(runAt))) return send(res, 400, { error: '工作流内容或时间无效' })
         const id = randomUUID()
@@ -1023,7 +1024,7 @@ const apiServer = createServer(async (req, res) => {
       const title = String(body.title || '').trim().slice(0, 160)
       const prompt = String(body.prompt || '').trim().slice(0, 12000)
       const runAt = String(body.runAt || '')
-      const intervalMinutes = Number(body.intervalMinutes) === 120 ? 120 : 0
+      const intervalMinutes = normalizeIntervalMinutes(body.intervalMinutes)
         const recurrence = intervalMinutes ? 'daily' : (['once','daily','weekly'].includes(body.recurrence) ? body.recurrence : 'once')
       if (!title || !prompt || !runAt || !Number.isFinite(Date.parse(runAt))) return send(res, 400, { error: '请填写任务名称、执行内容和有效执行时间' })
       const now = new Date().toISOString(), id = randomUUID()
