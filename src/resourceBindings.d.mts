@@ -48,3 +48,5 @@ export declare function resolveMcpConnections(connections: McpConnectionLike[] |
 export declare function isWorldEntryBound(entry: WorldEntryLike | null | undefined, person: string): boolean
 export declare function toggleWorldEntryBinding<T extends WorldEntryLike>(entries: T[], person: string, entryId: string, checked: boolean): T[]
 export declare function toggleMcpId(binding: PersonBinding | null | undefined, connectionId: string, checked: boolean, allIds?: string[]): PersonBinding
+
+export declare function restoreModelConfigs(saved: unknown, people: string[], previous?: Record<string, ModelConfigLike>): Record<string, ModelConfigLike>

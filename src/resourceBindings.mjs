@@ -56,6 +56,19 @@ export function normalizeProfiles(raw) {
     }))
 }
 
+export function restoreModelConfigs(saved, people, previous = {}) {
+  const blank = { endpoint: '', model: '', inputPrice: '', outputPrice: '', cachedInputPrice: '', usdToCny: '7.2' }
+  const shared = typeof saved?.endpoint === 'string' ? saved : null
+  const keyed = !shared && saved && typeof saved === 'object' && !Array.isArray(saved) ? saved : {}
+  const ids = new Set([...people, ...Object.keys(previous), ...Object.keys(keyed)])
+  return Object.fromEntries([...ids].map(id => {
+    const config = shared ?? keyed[id]
+    return [id, config && typeof config === 'object' && !Array.isArray(config)
+      ? { ...blank, ...config }
+      : previous[id] ?? { ...blank }]
+  }))
+}
+
 export function normalizeBindings(raw, people) {
   const out = {}
   for (const id of Array.isArray(people) ? people : []) {

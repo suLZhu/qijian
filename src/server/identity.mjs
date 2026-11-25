@@ -43,7 +43,7 @@ const REBUILD_DDL = {
     status TEXT NOT NULL DEFAULT 'scheduled' CHECK(status IN ('scheduled','ready','completed','paused')),
     last_run_at TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
     created_by TEXT NOT NULL DEFAULT 'user', temporary INTEGER NOT NULL DEFAULT 0,
-    conversation_id TEXT
+    conversation_id TEXT, interval_minutes INTEGER NOT NULL DEFAULT 0
   )`,
 }
 
@@ -84,6 +84,9 @@ function migratePersonValues(db) {
     if (!columns.some(column => column.name === 'person')) continue
     for (const [name, id] of Object.entries(LEGACY_NAME_TO_ID)) {
       db.prepare(`UPDATE ${table} SET person=? WHERE person=?`).run(id, name)
+      if (table === 'scheduled_tasks' && columns.some(column => column.name === 'created_by')) {
+        db.prepare('UPDATE scheduled_tasks SET created_by=? WHERE created_by=?').run(id, name)
+      }
     }
   }
   if (tableSql(db, 'mcp_bindings')) {

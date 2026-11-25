@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import {
-  emptyBinding, normalizeProfiles, normalizeBindings, resolveModelConfig,
+  restoreModelConfigs, emptyBinding, normalizeProfiles, normalizeBindings, resolveModelConfig,
   resolveMcpConnections, isWorldEntryBound, toggleWorldEntryBinding, toggleMcpId,
   normalizePool, isInPool, togglePool, poolLabel,
 } from '../src/resourceBindings.mjs'
@@ -257,4 +257,13 @@ test('服务端读候选队列兼容旧客户端，并限制最多 6 把', () =>
   assert.equal(isRetryableKeyStatus(401), true)
   assert.equal(isRetryableKeyStatus(429), true)
   assert.equal(isRetryableKeyStatus(400), false)
+})
+
+test('模型配置兼容旧共享配置和部分助手快照，保留其他助手原配置', () => {
+  const shared = { endpoint: 'https://example.org/v1', model: 'initial' }
+  const previous = restoreModelConfigs(shared, ['A', 'B'])
+  const restored = restoreModelConfigs({ A: { ...shared, model: 'replacement' } }, ['A', 'B'], previous)
+  assert.equal(restored.A.model, 'replacement')
+  assert.equal(restored.B.model, 'initial')
+  assert.equal(previous.A.model, 'initial')
 })

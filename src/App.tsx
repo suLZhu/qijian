@@ -54,7 +54,7 @@ import { restoreConversationLists, RECOVERY_BACKUP_KEY, decideCloudLoadAction, c
 // 资源库绑定层：设置区一次性添加模型/MCP/世界书，聊天窗口按助手选择由哪个使用。
 import { createToolExecutionBudget } from './toolExecutionBudget.mjs'
 import { clipContextText, compactToolSchema, takeWithinBudget } from './contextBudget.mjs'
-import { emptyBinding, normalizeProfiles, normalizeBindings, normalizePool, isInPool, togglePool, poolLabel, resolveModelConfig, resolveMcpConnections, isWorldEntryBound, toggleWorldEntryBinding, toggleMcpId, type ModelProfile, type PersonBinding, type ChatPool } from './resourceBindings.mjs'
+import { restoreModelConfigs, emptyBinding, normalizeProfiles, normalizeBindings, normalizePool, isInPool, togglePool, poolLabel, resolveModelConfig, resolveMcpConnections, isWorldEntryBound, toggleWorldEntryBinding, toggleMcpId, type ModelProfile, type PersonBinding, type ChatPool } from './resourceBindings.mjs'
 // 供应商中心：预置服务商 + 模型多选 + 多 KEY；勾选结果同步进模型预设池。
 import { normalizeVendors, syncVendorProfiles, allVendorKeys, resolveVendorKey, resolveKeyCandidates, chatRequestUrl, modelListUrl, groupModels, orderedKeys, DEFAULT_API_PATH, type Vendor } from './vendors.mjs'
 // 订阅账号：本地持久化归一化；极简账号登录面板单独放一个文件。
@@ -361,7 +361,7 @@ export default function App() {
   // 任务结果消费判定要读「最新的持久化会话状态」；轮询回调里的闭包会过期，用 ref 兜底。
   const conversationsRef = useRef(conversations)
   useEffect(() => { conversationsRef.current = conversations }, [conversations])
-  const [modelConfig, setModelConfig] = useState<Record<Person,ModelConfig>>(() => { const saved:any=read('ai-home.modelConfig',null); const blank={inputPrice:'',outputPrice:'',cachedInputPrice:'',usdToCny:'7.2'}; if(saved&&typeof saved==='object'&&!saved.endpoint&&ASSISTANT_PEOPLE.every(id=>saved[id])) return Object.fromEntries(ASSISTANT_PEOPLE.map(id=>[id,{...blank,...saved[id]}])) as Record<Person,ModelConfig>; const legacy=saved&&typeof saved.endpoint==='string'?saved:{endpoint:'',model:''}; return Object.fromEntries(ASSISTANT_PEOPLE.map(id=>[id,{...blank,...legacy}])) as Record<Person,ModelConfig> })
+  const [modelConfig, setModelConfig] = useState<Record<Person,ModelConfig>>(() => restoreModelConfigs(read('ai-home.modelConfig', null), assistants.map(a => a.id)))
   const [apiKey, setApiKey] = useState<Record<Person,string>>(() => { const saved=read<Record<string,string>|null>('ai-home.apiKey',null); return Object.fromEntries(ASSISTANT_PEOPLE.map(id=>[id,saved?.[id]||''])) as Record<Person,string> })
   // 本机工作区配置（按助手）：只在服务器模式下有；聊天工具据此决定是否向模型开放文件/Git/命令。
   const [workspaceConfigs, setWorkspaceConfigs] = useState<Record<string, WorkspaceConfig>>({})
@@ -778,7 +778,9 @@ export default function App() {
       setActiveConversationIds(pickActiveConversationIds(convs, ids) as Record<Person,string>)
       setMessages(pickActiveMessagesFromSnapshot(convs, ids) as Record<Person,ChatMessage[]>)
     }
-    if (data.modelConfig && typeof data.modelConfig === 'object') { const saved:any=data.modelConfig; if(!saved.endpoint&&ASSISTANT_PEOPLE.every(id=>saved[id])) setModelConfig(saved); else setModelConfig(Object.fromEntries(ASSISTANT_PEOPLE.map(id=>[id,saved])) as Record<Person,ModelConfig>) }
+    if (data.modelConfig && typeof data.modelConfig === 'object') {
+      setModelConfig(previous => restoreModelConfigs(data.modelConfig, restoredNames.map(a => a.id), previous))
+    }
     if (data.memory && typeof data.memory === 'object') setMemory(Object.fromEntries(ASSISTANT_PEOPLE.map(id=>[id,data.memory[id]||''])) as Record<Person,string>)
     if (data.memoryEntries && typeof data.memoryEntries === 'object') setMemoryEntries(Object.fromEntries(ASSISTANT_PEOPLE.map(id=>[id,Array.isArray(data.memoryEntries[id])?data.memoryEntries[id]:[]])) as Record<Person,MemoryEntry[]>)
     if (data.prompt && typeof data.prompt === 'object') setPrompt(Object.fromEntries(ASSISTANT_PEOPLE.map(id=>[id,data.prompt[id]||''])) as Record<Person,string>)

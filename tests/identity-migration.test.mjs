@@ -23,3 +23,23 @@ test('身份迁移兼容全局 MCP 表，并保留其他旧身份数据', () => 
     db.close()
   }
 })
+
+test('旧任务约束迁移保留分钟间隔、绑定会话以及助手和用户各自的创建权', () => {
+  const db = new DatabaseSync(':memory:')
+  try {
+    db.exec(`CREATE TABLE scheduled_tasks (
+      id TEXT PRIMARY KEY, person TEXT CHECK(person IN ('晏未晞','言朔')),
+      title TEXT, prompt TEXT, run_at TEXT, recurrence TEXT, status TEXT,
+      created_at TEXT, updated_at TEXT, created_by TEXT, temporary INTEGER,
+      conversation_id TEXT, interval_minutes INTEGER);
+      INSERT INTO scheduled_tasks VALUES ('a','晏未晞','聊天','找我聊聊','2026','daily','scheduled','2025','2025','晏未晞',1,'chat-a',10);
+      INSERT INTO scheduled_tasks VALUES ('b','言朔','花园','逛花园','2026','once','scheduled','2025','2025','user',0,'chat-b',0);`)
+    migrateDatabase(db)
+    migrateDatabase(db)
+    const rows = db.prepare('SELECT person, created_by, conversation_id, interval_minutes, temporary FROM scheduled_tasks ORDER BY id').all()
+    assert.deepEqual(rows.map(row => Object.values(row)), [
+      ['assistant-yanweixi','assistant-yanweixi','chat-a',10,1],
+      ['assistant-yanshuo','user','chat-b',0,0],
+    ])
+  } finally { db.close() }
+})
