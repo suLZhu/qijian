@@ -30,7 +30,8 @@ export declare function nativeHttpPost(url: string, headers?: Record<string, str
 export declare function openExternalUrl(url: string): boolean
 
 export declare function nativeHttpStreamAvailable(): boolean
-export declare function nativeHttpStream(url: string, headers: Record<string, string>, body: string, onEvent: (event: { type: string; status?: number; text?: string; message?: string }) => void): { id: string; cancel: () => void } | null
+export declare function directModelFetch(url: string, options?: RequestInit): Promise<Response>
+export declare function subscriptionModelFetch(url: string, options?: RequestInit): Promise<Response>
 
 export declare function openNativeWebView(url: string, title?: string): boolean
 

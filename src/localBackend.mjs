@@ -24,11 +24,10 @@ import { taskResultEnvelope } from './taskResult.mjs'
 import { buildRoutePlan, logicalModelId } from './modelRoutes.mjs'
 import { normalizeRouteState, activeLogicalId, fixedRouteId } from './routeState.mjs'
 import { normalizeLocalTask, makeLocalTask, dueLocalTasks, advanceLocalTask } from './localTasks.mjs'
-import { performSubscriptionLogin } from './subscriptionLogin.mjs'
-import { exchangeOAuthCode } from './subscriptionOAuth.mjs'
+import { subscriptionOperations } from './subscriptionOperations.mjs'
 import { runRouteChat } from './chatRouteRunner.mjs'
 import { subscriptionProtocolConfig } from './server/subscriptionChat.mjs'
-import { nativeHttpStream, nativeHttpStreamAvailable, nativeHttpGet } from './nativeSystem.mjs'
+import { directModelFetch, subscriptionModelFetch, nativeHttpStreamAvailable, nativeHttpGet } from './nativeSystem.mjs'
 import { parseSearchResults } from './webSearch.mjs'
 import { WIDGET_TYPES, WIDGET_TITLES, defaultConfig, normalizeConfig } from './server/widgets.mjs'
 
@@ -249,55 +248,6 @@ function searchLocalMemory({ person, query, exclude, limit = 5 }) {
 }
 
 // ── 订阅聊天（本地模式）：走 Android 原生流式 HTTPS，绕开 CORS ───────────────
-function createNativeStream(url, headers, body) {
-  const chunks = []
-  let done = false
-  let failure = null
-  let wake = null
-  let status = 0
-  let startResolve
-  const started = new Promise(resolve => { startResolve = resolve })
-  let doneResolve
-  const donePromise = new Promise(resolve => { doneResolve = resolve })
-  const notify = () => { const resolve = wake; wake = null; if (resolve) resolve() }
-  const handle = nativeHttpStream(url, headers, body, event => {
-    if (!event || typeof event !== 'object') return
-    if (event.type === 'start') {
-      status = Number(event.status) || 0
-      startResolve(status)
-      notify()
-    } else if (event.type === 'chunk') {
-      chunks.push(String(event.text || ''))
-      notify()
-    } else if (event.type === 'done') {
-      done = true
-      doneResolve()
-      notify()
-    } else if (event.type === 'error') {
-      failure = new Error(event.message || '原生请求失败')
-      startResolve(status)
-      done = true
-      doneResolve()
-      notify()
-    }
-  })
-  if (!handle) return null
-  return {
-    started,
-    status: () => status,
-    async *[Symbol.asyncIterator]() {
-      while (true) {
-        while (chunks.length) yield chunks.shift()
-        if (failure) throw failure
-        if (done) return
-        await new Promise(resolve => { wake = resolve })
-      }
-    },
-    async readAll() { await donePromise; return chunks.join('') },
-    cancel: handle.cancel,
-  }
-}
-
 function subscriptionSink(controller, streaming) {
   const encoder = new TextEncoder()
   const usage = { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0, prompt_tokens_details: { cached_tokens: 0 }, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 }
@@ -359,17 +309,40 @@ async function handleSubscriptionChatLocal(b, init) {
   if (!nativeHttpStreamAvailable()) return json(400, { error: '订阅聊天需要 App 原生网络桥；请用 APK，或连接服务器。' })
   b.body.messages = injectTimeContext(b.body.messages, new Date(), b.timeZone)
   const request = config.build(b.body)
-  const stream = createNativeStream(config.url, config.headers, JSON.stringify(request))
-  if (!stream) return json(502, { error: '无法启动原生网络请求' })
-  let startTimer
-  const startTimeout = new Promise(resolve => { startTimer = setTimeout(() => resolve(-1), 30000) })
-  const status = await Promise.race([stream.started, startTimeout])
-  clearTimeout(startTimer)
-  if (status < 0) { stream.cancel(); return json(502, { error: '订阅接口没有响应' }) }
-  if (status >= 400) {
-    const text = await stream.readAll()
-    return json(status, { error: '订阅接口返回 HTTP ' + status + (text ? ' · ' + text.slice(0, 400) : '') })
+  const requestController = new AbortController()
+  const abort = () => requestController.abort(init.signal.reason)
+  if (init?.signal?.aborted) abort()
+  else init?.signal?.addEventListener('abort', abort, { once: true })
+  const cleanup = () => init?.signal?.removeEventListener('abort', abort)
+  let upstream
+  try {
+    upstream = await subscriptionModelFetch(config.url, {
+      method: 'POST', headers: config.headers, body: JSON.stringify(request), signal: requestController.signal,
+    })
+    if (!upstream.ok || !upstream.body) {
+      const detail = (await upstream.text()).slice(0, 400)
+      cleanup()
+      return json(upstream.ok ? 502 : upstream.status, { error: '订阅接口返回 HTTP ' + upstream.status + (detail ? ' · ' + detail : '') })
+    }
+  } catch (error) {
+    cleanup()
+    return json(502, { error: error.message || '订阅网络请求失败' })
   }
+  async function* responseBytes() {
+    const reader = upstream.body.getReader()
+    try {
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) return
+        yield value
+      }
+    } finally {
+      await reader.cancel().catch(() => {})
+      reader.releaseLock()
+      cleanup()
+    }
+  }
+  const stream = responseBytes()
   if (b.body.stream === false) {
     const sink = subscriptionSink(null, false)
     try { await config.convert(stream, sink); return json(200, sink.result()) }
@@ -390,7 +363,7 @@ async function handleSubscriptionChatLocal(b, init) {
         try { controller.close() } catch { /* 已断开 */ }
       })
     },
-    cancel() { stream.cancel() },
+    cancel() { requestController.abort(); cleanup() },
   })
   return new Response(responseStream, { status: 200, headers: { 'Content-Type': 'text/event-stream; charset=utf-8', 'Cache-Control': 'no-cache, no-store' } })
 }
@@ -404,7 +377,7 @@ async function handleRouteChat(b, init) {
     body: b.body,
     timeZone: b.timeZone,
     signal: (init && init.signal) || null,
-    fetchImpl: fetch,
+    fetchImpl: directModelFetch,
   })
   if (!result.ok) return json(result.status || 502, { error: result.error, routeReport: result.report })
   const upstream = result.upstream
@@ -433,10 +406,11 @@ async function handleChat(init) {
   const target = /^https?:\/\//i.test(String(b.chatUrl || ''))
     ? String(b.chatUrl).trim()
     : /\/chat\/completions$/.test(raw) ? raw : raw.endsWith('/v1') ? raw + '/chat/completions' : raw + '/v1/chat/completions'
+  const fetchModel = b.accountType === 'subscription' ? subscriptionModelFetch : directModelFetch
   for (let i = 0; i < apiKeys.length; i++) {
     let upstream
     try {
-      upstream = await fetch(target, {
+      upstream = await fetchModel(target, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + apiKeys[i] },
         body: JSON.stringify(chatBody),
@@ -464,7 +438,7 @@ async function handleChat(init) {
 async function handleModels(init) {
   let b
   try { b = await readBody(init) } catch { return json(400, { error: '请求无效' }) }
-  if (b.accountType === 'subscription') return json(502, { error: '本地兼容订阅的模型目录尚未接通专用代理，请连接栖间服务器。' })
+  const fetchModel = b.accountType === 'subscription' ? subscriptionModelFetch : directModelFetch
   const raw = String(b.endpoint || '').trim().replace(/\/+$/, '')
   if (!raw) return json(400, { error: '请先填写 API 地址' })
   const apiKey = String(b.apiKey || '').trim()
@@ -475,7 +449,7 @@ async function handleModels(init) {
     ? customModelsUrl
     : /\/v1$/.test(raw) ? raw + '/models' : raw + '/v1/models'
   try {
-    const upstream = await fetch(target, { headers: { Authorization: 'Bearer ' + apiKey }, redirect: 'error', signal: AbortSignal.timeout(15000) })
+    const upstream = await fetchModel(target, { headers: { Authorization: 'Bearer ' + apiKey }, redirect: 'error', signal: AbortSignal.timeout(15000) })
     const text = await upstream.text()
     if (!upstream.ok) return json(502, { error: `上游返回 HTTP ${upstream.status}${text ? ' · ' + text.slice(0, 180) : ''}` })
     let data
@@ -663,38 +637,12 @@ export async function localHandle(path, init) {
       return json(200, { ok: true, saved: !!apiKey })
     }
 
-    // ── 订阅号账号密码登录：本地模式同样直连订阅接口换令牌 ──
-    if (p === '/api/subscription/login' && method === 'POST') {
-      let b
-      try { b = await readBody(init) } catch { return json(400, { error: '请求无效' }) }
-      try {
-        const result = await performSubscriptionLogin({
-          endpoint: b.endpoint, loginPath: b.loginPath, tokenPath: b.tokenPath,
-          username: b.username, password: b.password, fetchImpl: fetch,
-        })
-        return json(200, result)
-      } catch (error) {
-        return json(502, { error: (error && error.message) || '订阅号登录失败' })
-      }
-    }
-
-    // ── 网页登录授权码换令牌：本地模式直连官方端点，跨域被拦时给出明确提示 ──
-    if (p === '/api/subscription/oauth/exchange' && method === 'POST') {
-      let b
-      try { b = await readBody(init) } catch { return json(400, { error: '请求无效' }) }
-      try {
-        const result = await exchangeOAuthCode({
-          channelId: b.channelId, code: b.code, codeVerifier: b.codeVerifier,
-          state: b.state, fetchImpl: fetch,
-        })
-        return json(200, result)
-      } catch (error) {
-        return json(502, { error: (error && error.message) || '授权码换令牌失败' })
-      }
-    }
-
-    if (p === '/api/subscription/oauth/refresh' && method === 'POST') {
-      return json(502, { error: '本机续期尚未接通订阅代理，请连接栖间服务器后重试。' })
+    const subscriptionOperation = subscriptionOperations.get(p)
+    if (method === 'POST' && subscriptionOperation) {
+      let body
+      try { body = await readBody(init) } catch { return json(400, { error: '订阅请求无效' }) }
+      const { status, data } = await subscriptionOperation(body, subscriptionModelFetch)
+      return json(status, data)
     }
 
     // ── 模型列表（直连上游） ──

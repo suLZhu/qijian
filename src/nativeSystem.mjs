@@ -39,31 +39,64 @@ export function openSystemSetting(id, ok = false, sdk = 0) {
 
 export function nativeHttpStreamAvailable() {
   const b = bridge()
-  return !!b && typeof b.httpStream === 'function'
+  return !!b && typeof b.modelHttp === 'function'
 }
 
-/** 原生异步流式 POST；每段通过 onEvent({type:'start'|'chunk'|'done'|'error'}) 回调。 */
-export function nativeHttpStream(url, headers = {}, body = '', onEvent = () => {}) {
+export function directModelFetch(url, options = {}) {
+  return bridge() ? fetchThroughBridge('direct', url, options) : fetch(url, options)
+}
+
+export function subscriptionModelFetch(url, options = {}) {
+  return fetchThroughBridge('subscription', url, options)
+}
+
+async function fetchThroughBridge(policy, url, { method = 'GET', headers, body, signal } = {}) {
   const b = bridge()
-  if (!b || typeof b.httpStream !== 'function') return null
-  const id = 'stream-' + Date.now() + '-' + Math.random().toString(36).slice(2)
-  streamCallbacks.set(id, event => {
-    try { onEvent(event) } catch { /* 消费方异常不影响原生线程 */ }
-    if (event && (event.type === 'done' || event.type === 'error')) streamCallbacks.delete(id)
-  })
-  try {
-    b.httpStream(id, String(url || ''), JSON.stringify(headers || {}), String(body || ''))
-    return {
-      id,
-      cancel() {
-        streamCallbacks.delete(id)
-        try { b.httpStreamCancel?.(id) } catch { /* 原生取消失败忽略 */ }
-      },
+  if (!nativeHttpStreamAvailable()) throw new Error('需要支持模型网络分流的 App 原生网络桥，请更新 APK 或连接栖间服务器')
+  signal?.throwIfAborted()
+  install()
+  const id = 'model-' + Date.now() + '-' + Math.random().toString(36).slice(2)
+  return new Promise((resolve, reject) => {
+    let controller
+    const cleanup = () => {
+      streamCallbacks.delete(id)
+      clearTimeout(timer)
+      signal?.removeEventListener('abort', abort)
     }
-  } catch {
-    streamCallbacks.delete(id)
-    return null
-  }
+    const stop = () => {
+      cleanup()
+      try { b.httpStreamCancel(id) } catch { /* 请求可能已结束 */ }
+    }
+    const fail = error => {
+      stop()
+      controller.error(error)
+      reject(error)
+    }
+    const abort = () => fail(signal.reason || new DOMException('请求已取消', 'AbortError'))
+    const timer = setTimeout(() => fail(new Error('等待模型接口响应超时')), 30000)
+    const stream = new ReadableStream({ start(c) { controller = c }, cancel: stop })
+    signal?.addEventListener('abort', abort, { once: true })
+    streamCallbacks.set(id, event => {
+      try {
+        if (event.type === 'start') {
+          const status = Number(event.status)
+          const noBody = [204, 205, 304].includes(status)
+          resolve(new Response(noBody ? null : stream, { status, headers: event.headers }))
+          clearTimeout(timer)
+        } else if (event.type === 'chunk') {
+          controller.enqueue(Uint8Array.from(atob(event.bytes), ch => ch.charCodeAt(0)))
+        } else if (event.type === 'done') {
+          cleanup()
+          controller.close()
+        } else if (event.type === 'error') {
+          fail(new Error(event.message || '原生网络请求失败'))
+        }
+      } catch (error) { fail(error) }
+    })
+    try {
+      b.modelHttp(id, policy, method, String(url), JSON.stringify(Object.fromEntries(new Headers(headers))), String(body ?? ''))
+    } catch (error) { fail(error) }
+  })
 }
 
 export function nativeHttpPost(url, headers = {}, body = '') {

@@ -48,6 +48,7 @@ import org.json.JSONObject;
 final class SystemBridge {
     private static final int REQ_NOTIFICATIONS = 4401;
     private final MainActivity activity;
+    private final java.util.concurrent.ConcurrentHashMap<String, java.util.concurrent.atomic.AtomicBoolean> pendingModelRequests = new java.util.concurrent.ConcurrentHashMap<>();
     private final java.util.concurrent.ConcurrentHashMap<String, java.net.HttpURLConnection> streams = new java.util.concurrent.ConcurrentHashMap<>();
 
     SystemBridge(MainActivity activity) { this.activity = activity; }
@@ -133,66 +134,71 @@ final class SystemBridge {
         }
     }
 
-    /**
-     * 异步流式 HTTPS POST：订阅聊天（Codex/Claude/Grok）在本地模式直接用原生网络，
-     * 不经过浏览器 fetch，因此没有 CORS；每读到一段就回调 __aihomeHttpStream。
-     */
     @JavascriptInterface
-    public void httpStream(String id, String url, String headersJson, String body) {
+    public void modelHttp(String id, String policy, String method, String url, String headersJson, String body) {
         if (id == null || id.isEmpty()) return;
+        // Publish a cancellation flag before starting the worker, including while resolving the proxy.
+        java.util.concurrent.atomic.AtomicBoolean cancelled = new java.util.concurrent.atomic.AtomicBoolean();
+        pendingModelRequests.put(id, cancelled);
         new Thread(() -> {
             java.net.HttpURLConnection conn = null;
             try {
-                java.net.URL u = new java.net.URL(url);
-                if (!"https".equalsIgnoreCase(u.getProtocol())) {
-                    emitHttpStream(id, new JSONObject().put("type", "error").put("message", "仅支持 HTTPS"));
-                    return;
-                }
-                conn = (java.net.HttpURLConnection) u.openConnection();
-                conn.setRequestMethod("POST");
+                if (!"POST".equals(method) && !"GET".equals(method)) throw new java.io.IOException("不支持的模型请求方法");
+                conn = ModelNetwork.open(new java.net.URL(url), policy);
+                streams.put(id, conn);
+                if (cancelled.get()) return;
+                conn.setRequestMethod(method);
                 conn.setConnectTimeout(15000);
                 conn.setReadTimeout(120000);
-                conn.setDoOutput(true);
-                conn.setRequestProperty("Content-Type", "application/json");
-                conn.setRequestProperty("Accept", "text/event-stream");
-                if (headersJson != null) {
-                    JSONObject h = new JSONObject(headersJson);
-                    java.util.Iterator<String> it = h.keys();
-                    while (it.hasNext()) {
-                        String k = it.next();
-                        conn.setRequestProperty(k, h.optString(k));
-                    }
+                JSONObject headers = new JSONObject(headersJson);
+                java.util.Iterator<String> keys = headers.keys();
+                while (keys.hasNext()) {
+                    String key = keys.next();
+                    conn.setRequestProperty(key, headers.getString(key));
                 }
-                byte[] out = (body == null ? "" : body).getBytes(StandardCharsets.UTF_8);
-                conn.setFixedLengthStreamingMode(out.length);
-                try (OutputStream os = conn.getOutputStream()) { os.write(out); }
+                if ("POST".equals(method)) {
+                    conn.setDoOutput(true);
+                    byte[] out = body.getBytes(StandardCharsets.UTF_8);
+                    conn.setFixedLengthStreamingMode(out.length);
+                    try (OutputStream os = conn.getOutputStream()) { os.write(out); }
+                }
                 int status = conn.getResponseCode();
-                streams.put(id, conn);
-                emitHttpStream(id, new JSONObject().put("type", "start").put("status", status));
-                InputStream in = status >= 400 ? conn.getErrorStream() : conn.getInputStream();
-                if (in != null) {
-                    try (java.io.Reader reader = new java.io.InputStreamReader(in, StandardCharsets.UTF_8)) {
-                        char[] buf = new char[4096];
+                if (status >= 300 && status < 400) throw new java.io.IOException("上游返回重定向 HTTP " + status);
+                JSONObject responseHeaders = new JSONObject();
+                for (java.util.Map.Entry<String, java.util.List<String>> field : conn.getHeaderFields().entrySet()) {
+                    if (field.getKey() != null) responseHeaders.put(field.getKey(), android.text.TextUtils.join(", ", field.getValue()));
+                }
+                emitHttpStream(id, new JSONObject().put("type", "start").put("status", status).put("headers", responseHeaders));
+                try (InputStream in = status >= 400 ? conn.getErrorStream() : conn.getInputStream()) {
+                    if (in != null) {
+                        byte[] buf = new byte[8192];
                         int n;
-                        while ((n = reader.read(buf)) > 0) {
-                            emitHttpStream(id, new JSONObject().put("type", "chunk").put("text", new String(buf, 0, n)));
+                        while (!cancelled.get() && (n = in.read(buf)) != -1) {
+                            String bytes = android.util.Base64.encodeToString(buf, 0, n, android.util.Base64.NO_WRAP);
+                            emitHttpStream(id, new JSONObject().put("type", "chunk").put("bytes", bytes));
                         }
                     }
                 }
-                emitHttpStream(id, new JSONObject().put("type", "done").put("status", status));
+                if (!cancelled.get()) emitHttpStream(id, new JSONObject().put("type", "done"));
             } catch (Exception e) {
-                try { emitHttpStream(id, new JSONObject().put("type", "error").put("message", e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage())); }
-                catch (Exception ignored) { }
+                String label = "subscription".equals(policy) ? "经订阅代理请求失败：" : "直连请求失败：";
+                try {
+                    if (!cancelled.get()) emitHttpStream(id, new JSONObject().put("type", "error").put("message",
+                        label + (e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage())));
+                } catch (Exception ignored) { }
             } finally {
                 streams.remove(id);
+                pendingModelRequests.remove(id);
                 if (conn != null) conn.disconnect();
             }
-        }, "aihome-http-stream").start();
+        }, "aihome-model-http").start();
     }
 
     @JavascriptInterface
     public void httpStreamCancel(String id) {
         try {
+            java.util.concurrent.atomic.AtomicBoolean cancelled = pendingModelRequests.get(id);
+            if (cancelled != null) cancelled.set(true);
             java.net.HttpURLConnection conn = streams.remove(id);
             if (conn != null) conn.disconnect();
         } catch (Exception ignored) { }

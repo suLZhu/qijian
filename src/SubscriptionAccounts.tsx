@@ -4,18 +4,16 @@ import { syncVendorProfiles, type Vendor, type VendorModel } from './vendors.mjs
 import type { ModelProfile } from './resourceBindings.mjs'
 import { makePkce, buildLoginConfig, chatGptAccountIdFromToken } from './subscriptionOAuth.mjs'
 import { startOAuthLogin } from './nativeOAuth.mjs'
-import { nativeHttpGet, nativeHttpPost, openExternalUrl } from './nativeSystem.mjs'
+import { openExternalUrl } from './nativeSystem.mjs'
 // P1-9：上游原始 JSON / 错误码统一转成中文短句，原文只在「查看详情」里展开。
 import { formatLoginError, type LoginErrorInfo } from './loginError.mjs'
-import { apiFetch, isLocalMode } from './apiBase.mjs'
+import { apiFetch } from './apiBase.mjs'
 import { IconChat, IconCheck, IconChevronRight, IconGrid, IconMore, IconSparkles, IconStar, type IconComponent } from './icons'
 import {
   mergeAvailableModels, normalizeModelIds, buildSubscriptionModels,
   pickedModelIds, type ModelState,
 } from './subscriptionModels.mjs'
 
-const GROK_CLIENT_ID = 'b1a00492-073a-47ea-816f-4c329264a828'
-const GROK_SCOPE = 'openid profile email offline_access grok-cli:access api:access'
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
 
 // 账号登录：只做「点一下 → App 内官方授权页 → 自动拿回令牌 → 自动带上模型」。
@@ -73,127 +71,21 @@ async function fetchStandardModels(endpoint: string, token: string): Promise<{ m
   finally { if (timer) clearTimeout(timer) }
 }
 
-// ChatGPT 订阅的模型目录在 Codex 后端，不在 /v1/models。
-// Kelivo 等客户端就是用 access token + chatgpt-account-id 调这个接口拿到真实列表的。
-async function fetchCodexModels(token: string, accountId: string): Promise<{ models: string[]; error: string }> {
-  const url = 'https://chatgpt.com/backend-api/codex/models?client_version=0.159.0'
-  const headers: Record<string, string> = {
-    Authorization: 'Bearer ' + token,
-    originator: 'qijian',
-    version: '0.159.0',
-    Accept: 'application/json',
-  }
-  if (accountId) headers['chatgpt-account-id'] = accountId
-  try {
-    const native = isLocalMode() ? nativeHttpGet(url, headers) : null
-    if (native && !native.error) {
-      const status = Number(native.status || 0)
-      if (status >= 400) return { models: [], error: 'Codex 模型目录 HTTP ' + status + ' · ' + String(native.body || '').slice(0, 180) }
-      let payload: any
-      try { payload = JSON.parse(String(native.body || '')) } catch { return { models: [], error: 'Codex 模型目录返回的不是 JSON' } }
-      return normalizeCodexModels(payload)
-    }
-    const r = await apiFetch('/api/codex/models', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ token, accountId }),
-    })
-    const d = await r.json().catch(() => ({}))
-    if (!r.ok) return { models: [], error: String(d?.error || ('HTTP ' + r.status)).slice(0, 240) }
-    return normalizeCodexModels(d)
-  } catch (e) {
-    return { models: [], error: e instanceof Error ? e.message : '拉取失败' }
-  }
-}
-
-const CLAUDE_BETAS = [
-  'claude-code-20250219', 'oauth-2025-04-20', 'interleaved-thinking-2025-05-14',
-  'redact-thinking-2026-02-12', 'context-management-2025-06-27',
-  'prompt-caching-scope-2026-01-05', 'mid-conversation-system-2026-04-07',
-  'advanced-tool-use-2025-11-20', 'effort-2025-11-24', 'extended-cache-ttl-2025-04-11',
-].join(',')
-
-async function fetchClaudeModels(token: string): Promise<{ models: string[]; error: string }> {
-  const url = 'https://api.anthropic.com/v1/models?limit=1000'
-  const headers: Record<string, string> = {
-    Authorization: 'Bearer ' + token,
-    'anthropic-version': '2023-06-01',
-    'anthropic-beta': CLAUDE_BETAS,
-    'anthropic-dangerous-direct-browser-access': 'true',
-    'User-Agent': 'claude-cli/2.1.280 (external, cli)',
-    'x-app': 'cli',
-    Accept: 'application/json',
-  }
-  try {
-    const native = isLocalMode() ? nativeHttpGet(url, headers) : null
-    if (native && !native.error) {
-      const status = Number(native.status || 0)
-      if (status >= 400) return { models: [], error: 'Claude 模型目录 HTTP ' + status + ' · ' + String(native.body || '').slice(0, 180) }
-      let payload: any
-      try { payload = JSON.parse(String(native.body || '')) } catch { return { models: [], error: 'Claude 模型目录返回的不是 JSON' } }
-      const ids = (Array.isArray(payload?.data) ? payload.data : []).map((row: any) => String(row?.id || '').trim()).filter(Boolean)
-      return { models: normalizeModelIds(ids), error: ids.length ? '' : 'Claude 模型目录没有返回可用模型' }
-    }
-    const r = await apiFetch('/api/claude/models', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ token }) })
-    const d = await r.json().catch(() => ({}))
-    if (!r.ok) return { models: [], error: String(d?.error || ('HTTP ' + r.status)).slice(0, 240) }
-    return { models: normalizeModelIds(d?.models), error: '' }
-  } catch (e) {
-    return { models: [], error: e instanceof Error ? e.message : '拉取失败' }
-  }
-}
-
-async function fetchGrokModels(token: string): Promise<{ models: string[]; error: string }> {
-  const headers: Record<string, string> = {
-    Authorization: 'Bearer ' + token,
-    'X-XAI-Token-Auth': 'xai-grok-cli',
-    Accept: 'application/json',
-  }
-  const urls = ['https://cli-chat-proxy.grok.com/v1/models-v2', 'https://api.x.ai/v1/models']
-  try {
-    const ids = new Set<string>()
-    let lastError = ''
-    for (const url of urls) {
-      const native = isLocalMode() ? nativeHttpGet(url, headers) : null
-      if (native && !native.error) {
-        const status = Number(native.status || 0)
-        if (status >= 400) { lastError = 'HTTP ' + status + ' · ' + String(native.body || '').slice(0, 120); continue }
-        try {
-          const payload = JSON.parse(String(native.body || ''))
-          for (const row of Array.isArray(payload?.data) ? payload.data : []) {
-            if (!row) continue
-            if (typeof row === 'string') { ids.add(row); continue }
-            if (row.hidden === true) continue
-            const id = String(row.id || row.model || row.modelId || row.slug || '').trim()
-            if (id) ids.add(id)
-          }
-        } catch { lastError = '模型目录返回的不是 JSON' }
-      } else {
-        // 没有原生桥时走服务端代理（一次拿两边的合并结果）。
-        const r = await apiFetch('/api/grok/models', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ token }) })
-        const d = await r.json().catch(() => ({}))
-        if (r.ok) return { models: normalizeModelIds(d?.models), error: '' }
-        lastError = String(d?.error || ('HTTP ' + r.status))
-        break
-      }
-    }
-    if (!ids.size) return { models: [], error: lastError || 'Grok 模型目录没有返回可用模型' }
-    return { models: normalizeModelIds([...ids]), error: '' }
-  } catch (e) {
-    return { models: [], error: e instanceof Error ? e.message : '拉取失败' }
-  }
-}
-
-function normalizeCodexModels(payload: any): { models: string[]; error: string } {
-  const rows = Array.isArray(payload?.models) ? payload.models : Array.isArray(payload?.data) ? payload.data : []
-  const ids = rows.map((row: any) => typeof row === 'string' ? row : String(row?.slug || row?.id || '')).filter(Boolean)
-  return { models: normalizeModelIds(ids), error: ids.length ? '' : 'Codex 模型目录没有返回可用模型' }
-}
-
 async function fetchRemoteModels(endpoint: string, token: string, channelId = '', accountId = ''): Promise<{ models: string[]; error: string }> {
   if (!token) return { models: [], error: '缺少登录令牌' }
-  if (channelId === 'claude') return fetchClaudeModels(token)
-  if (channelId === 'grok') return fetchGrokModels(token)
-  if (channelId === 'gpt') return fetchCodexModels(token, accountId)
+  const catalogs: Record<string, string> = { gpt: 'codex', claude: 'claude', grok: 'grok' }
+  const catalog = catalogs[channelId]
+  if (catalog) {
+    try {
+      const response = await apiFetch('/api/' + catalog + '/models', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token, accountId }),
+      })
+      const data = await response.json()
+      if (!response.ok) return { models: [], error: data.error || ('HTTP ' + response.status) }
+      return { models: normalizeModelIds(data.models), error: '' }
+    } catch (error) { return { models: [], error: error instanceof Error ? error.message : '拉取失败' } }
+  }
   if (!endpoint) return { models: [], error: '缺少接口地址' }
   return fetchStandardModels(endpoint, token)
 }
@@ -355,17 +247,6 @@ export function SubscriptionAccounts({ vendors, setVendors, setModelProfiles, su
   }
 
   const grokDeviceStart = async () => {
-    const headers = { 'Content-Type': 'application/x-www-form-urlencoded', Accept: 'application/json' }
-    const form = new URLSearchParams({ client_id: GROK_CLIENT_ID, scope: GROK_SCOPE }).toString()
-    const native = isLocalMode() ? nativeHttpPost('https://auth.x.ai/oauth2/device/code', headers, form) : null
-    if (native && !native.error) {
-      const status = Number(native.status || 0)
-      let data: any = {}
-      try { data = JSON.parse(String(native.body || '')) } catch { /* 交给下面报错 */ }
-      if (status >= 400 || data.error) throw new Error(data.error_description || data.error || ('xAI HTTP ' + status))
-      return data
-    }
-    if (native?.error) throw new Error(native.error)
     const r = await apiFetch('/api/oauth/device/start', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ channel: 'grok' }),
@@ -376,17 +257,6 @@ export function SubscriptionAccounts({ vendors, setVendors, setModelProfiles, su
   }
 
   const grokDevicePoll = async (deviceCode: string) => {
-    const headers = { 'Content-Type': 'application/x-www-form-urlencoded', Accept: 'application/json' }
-    const form = new URLSearchParams({
-      grant_type: 'urn:ietf:params:oauth:grant-type:device_code',
-      client_id: GROK_CLIENT_ID,
-      device_code: deviceCode,
-    }).toString()
-    const native = isLocalMode() ? nativeHttpPost('https://auth.x.ai/oauth2/token', headers, form) : null
-    if (native && !native.error) {
-      try { return JSON.parse(String(native.body || '{}')) } catch { return {} }
-    }
-    if (native?.error) throw new Error(native.error)
     const r = await apiFetch('/api/oauth/device/poll', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ channel: 'grok', deviceCode }),

@@ -419,7 +419,7 @@ public class MainActivity extends BridgeActivity {
         HttpURLConnection conn = null;
         try {
             URL u = new URL(tokenUrl);
-            conn = (HttpURLConnection) u.openConnection();
+            conn = ModelNetwork.open(u, "subscription");
             conn.setRequestMethod("POST");
             conn.setConnectTimeout(15000);
             conn.setReadTimeout(20000);
@@ -450,7 +450,7 @@ public class MainActivity extends BridgeActivity {
             if (token.isEmpty()) { deliverOAuth(oauthError("令牌接口没有返回 access_token")); return; }
             deliverOAuth(oauthOk(token, data.optString("refresh_token", ""), data.optLong("expires_in", 0), data.optString("id_token", "")));
         } catch (Exception e) {
-            deliverOAuth(oauthError("换取令牌失败：" + safeMessage(e)));
+            deliverOAuth(oauthError("经订阅代理换取令牌失败：" + safeMessage(e)));
         } finally {
             if (conn != null) conn.disconnect();
         }
