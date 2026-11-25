@@ -1237,10 +1237,12 @@ export default function App() {
   // 正在进行的模型请求：删除「正在生成」的助手消息时中止它；回写全部按 id 匹配，
   //   消息删除后天然无处可写，绝不会删除后又重新出现。
   const sendAbortRef = useRef<Record<string,{ id: string; controller: AbortController }>>({})
-  async function send(textInput: string, attachments: MessageAttachment[] = [], options: { conversationId?: string; queuedIds?: string[]; insertUser?: boolean; historyEndIndex?: number; regenerate?: { replaceId: string; originalContent: string; originalUsage?: TokenUsage }; onUserInserted?: () => void } = {}): Promise<'ok'|'fail'|'noop'> {
+  async function send(textInput: string, attachments: MessageAttachment[] = [], options: { assistantId?: Person; conversationId?: string; queuedIds?: string[]; insertUser?: boolean; historyEndIndex?: number; regenerate?: { replaceId: string; originalContent: string; originalUsage?: TokenUsage }; onUserInserted?: () => void } = {}): Promise<'ok'|'fail'|'noop'> {
     const text = textInput.trim()
-    if ((!text && !attachments.length) || sending) return 'noop'
-    const target = person
+    const target = options.assistantId ?? person
+    const requestedConversationId = options.conversationId ?? activeConversationIdsRef.current[target] ?? ''
+    if ((!text && !attachments.length) || sendingRef.current[pendingScopeKey(target,requestedConversationId)]) return 'noop'
+    if(options.conversationId && !conversationsRef.current[target]?.some(c=>c.id===requestedConversationId)) return 'fail'
     // 聊天窗口选的模型预设优先；未绑定时回退旧的「每助手一份」配置（老数据零影响）。
     const activeModel = resolveModelConfig(bindings[target]?.modelProfileId || defaultModelId || '', modelProfiles, modelConfig[target])
     // 多 KEY：默认「备用优先、主号兜底」，服务端按顺序自动换下一把；
@@ -1271,7 +1273,7 @@ export default function App() {
       setChatError('请先在「设置 → 资源库」添加模型并在聊天窗口「配置」里选用，然后填写 API Key。')
       return 'fail'
     }
-    const sendConversationId = options.conversationId ?? activeConversationIds[target] ?? ''
+    const sendConversationId = requestedConversationId
     const convHistory = (conversations[target]||[]).find(c=>c.id===sendConversationId)?.messages || (sendConversationId===activeConversationIds[target]?messages[target]:[])
     const history = options.historyEndIndex!=null ? convHistory.slice(0,Math.max(0,options.historyEndIndex)) : convHistory
     const card = characters[target]
@@ -1899,7 +1901,8 @@ export default function App() {
       finishGeneration(localStorage, assistantMessageId)
       setGenerationForeground({action:'stop', messageId:assistantMessageId})
       // 生成成功 → 自动补发同会话的 pending，开启下一轮；报错/中断不自动发（保留给用户）。
-      if (genOutcome === 'ok') void autoSendPending(target, sendConversationId)
+      if (genOutcome === 'ok') window.setTimeout(()=>void autoSendPending(target, sendConversationId),0)
+      else if(pendingSendsRef.current[sendScope]) commitPending(markNeedsReview(pendingSendsRef.current,target,sendConversationId))
     }
   }
 
@@ -1909,8 +1912,7 @@ export default function App() {
   const sendRef = useRef(send)
   useEffect(() => { sendRef.current = send })
   // 同步锁：effect 重挂载、按钮点击可能同刻竞争同一条 pending，锁保证同时只进一次 send。
-  const flushLockRef = useRef(false)
-  const autoSendLockRef = useRef(false)
+  const flushLockRef = useRef(new Set<string>())
 
   function markConversationDirty() {
     // 与 send() 相同的落盘防线：用户消息一入列就要求立刻保存，堵住「排队后立刻刷新丢消息」。
@@ -1952,8 +1954,8 @@ export default function App() {
   // 发送一条 pending：自动补发与用户手动「发送」共用。
   // confirmReview=true 允许发送 needs_review（用户显式确认）；自动路径永远只发 pending。
   async function flushPending(assistantId: string, conversationId: string, confirmReview = false, waitsLeft = 15) {
-    if (flushLockRef.current) return
     const key = pendingScopeKey(assistantId, conversationId)
+    if (flushLockRef.current.has(key)) return
     const item = pendingSendsRef.current[key]
     if (!item) return
     if (item.status !== 'pending' && !(confirmReview && item.status === 'needs_review')) return
@@ -1968,10 +1970,10 @@ export default function App() {
       window.setTimeout(() => void flushPending(assistantId, conversationId, confirmReview, waitsLeft - 1), 200)
       return
     }
-    flushLockRef.current = true
+    flushLockRef.current.add(key)
     try {
       const outcome = await sendRef.current(item.text, item.attachments as MessageAttachment[], {
-        conversationId,
+        assistantId, conversationId,
         // 气泡一插入就清掉待发送卡片：用户看到「已发出」，不再等助手回复。
         onUserInserted: () => commitPending(clearPending(pendingSendsRef.current, assistantId, conversationId)),
       })
@@ -1979,18 +1981,15 @@ export default function App() {
         // 还没走到插气泡就失败（比如没配模型）才保留卡片，方便重试。
         commitPending(markNeedsReview(pendingSendsRef.current, assistantId, conversationId))
       }
-    } finally { flushLockRef.current = false }
+    } finally { flushLockRef.current.delete(key); if(pendingSendsRef.current[key]?.status==='pending'&&!sendingRef.current[key]) window.setTimeout(()=>void flushPending(assistantId,conversationId),0) }
   }
 
   // 当前会话生成成功结束后，自动补发其 pending（开启下一轮对话）。
   async function autoSendPending(assistantId: string, conversationId: string) {
-    if (autoSendLockRef.current) return
     const key = pendingScopeKey(assistantId, conversationId)
     const item = pendingSendsRef.current[key]
     if (!item || item.status !== 'pending') return
-    autoSendLockRef.current = true
-    try { await flushPending(assistantId, conversationId, false) }
-    finally { autoSendLockRef.current = false }
+    await flushPending(assistantId, conversationId, false)
   }
 
   // 用户主动停止当前生成（AbortController）。pending 保留，可由用户随后手动发送。
@@ -2238,6 +2237,10 @@ export default function App() {
     onDeleteConversation={drawerDelete}
     onDraftChange={v=>setDraft(v)}
     onSend={prototypeSend}
+    renderSubscription={()=> <SubscriptionAccounts vendors={vendors} setVendors={setVendors} setModelProfiles={setModelProfiles} subscriptions={subscriptions} setSubscriptions={setSubscriptions}/>}
+    renderUsage={()=> <UsageStats people={assistants.map(a=>a.id)} conversations={conversations} models={Object.fromEntries(assistants.map(a=>[a.id,resolveModelConfig(bindings[a.id]?.modelProfileId||defaultModelId||'',modelProfiles,modelConfig[a.id]).model]))} displayName={displayName}/>}
+    vendors={vendors}
+    onSaveVendors={next=>{setVendors(next);setModelProfiles(old=>syncVendorProfiles(next,old))}}
     pending={pendingSends[pendingScopeKey(person,activeConversationIds[person]||'')]}
     onCancelPending={cancelPending}
     onEditPending={editPendingText}

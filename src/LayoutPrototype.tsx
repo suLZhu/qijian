@@ -5,8 +5,8 @@ import { LEGACY_ASSISTANTS, migrateLocalStorage } from './assistantIdentity'
 import './LayoutPrototype.css'
 import { IconBook, IconPlug, IconBack, IconChevronRight, IconClose, IconHome, IconChat, IconMenu, IconPlus, IconSend, IconStop, IconSettings } from './icons'
 import { settingItems } from './layout/sections'
-import { SubscriptionPreview, UsageLedgerPreview } from './ProviderUsagePreview'
 import { RealProviderPreview } from './RealProviderPreview'
+import type { Vendor } from './vendors.mjs'
 import { SettingsSectionsPreview } from './SettingsSectionsPreview'
 import { ModelFunctionsPreview, ScheduledTasksPreview } from './FeaturePagesPreview'
 import { AdvancedSettingsPreview } from './AdvancedSettingsPreview'
@@ -20,6 +20,10 @@ type MessageView = { role:string; content:string; id?:string; reasoning?:string;
 type ConversationView = { id: string; title: string; messages: MessageView[]; updatedAt?:string }
 type Attachment = { name:string; type:string; size:number; preview?:string; dataUrl?:string; textContent?:string; assetId?:string }
 type LayoutPrototypeProps = {
+  renderSubscription?:()=>ReactNode
+  renderUsage?:()=>ReactNode
+  vendors?:Vendor[]
+  onSaveVendors?:(next:Vendor[])=>void
   renderBinding?: (kind:'world'|'mcp')=>ReactNode
   assistants?: AssistantView[]
   conversations?: Record<string,ConversationView[]>
@@ -196,9 +200,9 @@ export default function LayoutPrototype(props:LayoutPrototypeProps = {}) {
       </div>}
       {view === 'settings' && <div className="qj-page">
         {section ? <>
-          {section === '供应商' ? <RealProviderPreview /> :
-            section === '订阅' ? <SubscriptionPreview /> :
-            section === 'AI 用量账本' ? <UsageLedgerPreview /> :
+          {section === '供应商' ? <RealProviderPreview vendors={props.vendors||[]} onSave={next=>props.onSaveVendors?.(next)}/> :
+            section === '订阅' ? props.renderSubscription?.() :
+            section === 'AI 用量账本' ? props.renderUsage?.() :
             section === '模型功能' ? <ModelFunctionsPreview /> :
             section === '定时任务' ? <ScheduledTasksPreview /> :
             section === '工具与扩展' ? <AdvancedSettingsPreview kind="tools" /> :

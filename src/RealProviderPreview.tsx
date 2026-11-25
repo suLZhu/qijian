@@ -1,14 +1,8 @@
 import { useMemo, useState } from 'react'
 import { apiFetch } from './apiBase.mjs'
-import { blankVendor, groupModels, modelListUrl, normalizeVendors, syncVendorProfiles, type Vendor, type VendorModel } from './vendors.mjs'
+import { blankVendor, groupModels, modelListUrl, type Vendor, type VendorModel } from './vendors.mjs'
 import './ProviderUsagePreview.css'
 
-const VENDORS_KEY='ai-home.vendors'
-const MODEL_PROFILES_KEY='ai-home.modelProfiles'
-
-function readJson(key:string,fallback:any){
-  try{return JSON.parse(localStorage.getItem(key)||'')}catch{return fallback}
-}
 function keyOf(v:Vendor){return v.keys?.[0]?.value||''}
 function withKey(v:Vendor,value:string):Vendor{
   const keys=[...(v.keys||[])]
@@ -17,8 +11,8 @@ function withKey(v:Vendor,value:string):Vendor{
   return {...v,keys}
 }
 
-export function RealProviderPreview(){
-  const [vendors,setVendors]=useState<Vendor[]>(()=>normalizeVendors(readJson(VENDORS_KEY,null)))
+export function RealProviderPreview({vendors:initialVendors,onSave}:{vendors:Vendor[];onSave:(next:Vendor[])=>void}){
+  const [vendors,setVendors]=useState<Vendor[]>(initialVendors)
   const [active,setActive]=useState(()=>vendors.find(v=>!v.hidden)?.id||vendors[0]?.id||'')
   const [message,setMessage]=useState('')
   const [busy,setBusy]=useState(false)
@@ -32,9 +26,7 @@ export function RealProviderPreview(){
   }
   function save(next=vendors){
     try{
-      localStorage.setItem(VENDORS_KEY,JSON.stringify(next))
-      const profiles=syncVendorProfiles(next,readJson(MODEL_PROFILES_KEY,[]))
-      localStorage.setItem(MODEL_PROFILES_KEY,JSON.stringify(profiles))
+      onSave(next)
       setMessage('已保存，并同步到聊天模型池。')
     }catch{
       setMessage('保存失败：当前环境无法写入本机配置。')
@@ -46,7 +38,7 @@ export function RealProviderPreview(){
     setVendors(next);setActive(v.id);setMessage('')
   }
   function remove(){
-    if(!current)return
+    if(!current||!window.confirm('确认移除供应商「'+current.name+'」？'))return
     let next:Vendor[]
     if(current.builtin){
       next=vendors.map(v=>v.id===current.id?{...v,hidden:true,enabled:false}:v)
@@ -81,7 +73,7 @@ export function RealProviderPreview(){
       })})
       const data=await response.json().catch(()=>({}))
       if(!response.ok)throw new Error(data?.error||('HTTP '+response.status))
-      const ids=Array.isArray(data?.models)?data.models.map((x:any)=>String(x)).filter(Boolean):[]
+      const ids=Array.isArray(data?.models)?data.models.map((x:any)=>typeof x==='string'?x:String(x?.id||'')).filter(Boolean):[]
       if(!ids.length){setMessage('接口正常，但没有返回模型列表。');return}
       const old=new Map((current.models||[]).map(m=>[m.id,m]))
       const models: VendorModel[]=ids.map((id:string)=>old.get(id)||{id,name:id,selected:false,source:'remote'})
@@ -96,7 +88,7 @@ export function RealProviderPreview(){
   const [manual,setManual]=useState('')
 
   return <div className="pup-wrap">
-    <header className="pup-head"><h2>供应商</h2><p>这里已经读写栖间真实供应商配置；保存后同步到聊天模型池。</p></header>
+    <header className="pup-head"><h2>供应商</h2></header>
     <div className="pup-provider-nav">
       {visible.map(v=><button key={v.id} className={v.id===active?'active':''} onClick={()=>{setActive(v.id);setMessage('')}}>{v.name}</button>)}
       <button className="pup-add" onClick={add}>＋ 添加</button>
@@ -107,6 +99,7 @@ export function RealProviderPreview(){
       <label className="pup-field"><span>API Key</span><input type="password" autoComplete="off" value={keyOf(current)} onChange={e=>setVendors(old=>old.map(v=>v.id===current.id?withKey(v,e.target.value):v))}/></label>
       <div className="pup-actionline"><button disabled={busy} onClick={()=>void fetchModels()}>{busy?'正在获取…':'↻ 获取模型列表'}</button><span className="pup-hint">{selected.size} 个模型已加入聊天池</span></div>
       <section className="pup-models">
+        {selected.size>0&&<div className="pup-selected-models"><b>已选模型</b>{[...selected].map(id=><div className="pup-check-row" key={id}><span>{id}</span><button aria-label={'移除 '+id} onClick={()=>toggleModel(id,false)}>×</button></div>)}</div>}
         {groups.map(g=><details key={g.id} className="pup-family" open>
           <summary>{g.label}<small>{g.models.length} 个</small></summary>
           {g.models.map(id=><label className="pup-check-row" key={id}><input type="checkbox" checked={selected.has(id)} onChange={e=>toggleModel(id,e.target.checked)}/><span>{id}</span></label>)}
