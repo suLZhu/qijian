@@ -48,3 +48,5 @@ export declare function resolveKeyCandidates(vendors: unknown, keyId: string, fa
 export declare function isRetryableKeyStatus(status: number): boolean
 export declare function readKeyCandidates(body: unknown): string[]
 export declare function blankVendor(name?: string, endpoint?: string): Vendor
+
+export declare function resolveChatAccess(vendors: Vendor[], subscriptions: import('./subscriptionChannels.mjs').SubscriptionAccount[], vendorId: string, keyId: string, fallbackKey: string): { apiKeys: string[]; protocol: string; accountId: string; error?: string }

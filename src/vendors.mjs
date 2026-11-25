@@ -313,6 +313,30 @@ export function resolveKeyCandidates(vendors, keyId, fallbackKey = '', vendorId 
   return out.slice(0, 6)
 }
 
+// 订阅账号保存的 vendorKeyId 是授权令牌与供应商 Key 的关联。
+export function resolveChatAccess(vendors, subscriptions, vendorId, keyId, fallbackKey) {
+  const keys = resolveKeyCandidates(vendors, keyId, fallbackKey, vendorId)
+  const vendor = vendors.find(item => item.id === vendorId)
+  const accounts = subscriptions.filter(item => item.vendorId === vendorId && item.vendorKeyId)
+  const tokenFor = account => vendor?.keys.find(key => key.id === account.vendorKeyId)?.value
+  const reserved = new Set(accounts.map(tokenFor).filter(Boolean))
+  const selected = vendor?.keys.find(key => key.id === keyId)
+  const account = selected
+    ? accounts.find(item => item.vendorKeyId === selected.id || tokenFor(item) === selected.value)
+    : accounts.find(item => item.loggedIn)
+  const direct = { apiKeys: keys.filter(key => !reserved.has(key)), protocol: '', accountId: '' }
+  if (!accounts.length && (vendor?.subscription || vendor?.subscriptionChannel)) {
+    return { ...direct, apiKeys: [], error: '无法确认订阅凭据，请重新登录订阅账号' }
+  }
+  if (!account) return direct
+  const protocol = { gpt: 'codex', claude: 'anthropic', grok: 'grok' }[account.channelId]
+  const token = tokenFor(account)
+  if (!protocol || !account.loggedIn || !token || vendor?.enabled === false) {
+    return { ...direct, apiKeys: [], error: '订阅账号不可用，请检查账号状态和凭据' }
+  }
+  return { apiKeys: [token], protocol, accountId: account.accountId || vendor.subscriptionAccountId || '' }
+}
+
 // 可重试的上游状态：这些基本都是额度 / 鉴权 / 限流问题，换一把 Key 有意义。
 export function isRetryableKeyStatus(status) {
   return [401, 402, 403, 408, 429, 500, 502, 503, 504].includes(Number(status))

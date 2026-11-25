@@ -278,3 +278,17 @@ test('换供应商后旧绑定和旧助手凭据不能跨站重试', () => {
   assert.deepEqual(resolveKeyCandidates(vendors, '', 'legacy'), ['legacy'])
   assert.deepEqual(resolveKeyCandidates(vendors, 's1', 'token'), [])
 })
+
+test('同一供应商的订阅与普通凭据按账号关联隔离', async () => {
+  const { resolveChatAccess } = await import('../src/vendors.mjs')
+  const vendors = [{ id: 'openai', subscription: true, keys: [
+    { id: 'api', value: 'normal', role: 'backup' }, { id: 'auth', value: 'oauth' },
+  ] }]
+  const account = { vendorId: 'openai', vendorKeyId: 'auth', loggedIn: true, channelId: 'gpt', accountId: 'acct' }
+  const access = (keyId, accounts = [account]) => resolveChatAccess(vendors, accounts, 'openai', keyId, 'oauth')
+  assert.deepEqual(access('api'), { apiKeys: ['normal'], protocol: '', accountId: '' })
+  assert.deepEqual(access('auth'), { apiKeys: ['oauth'], protocol: 'codex', accountId: 'acct' })
+  assert.deepEqual(access(''), access('auth'))
+  assert.deepEqual(access('auth', []).apiKeys, [])
+  assert.deepEqual(access('auth', [{ ...account, loggedIn: false }]).apiKeys, [])
+})
