@@ -54,6 +54,7 @@ import { readKeyCandidates, isRetryableKeyStatus } from './vendors.mjs'
 import { performSubscriptionLogin } from './subscriptionLogin.mjs'
 import { exchangeOAuthCode } from './subscriptionOAuth.mjs'
 import { runRouteChat } from './chatRouteRunner.mjs'
+import { ensureMcpSchema, listMcpServices, boundMcpIds, replaceMcpBindings, boundMcpService, deleteMcpService } from './server/mcpStore.mjs'
 
 const password = process.env.AI_HOME_PASSWORD
 if (!password || password.length < 16) {
@@ -117,6 +118,8 @@ if (!workflowColumns.includes('temporary')) db.exec('ALTER TABLE scheduled_tasks
 // Timer tasks must write back into the conversation they were created from.
 if (!workflowColumns.includes('conversation_id')) db.exec('ALTER TABLE scheduled_tasks ADD COLUMN conversation_id TEXT')
 if (!workflowColumns.includes('interval_minutes')) db.exec('ALTER TABLE scheduled_tasks ADD COLUMN interval_minutes INTEGER NOT NULL DEFAULT 0')
+// MCP 5.0：旧版按 person 复制服务；启动时一次性迁移成全局服务 + 独立助手绑定。
+ensureMcpSchema(db)
 migrateDatabase(db)
 
 // 启动滚动备份：见 server/backup.mjs（VACUUM INTO 一致性快照，保留 5 份，
@@ -232,7 +235,7 @@ function decryptSecret(value) {
   decipher.setAuthTag(Buffer.from(tag, 'hex'))
   return Buffer.concat([decipher.update(Buffer.from(ciphertext, 'hex')), decipher.final()]).toString('utf8')
 }
-function publicMcp(row) { let hasToken = false; try { const saved = JSON.parse(decryptSecret(row.token_enc)); hasToken = typeof saved.token === 'string' && saved.token.length > 0 } catch { hasToken = decryptSecret(row.token_enc).length > 0 }; return { id: row.id, person: row.person, name: row.name, url: row.url, transport: row.transport, enabled: !!row.enabled, updatedAt: row.updated_at, hasToken } }
+function publicMcp(row) { let hasToken = false; try { const saved = JSON.parse(decryptSecret(row.token_enc)); hasToken = typeof saved.token === 'string' && saved.token.length > 0 } catch { hasToken = decryptSecret(row.token_enc).length > 0 }; return { id: row.id, name: row.name, url: row.url, transport: row.transport, enabled: !!row.enabled, updatedAt: row.updated_at, hasToken } }
 function validateRemoteUrl(raw) {
   let u
   try { u = new URL(raw) } catch { throw Object.assign(new Error('MCP 地址格式无效'), { status: 400 }) }
@@ -874,16 +877,24 @@ const apiServer = createServer(async (req, res) => {
     } catch (error) { return send(res, error.status || 502, { ok: false, error: error.message || '连接失败' }) }
   }
   if (url.pathname === '/api/mcp' && req.method === 'GET') {
+    return send(res, 200, { connections: listMcpServices(db).map(publicMcp) })
+  }
+  if (url.pathname === '/api/mcp/bindings' && req.method === 'GET') {
     const person = url.searchParams.get('person')
     if (!isValidAssistantId(person)) return send(res, 400, { error: '人物身份无效' })
-    const rows = db.prepare('SELECT * FROM mcp_connections WHERE person=? ORDER BY updated_at DESC').all(person)
-    return send(res, 200, { connections: rows.map(publicMcp) })
+    return send(res, 200, { connectionIds: boundMcpIds(db, person) })
+  }
+  if (url.pathname === '/api/mcp/bindings' && req.method === 'PUT') {
+    try {
+      const body = await readBody(req)
+      if (!isValidAssistantId(body.person)) return send(res, 400, { error: '人物身份无效' })
+      const connectionIds = replaceMcpBindings(db, body.person, body.connectionIds)
+      return send(res, 200, { connectionIds })
+    } catch (error) { return send(res, error.status || 400, { error: error.message || '保存 MCP 绑定失败' }) }
   }
   if (url.pathname === '/api/mcp' && req.method === 'POST') {
     try {
       const body = await readBody(req)
-      const person = body.person
-      if (!isValidAssistantId(person)) return send(res, 400, { error: '必须指定有效的人物绑定' })
       const name = String(body.name || '').trim().slice(0, 120)
       const remote = validateRemoteUrl(String(body.url || '').trim())
       const transportType = body.transport || 'httpStream'
@@ -895,26 +906,22 @@ const apiServer = createServer(async (req, res) => {
       for (const [key, value] of Object.entries(customHeaders)) { if (!/^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/.test(key) || typeof value !== 'string' || value.length > 2048 || /[\r\n]/.test(value)) return send(res, 400, { error: '自定义请求头格式无效' }) }
       if (!name) return send(res, 400, { error: '请填写服务名称' })
       const id = randomUUID(), updatedAt = new Date().toISOString()
-      db.prepare('INSERT INTO mcp_connections (id,person,name,url,transport,enabled,token_enc,updated_at) VALUES (?,?,?,?,?,1,?,?)').run(id, person, name, remote.toString(), transportType, encryptSecret(JSON.stringify({ token, headers: customHeaders })), updatedAt)
+      db.prepare('INSERT INTO mcp_connections (id,name,url,transport,enabled,token_enc,updated_at) VALUES (?,?,?,?,1,?,?)').run(id, name, remote.toString(), transportType, encryptSecret(JSON.stringify({ token, headers: customHeaders })), updatedAt)
       const row = db.prepare('SELECT * FROM mcp_connections WHERE id=?').get(id)
       return send(res, 201, { connection: publicMcp(row) })
     } catch (error) { return send(res, error.status || 400, { error: error.message || '保存 MCP 配置失败' }) }
   }
   const mcpMatch = url.pathname.match(/^\/api\/mcp\/([a-f0-9-]+)(?:\/(tools|call))?$/)
   if (mcpMatch && req.method === 'DELETE' && !mcpMatch[2]) {
-    const body = await readBody(req).catch(() => ({}))
-    if (!isValidAssistantId(body.person)) return send(res, 400, { error: '必须指定人物身份' })
-    const result = db.prepare('DELETE FROM mcp_connections WHERE id=? AND person=?').run(mcpMatch[1], body.person)
+    const result = deleteMcpService(db, mcpMatch[1])
     if (result.changes) void mcpConnectionPool.drop(mcpMatch[1])
-    return result.changes ? send(res, 200, { ok: true }) : send(res, 404, { error: '未找到该人物绑定的 MCP 服务' })
+    return result.changes ? send(res, 200, { ok: true }) : send(res, 404, { error: '未找到 MCP 服务' })
   }
   if (mcpMatch && req.method === 'PUT' && !mcpMatch[2]) {
     try {
       const body = await readBody(req)
-      const person = body.person
-      if (!isValidAssistantId(person)) return send(res, 400, { error: '必须指定人物身份' })
-      const row = db.prepare('SELECT * FROM mcp_connections WHERE id=? AND person=?').get(mcpMatch[1], person)
-      if (!row) return send(res, 404, { error: '未找到该人物绑定的 MCP 服务' })
+      const row = db.prepare('SELECT * FROM mcp_connections WHERE id=?').get(mcpMatch[1])
+      if (!row) return send(res, 404, { error: '未找到 MCP 服务' })
       const name = String(body.name ?? row.name).trim().slice(0, 120)
       if (!name) return send(res, 400, { error: '请填写服务名称' })
       const remote = validateRemoteUrl(String(body.url ?? row.url).trim())
@@ -923,12 +930,12 @@ const apiServer = createServer(async (req, res) => {
       if (token !== null && token.length > 8192) return send(res, 400, { error: 'Token 长度超出限制' })
       const updatedAt = new Date().toISOString()
       if (token === null) {
-        db.prepare('UPDATE mcp_connections SET name=?, url=?, enabled=?, updated_at=? WHERE id=? AND person=?').run(name, remote.toString(), enabled, updatedAt, mcpMatch[1], person)
+        db.prepare('UPDATE mcp_connections SET name=?, url=?, enabled=?, updated_at=? WHERE id=?').run(name, remote.toString(), enabled, updatedAt, mcpMatch[1])
       } else {
-        db.prepare('UPDATE mcp_connections SET name=?, url=?, enabled=?, token_enc=?, updated_at=? WHERE id=? AND person=?').run(name, remote.toString(), enabled, encryptSecret(JSON.stringify({ token, headers: {} })), updatedAt, mcpMatch[1], person)
+        db.prepare('UPDATE mcp_connections SET name=?, url=?, enabled=?, token_enc=?, updated_at=? WHERE id=?').run(name, remote.toString(), enabled, encryptSecret(JSON.stringify({ token, headers: {} })), updatedAt, mcpMatch[1])
       }
       void mcpConnectionPool.drop(mcpMatch[1])
-      const next = db.prepare('SELECT * FROM mcp_connections WHERE id=? AND person=?').get(mcpMatch[1], person)
+      const next = db.prepare('SELECT * FROM mcp_connections WHERE id=?').get(mcpMatch[1])
       return send(res, 200, { connection: publicMcp(next) })
     } catch (error) { return send(res, error.status || 400, { error: error.message || '更新 MCP 配置失败' }) }
   }
@@ -937,8 +944,8 @@ const apiServer = createServer(async (req, res) => {
       const body = await readBody(req)
       const person = body.person
       if (!isValidAssistantId(person)) return send(res, 400, { error: '必须指定人物身份' })
-      const row = db.prepare('SELECT * FROM mcp_connections WHERE id=? AND person=?').get(mcpMatch[1], person)
-      if (!row) return send(res, 404, { error: '此 MCP 没有绑定到当前人物' })
+      const row = boundMcpService(db, person, mcpMatch[1])
+      if (!row) return send(res, 404, { error: '此 MCP 未启用或没有绑定到当前助手' })
       if (mcpMatch[2] === 'tools') {
         const result = await withMcpClient(row, client => client.listTools())
         return send(res, 200, { tools: result.tools.map(t => ({ name: t.name, description: t.description || '', inputSchema: t.inputSchema })) })

@@ -143,7 +143,12 @@ const BUILTINS = [
 export async function createToolRegistry({ db, person, mcpList, mcpCall }) {
   const definitions = BUILTINS.map(b => b.definition)
   const mcpMap = new Map()
-  const connections = db.prepare('SELECT * FROM mcp_connections WHERE person=? AND enabled=1').all(person)
+  const connections = db.prepare(`
+    SELECT c.* FROM mcp_connections c
+    INNER JOIN mcp_bindings b ON b.connection_id=c.id
+    WHERE b.person=? AND c.enabled=1
+    ORDER BY c.updated_at DESC
+  `).all(person)
 
   for (const row of connections) {
     let listed

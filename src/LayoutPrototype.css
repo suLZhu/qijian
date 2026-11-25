@@ -116,3 +116,21 @@
 .qj-drawer{
   background:linear-gradient(180deg,#fff,#fbfcfa);
 }
+
+/* Shared chat resource and attachment controls. */
+.qj-chat-resource-actions,.qj-attachment-actions,.qj-attachment-list{display:flex;gap:8px;align-items:center;padding:4px 13px;flex-shrink:0;flex-wrap:wrap}
+.qj-chat-resource-actions{justify-content:flex-end}
+.qj-attachment-list{max-height:96px;overflow:auto}
+.qj-attachment-list>span{display:flex;align-items:center;gap:6px;padding:5px 8px;border:1px solid var(--qj-line);border-radius:8px;overflow-wrap:anywhere;min-width:0}
+.qj-attachment-list button{border:0;background:transparent}
+.qj-message-content{min-width:0;max-width:100%}
+.qj-message-attachment img{display:block;max-width:100%;max-height:240px;object-fit:contain;border-radius:10px}
+.qj-tool-tray{max-height:50%;overflow:auto}
+
+.qj-pending-edit{display:flex;align-items:center;gap:6px;padding:8px 13px;flex-shrink:0}
+.qj-pending-edit textarea{flex:1;min-width:0;resize:vertical;max-height:100px;border:1px solid var(--qj-line);border-radius:8px;padding:6px;font:inherit}
+.qj-pending-edit button{border:0;border-radius:8px;background:var(--qj-soft);padding:6px 9px}
+
+.qj-message-actions{display:flex;flex-wrap:wrap;gap:5px;margin-top:5px}
+.qj-message-actions button{border:1px solid var(--qj-line);border-radius:8px;background:var(--qj-soft);padding:5px 9px;font-size:12px}
+.qj-message-selected{outline:2px solid var(--qj-accent);outline-offset:4px;border-radius:12px}

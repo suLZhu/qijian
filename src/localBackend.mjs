@@ -36,6 +36,7 @@ const K = {
   toolLogs: 'ai-home.local.toolLogs',
   memoryRecords: 'ai-home.local.memoryRecords',
   mcp: 'ai-home.local.mcp',
+  mcpBindings: 'ai-home.local.mcpBindings',
   inbox: 'ai-home.local.inbox',
   tasks: 'ai-home.local.tasks',
   proactive: 'ai-home.local.proactive',
@@ -960,67 +961,92 @@ export async function localHandle(path, init) {
         return json(200, { ok: true, count: tools.length })
       } catch (e) { return json(502, { ok: false, error: e.message || '连接失败' }) }
     }
+    // Migrate legacy per-person copies into a shared service catalog once.
+    const readMcpCatalog = () => {
+      const rows = readJSON(K.mcp, [])
+      if (!rows.some(c => c && c.person)) return rows
+      const bindings = readJSON(K.mcpBindings, {})
+      const catalog = []
+      const bySignature = new Map()
+      for (const row of rows) {
+        if (!row) continue
+        const signature = [String(row.name || '').toLowerCase(), row.url, row.transport].join('\u0000')
+        let id = bySignature.get(signature)
+        if (!id) { id = row.id; bySignature.set(signature, id); const { person: _person, ...rest } = row; catalog.push(rest) }
+        if (row.person) bindings[row.person] = [...new Set([...(bindings[row.person] || []), id])]
+      }
+      writeJSON(K.mcpBindings, bindings)
+      writeJSON(K.mcp, catalog)
+      return catalog
+    }
     if (p === '/api/mcp' && method === 'GET') {
+      return json(200, { connections: readMcpCatalog().map(({ token, ...row }) => row) })
+    }
+    if (p === '/api/mcp/bindings' && method === 'GET') {
       const person = q.get('person') || ''
-      if (!person) return json(400, { error: '人物身份无效' })
-      const connections = readJSON(K.mcp, [])
-        .filter(c => c && c.person === person)
-        .map(c => ({ id: c.id, person: c.person, name: c.name, url: c.url, transport: c.transport, enabled: c.enabled, updated_at: c.updated_at }))
-      return json(200, { connections })
+      if (!person) return json(400, { error: '必须指定助手' })
+      const valid = new Set(readMcpCatalog().filter(c => c.enabled !== false).map(c => c.id))
+      return json(200, { connectionIds: (readJSON(K.mcpBindings, {})[person] || []).filter(id => valid.has(id)) })
+    }
+    if (p === '/api/mcp/bindings' && method === 'PUT') {
+      const body = await readBody(init)
+      const person = String(body.person || '')
+      if (!person || !Array.isArray(body.connectionIds)) return json(400, { error: '助手和绑定列表无效' })
+      const valid = new Set(readMcpCatalog().filter(c => c.enabled !== false).map(c => c.id))
+      const connectionIds = [...new Set(body.connectionIds.filter(id => typeof id === 'string' && valid.has(id)))]
+      const bindings = readJSON(K.mcpBindings, {})
+      bindings[person] = connectionIds
+      try { writeJSON(K.mcpBindings, bindings) } catch { return json(500, { error: '本地绑定保存失败' }) }
+      return json(200, { connectionIds })
     }
     if (p === '/api/mcp' && method === 'POST') {
       const b = await readBody(init)
-      const person = String(b.person || '')
-      if (!person) return json(400, { error: '必须指定有效的人物绑定' })
       const name = String(b.name || '').trim().slice(0, 120)
-      if (!name) return json(400, { error: '请填写服务名称' })
       const remote = String(b.url || '').trim()
+      if (!name) return json(400, { error: '请填写服务名称' })
       if (!/^https?:\/\//i.test(remote)) return json(400, { error: '主机地址需以 http:// 或 https:// 开头' })
-      const transportType = b.transport || 'httpStream'
-      if (transportType !== 'httpStream') return json(400, { error: '当前版本仅支持 Streamable HTTP 连接' })
+      if (b.transport && b.transport !== 'httpStream') return json(400, { error: '仅支持 Streamable HTTP' })
       const token = String(b.token || '').trim()
       if (token.length > 8192) return json(400, { error: 'Token 长度超出限制' })
-      const all = readJSON(K.mcp, [])
-      const record = { id: uuid(), person, name, url: remote, transport: transportType, enabled: true, token, updated_at: nowISO() }
-      all.unshift(record)
-      try { writeJSON(K.mcp, all.slice(0, 200)) } catch { return json(500, { error: '本地存储写入失败' }) }
-      return json(201, { connection: { id: record.id, person, name, url: remote, transport: transportType, enabled: true, updated_at: record.updated_at } })
+      const all = readMcpCatalog()
+      const record = { id: uuid(), name, url: remote, transport: 'httpStream', enabled: true, token, updated_at: nowISO() }
+      try { writeJSON(K.mcp, [record, ...all].slice(0, 200)) } catch { return json(500, { error: '本地服务保存失败' }) }
+      const { token: hidden, ...connection } = record
+      return json(201, { connection })
     }
     const mcpMatch = p.match(/^\/api\/mcp\/([a-f0-9-]+)(?:\/(tools|call))?$/)
     if (mcpMatch && method === 'DELETE' && !mcpMatch[2]) {
-      const b = await readBody(init).catch(() => ({}))
-      const person = String(b.person || '')
-      if (!person) return json(400, { error: '必须指定人物身份' })
-      const all = readJSON(K.mcp, [])
-      const next = all.filter(c => !(c && c.id === mcpMatch[1] && c.person === person))
-      if (next.length === all.length) return json(404, { error: '未找到该人物绑定的 MCP 服务' })
-      try { writeJSON(K.mcp, next) } catch { return json(500, { error: '本地存储写入失败' }) }
+      const all = readMcpCatalog()
+      const next = all.filter(c => c.id !== mcpMatch[1])
+      if (next.length === all.length) return json(404, { error: '未找到 MCP 服务' })
+      const bindings = readJSON(K.mcpBindings, {})
+      for (const person of Object.keys(bindings)) bindings[person] = bindings[person].filter(id => id !== mcpMatch[1])
+      try { writeJSON(K.mcp, next); writeJSON(K.mcpBindings, bindings) } catch { return json(500, { error: '本地删除失败' }) }
       return json(200, { ok: true })
     }
     if (mcpMatch && method === 'PUT' && !mcpMatch[2]) {
       const b = await readBody(init)
-      const person = String(b.person || '')
-      if (!person) return json(400, { error: '必须指定人物身份' })
-      const all = readJSON(K.mcp, [])
-      const i = all.findIndex(c => c && c.id === mcpMatch[1] && c.person === person)
-      if (i < 0) return json(404, { error: '未找到该人物绑定的 MCP 服务' })
+      const all = readMcpCatalog()
+      const i = all.findIndex(c => c.id === mcpMatch[1])
+      if (i < 0) return json(404, { error: '未找到 MCP 服务' })
       const name = String(b.name ?? all[i].name).trim().slice(0, 120)
-      if (!name) return json(400, { error: '请填写服务名称' })
       const url = String(b.url ?? all[i].url).trim()
-      if (!/^https?:\/\//i.test(url)) return json(400, { error: '主机地址需以 http:// 或 https:// 开头' })
+      if (!name || !/^https?:\/\//i.test(url)) return json(400, { error: '服务名称或地址无效' })
       const token = b.token === undefined ? all[i].token : String(b.token || '').trim()
       if (token.length > 8192) return json(400, { error: 'Token 长度超出限制' })
-      const enabled = b.enabled === undefined ? all[i].enabled !== false : !!b.enabled
-      all[i] = { ...all[i], name, url, transport: 'httpStream', enabled, token, updated_at: nowISO() }
-      try { writeJSON(K.mcp, all) } catch { return json(500, { error: '本地存储写入失败' }) }
-      return json(200, { connection: { id: all[i].id, person, name, url, transport: 'httpStream', enabled, updated_at: all[i].updated_at } })
+      all[i] = { ...all[i], name, url, token, enabled: b.enabled === undefined ? all[i].enabled !== false : !!b.enabled, updated_at: nowISO() }
+      try { writeJSON(K.mcp, all) } catch { return json(500, { error: '本地更新失败' }) }
+      const { token: hidden, ...connection } = all[i]
+      return json(200, { connection })
     }
     if (mcpMatch && method === 'POST' && ['tools', 'call'].includes(mcpMatch[2])) {
       try {
         const b = await readBody(init)
         const person = String(b.person || '')
         if (!person) return json(400, { error: '必须指定人物身份' })
-        const row = readJSON(K.mcp, []).find((c) => c && c.id === mcpMatch[1] && c.person === person)
+        const catalog = readMcpCatalog()
+        const boundIds = readJSON(K.mcpBindings, {})[person] || []
+        const row = boundIds.includes(mcpMatch[1]) ? catalog.find(c => c.id === mcpMatch[1] && c.enabled !== false) : null
         if (!row) return json(404, { error: '此 MCP 没有绑定到当前人物' })
         const tools = await mcpTools(row.url, row.token)
         if (mcpMatch[2] === 'tools') return json(200, { tools: tools.map((t) => ({ name: t.name, description: t.description || '', inputSchema: t.inputSchema })) })

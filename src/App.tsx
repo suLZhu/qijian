@@ -44,6 +44,7 @@ import { formatDuration, summarizeTokenUsage, groupToolCalls, needsChineseTransl
 // 消息操作：重新生成目标解析 + 历史消息 id 补齐/对齐（编辑、删除、重新生成按 id 定位）。
 import { resolveRegenerateContext, alignMessageIds } from './messageOps.mjs'
 import { needsUpload, assetIdsOfMessages, collectReferencedAssetIds, releasedAssetIds } from './attachmentRefs.mjs'
+import { extractDocumentText, supportedDocumentName } from './documentText'
 import { messageWithVision, historyVisionMessageIndexes, historicalMessageWithoutVision } from './visionAttachments.mjs'
 // 会话内消息搜索（微信式）：纯字符串匹配 + 上一条/下一条循环 + messageId 定位。
 import { searchMessages, stepMatchIndex, type ChatSearchResult } from './chatSearch.mjs'
@@ -2187,9 +2188,14 @@ export default function App() {
     setMessages(old=>({...old,[target]:targetConv?.messages||[]}))
     setChatError('')
   }
-  function prototypeSend(text:string){
+  function prototypeSend(text:string,attachments:MessageAttachment[]){
+    if(sending) {
+      const scope=pendingScopeKey(person,activeConversationIdsRef.current[person]||'')
+      if(pendingSendsRef.current[scope]) { setChatError('已有待发送消息，请先编辑或撤回，当前输入已保留。'); return Promise.resolve('fail' as const) }
+      return Promise.resolve(enqueuePending(text,attachments)?'ok':'fail')
+    }
     setDraft('')
-    return send(text).then(result=>{ if(result!=='ok') setDraft(text); return result })
+    return send(text,attachments).then(result=>{ if(result!=='ok') setDraft(text); return result })
   }
   // 聊天页没有「← 房间」按钮：从抽屉底部或系统返回手势回房间。
   const drawerBackToRoom=()=>{setSidebarOpen(false);setChatOpen(false);setActiveTool('')}
@@ -2232,6 +2238,15 @@ export default function App() {
     onDeleteConversation={drawerDelete}
     onDraftChange={v=>setDraft(v)}
     onSend={prototypeSend}
+    pending={pendingSends[pendingScopeKey(person,activeConversationIds[person]||'')]}
+    onCancelPending={cancelPending}
+    onEditPending={editPendingText}
+    onStop={stopGeneration}
+    onEditMessage={editMessage}
+    onDeleteMessages={deleteMessages}
+    onRegenerateMessage={regenerateMessage}
+    onConfirmPending={()=>void flushPending(person,activeConversationIds[person]||'',true)}
+    renderBinding={kind=><WorldMcpMatrix key={person+kind} mode="bind" only={kind} person={person} worldEntries={worldEntries} setWorldEntries={setWorldEntries}/>}
   />
 
   return <main className={"shell theme-"+themePrefs.theme+" bubble-"+bubbleClass+" chatbg-"+bgClass+chatViewportLock+(beautifyClass?' '+beautifyClass:'')} style={{...shellVars,...(nativeTextZoomAvailable()?{'--font-scale':'1'}:{}),...(bgUrl?{'--chat-bg-image':'url("'+bgUrl+')'}:{}),...(bgClass==='image'?{'--chat-bg-opacity':String((themePrefs.chatBgOpacity??100)/100)}:{}),...(bubbleUrl?{'--bubble-image':'url("'+bubbleUrl+')'}:{})} as any}>
@@ -3088,7 +3103,7 @@ function Chat(p: any) {
   // 顶栏不再显示只读状态条；绑定状态由输入栏小图标的角标与面板自己表达。
   const quickMcp=useMcpLibrary()
   const quickBinding:PersonBinding=p.bindings?.[chatPerson]||emptyBinding()
-  const quickMine=quickMcp.connections.filter(c=>c.person===chatPerson)
+  const quickMine=quickMcp.connections.filter(c=>c.enabled)
   // 图标面板只显示「设置页勾进池里」的 001 / 002 条目；编号按设置页全量列表算，保证两边一致。
   const pool:ChatPool=p.chatPool||normalizePool(null)
   const worldAll=((p.worldEntries||[]) as WorldEntry[]).map(e=>e.id)
@@ -3444,8 +3459,18 @@ function Chat(p: any) {
           if(saved){item.preview=saved.url;item.assetId=saved.id}
           else uploadFailed++   // 降级：保留 blob: 本次会话仍可见，但刷新会失效，必须明示
         }
-      } else if(/\.(txt|md|json|csv|log)$/i.test(file.name)&&file.size<500*1024){
-        item.textContent=await file.text()
+      } else if(supportedDocumentName(file.name)){
+        try{
+          const extracted=await extractDocumentText(file)
+          item.textContent=extracted.text
+          if(extracted.truncated)console.info('[attachments] extracted text truncated for',file.name)
+        }catch(error){
+          p.setChatError('文档读取失败：'+file.name+' · '+(error instanceof Error?error.message:'无法解析文档'))
+          continue
+        }
+      } else {
+        p.setChatError('暂不支持读取此文件格式：'+file.name)
+        continue
       }
       loaded.push(item)
     }
@@ -3945,24 +3970,19 @@ function AssistantThemeSettings({personAppearance,setPersonAppearance,assets,dis
 }
 
 // ── 资源库：设置区一次性添加模型 / 世界书 / MCP，聊天窗口按助手选用 ──────────
-type McpLibraryItem = { id: string; person: Person; name: string; url: string; transport: string; enabled: boolean }
+type McpLibraryItem = { id: string; name: string; url: string; transport: string; enabled: boolean }
 
-// MCP 的服务端按 person 做隔离（安全边界），所以这里逐个助手拉取后合并成一张总表；
-// 添加时可选「全部助手」，一次提交就为每位助手各建一条，不用再切换工作区反复填。
 function useMcpLibrary() {
   const [connections, setConnections] = useState<McpLibraryItem[]>([])
   const [error, setError] = useState('')
   const refresh = useCallback(async () => {
-    const all: McpLibraryItem[] = []
-    for (const p of ASSISTANT_PEOPLE) {
-      try {
-        const r = await apiFetch('/api/mcp?person=' + encodeURIComponent(p), { credentials: 'include' })
-        if (!r.ok) continue
-        const d = await r.json()
-        for (const c of (d.connections || [])) all.push({ ...c, person: p })
-      } catch { /* 单个助手读取失败不影响其他助手 */ }
-    }
-    setConnections(all)
+    try {
+      const response = await apiFetch('/api/mcp', { credentials: 'include' })
+      const data = await response.json()
+      if (!response.ok) throw new Error(data.error || '读取 MCP 服务失败')
+      setConnections(Array.isArray(data.connections) ? data.connections : [])
+      setError('')
+    } catch (error) { setError(error instanceof Error ? error.message : '读取 MCP 服务失败') }
   }, [])
   useEffect(() => { void refresh() }, [refresh])
   return { connections, error, setError, refresh }
@@ -4738,36 +4758,56 @@ function VendorCenter({vendors,setVendors,setModelProfiles,section,onSection,mod
 
 // 设置页「聊天可选清单」：勾进池里的条目才会出现在聊天窗口对应小图标里。
 // 世界书 / MCP 两栏并排：设置页（勾选池）和聊天页（绑定当前助手）共用同一套布局。
-function WorldMcpMatrix({mode,person,chatPool,setChatPool,worldEntries,setWorldEntries,bindings,setBindings}:{
+function WorldMcpMatrix({mode,person,chatPool,setChatPool,worldEntries,setWorldEntries,only}:{
+  only?:'world'|'mcp'
   mode:'pool'|'bind'; person?:Person
   chatPool?:ChatPool; setChatPool?:React.Dispatch<React.SetStateAction<ChatPool>>
   worldEntries:WorldEntry[]; setWorldEntries:React.Dispatch<React.SetStateAction<WorldEntry[]>>
   bindings?:Record<Person,PersonBinding>; setBindings?:React.Dispatch<React.SetStateAction<Record<Person,PersonBinding>>>
 }) {
   const mcp=useMcpLibrary()
+  const [serverMcpIds,setServerMcpIds]=useState<string[]>([])
+  const [mcpBindingError,setMcpBindingError]=useState('')
+  useEffect(()=>{
+    if(mode!=='bind'||!person)return
+    let active=true
+    void apiFetch('/api/mcp/bindings?person='+encodeURIComponent(person),{credentials:'include'})
+      .then(async response=>{const data=await response.json();if(!response.ok)throw new Error(data.error||'读取 MCP 绑定失败');if(active)setServerMcpIds(data.connectionIds||[])})
+      .catch(error=>{if(active)setMcpBindingError(String(error.message||error))})
+    return ()=>{active=false}
+  },[mode,person])
+  const saveMcpBinding=async(id:string,enabled:boolean)=>{
+    if(!person)return
+    const next=enabled?[...new Set([...serverMcpIds,id])]:serverMcpIds.filter(value=>value!==id)
+    setMcpBindingError('')
+    try {
+      const response=await apiFetch('/api/mcp/bindings',{method:'PUT',credentials:'include',headers:{'Content-Type':'application/json'},body:JSON.stringify({person,connectionIds:next})})
+      const data=await response.json()
+      if(!response.ok)throw new Error(data.error||'保存 MCP 绑定失败')
+      setServerMcpIds(data.connectionIds||[])
+    }catch(error){setMcpBindingError(error instanceof Error?error.message:String(error))}
+  }
   const pool=chatPool||{worldIds:null,mcpIds:null}
   const worldAll=worldEntries.map(e=>e.id)
-  const binding=person?(bindings?.[person]||emptyBinding()):emptyBinding()
-  const mineMine=mcp.connections.filter(c=>!person||c.person===person)
+  const mineMine=mcp.connections
   const mcpAll=mineMine.map(c=>c.id)
-  const mcpIds=binding.mcpIds===null?mcpAll:binding.mcpIds
-  const patch=(next:PersonBinding)=>setBindings?.(old=>({...old,[person!]:next}))
+
   const row=(id:string,label:string,sub:string,checked:boolean,onChange:(v:boolean)=>void)=>
     <label className="tray-option tray-switch-row" key={id}><span>{label}<small>{sub}</small></span><input type="checkbox" className="tray-switch" checked={checked} onChange={e=>onChange(e.target.checked)}/></label>
   return <div className="world-mcp-matrix">
-    <section className="wm-col"><h4>世界书</h4>
+    {only!=='mcp'&&<section className="wm-col"><h4>世界书</h4>
       {worldEntries.length===0&&<p className="muted tray-empty">还没有世界书条目。</p>}
       {worldEntries.map(e=>row(e.id,e.title||'未命名条目',e.enabled?'已启用':'已停用',
         mode==='bind'&&person?isWorldEntryBound(e,person):isInPool(pool,'worldIds',e.id,worldAll),
         v=>{ if(mode==='bind'&&person) setWorldEntries(old=>toggleWorldEntryBinding(old,person,e.id,v)); else setChatPool?.(old=>togglePool(old,'worldIds',e.id,v,worldAll)) }))}
-    </section>
-    <section className="wm-col"><h4>MCP</h4>
-      {mcp.error&&<p className="mcp-error">{mcp.error}</p>}
+    </section>}
+    {only!=='world'&&<section className="wm-col"><h4>MCP</h4>
+      {(mcp.error||mcpBindingError)&&<p className="mcp-error">{mcp.error||mcpBindingError}</p>}
       {mineMine.length===0&&<p className="muted tray-empty">还没有 MCP 服务。</p>}
       {mineMine.map(c=>row(c.id,c.name,c.url,
-        mode==='bind'&&person?mcpIds.includes(c.id):isInPool(pool,'mcpIds',c.id,mcpAll),
-        v=>{ if(mode==='bind'&&person) patch(toggleMcpId(binding,c.id,v,mcpAll)); else setChatPool?.(old=>togglePool(old,'mcpIds',c.id,v,mcpAll)) }))}
-    </section>
+        mode==='bind'&&person?serverMcpIds.includes(c.id):isInPool(pool,'mcpIds',c.id,mcpAll),
+        v=>{ if(mode==='bind'&&person) void saveMcpBinding(c.id,v); else setChatPool?.(old=>togglePool(old,'mcpIds',c.id,v,mcpAll)) }))}
+    </section>}
   </div>
 }
 
@@ -4811,7 +4851,7 @@ function ResourceLibrary({ initialTab, only, tabs, worldEntries, setWorldEntries
   const [mcpCounts, setMcpCounts] = useState<Record<string, number | undefined>>({})
   const [mcpStatus, setMcpStatus] = useState<Record<string, 'ok' | 'fail'>>({})
   const mcpStatusLoadedRef = useRef<Set<string>>(new Set())
-  const [mcpEdit, setMcpEdit] = useState<Array<{ id: string; person: Person }>>([])
+  const [mcpEdit, setMcpEdit] = useState<string>('')
   const [mcpTest, setMcpTest] = useState<{ busy: boolean; ok?: boolean; message: string }>({ busy: false, message: '' })
   const [mcpFormOpen, setMcpFormOpen] = useState(false)
   const [mcpShowToken, setMcpShowToken] = useState(false)
@@ -4840,7 +4880,7 @@ function ResourceLibrary({ initialTab, only, tabs, worldEntries, setWorldEntries
         try {
           const response = await apiFetch('/api/mcp/' + encodeURIComponent(connection.id) + '/tools', {
             method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ person: connection.person }),
+            body: JSON.stringify({ person: ASSISTANT_PEOPLE[0] }),
           })
           const data = await response.json().catch(() => ({}))
           if (cancelled) return
@@ -4881,21 +4921,17 @@ function ResourceLibrary({ initialTab, only, tabs, worldEntries, setWorldEntries
   const addMcp = async (e: FormEvent) => {
     e.preventDefault(); setMcpBusy(true); mcp.setError('')
     try {
-      if (mcpEdit.length) {
-        // 修改：逐个助手 PUT，id 不变，聊天里的绑定不失效
-        for (const it of mcpEdit) {
-          const r = await apiFetch('/api/mcp/' + encodeURIComponent(it.id), { method: 'PUT', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ person: it.person, name: mcpDraft.name, url: mcpDraft.url, token: mcpDraft.token }) })
-          const d = await r.json().catch(() => ({}))
-          if (!r.ok) throw new Error(d.error || '修改 MCP 失败')
-        }
-        setMcpEdit([])
+      if (mcpEdit) {
+        const payload: Record<string, string> = { name: mcpDraft.name, url: mcpDraft.url }
+        if (mcpDraft.token.trim()) payload.token = mcpDraft.token
+        const response = await apiFetch('/api/mcp/' + encodeURIComponent(mcpEdit), { method: 'PUT', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) })
+        const data = await response.json().catch(() => ({}))
+        if (!response.ok) throw new Error(data.error || '修改 MCP 失败')
+        setMcpEdit('')
       } else {
-        // 不再选归属助手：一次为所有助手各建一条，聊天里再按助手开关
-        for (const person of ASSISTANT_PEOPLE) {
-          const r = await apiFetch('/api/mcp', { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ person, name: mcpDraft.name, url: mcpDraft.url, transport: 'httpStream', token: mcpDraft.token }) })
-          const d = await r.json().catch(() => ({}))
-          if (!r.ok) throw new Error(d.error || '保存 MCP 失败')
-        }
+        const response = await apiFetch('/api/mcp', { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: mcpDraft.name, url: mcpDraft.url, transport: 'httpStream', token: mcpDraft.token }) })
+        const data = await response.json().catch(() => ({}))
+        if (!response.ok) throw new Error(data.error || '保存 MCP 失败')
       }
       setMcpDraft({ name: '', url: '', token: '', owner: 'all' })
       setMcpTest({ busy: false, message: '' })
@@ -4906,7 +4942,7 @@ function ResourceLibrary({ initialTab, only, tabs, worldEntries, setWorldEntries
   }
   const startEditMcp = (g: { name: string; url: string; items: McpLibraryItem[] }) => {
     setMcpFormOpen(true)
-    setMcpEdit(g.items.map((c) => ({ id: c.id, person: c.person })))
+    setMcpEdit(g.items[0]?.id || '')
     setMcpDraft({ name: g.name, url: g.url, token: '', owner: 'all' })
     document.querySelector('.resource-form')?.scrollIntoView({ block: 'start', behavior: 'smooth' })
   }
@@ -4916,7 +4952,7 @@ function ResourceLibrary({ initialTab, only, tabs, worldEntries, setWorldEntries
       for (const item of g.items) {
         const response = await apiFetch('/api/mcp/' + encodeURIComponent(item.id), {
           method: 'PUT', credentials: 'include', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ person: item.person, enabled }),
+          body: JSON.stringify({ enabled }),
         })
         const data = await response.json().catch(() => ({}))
         if (!response.ok) throw new Error(data.error || '更新 MCP 失败')
@@ -4932,7 +4968,7 @@ function ResourceLibrary({ initialTab, only, tabs, worldEntries, setWorldEntries
     mcp.setError('')
     try {
       for (const c of g.items) {
-        const r = await apiFetch('/api/mcp/' + c.id, { method: 'DELETE', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ person: c.person }) })
+        const r = await apiFetch('/api/mcp/' + c.id, { method: 'DELETE', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}) })
         if (!r.ok) { const d = await r.json().catch(() => ({})); throw new Error(d.error || '移除失败') }
       }
       await mcp.refresh()
@@ -4959,17 +4995,17 @@ function ResourceLibrary({ initialTab, only, tabs, worldEntries, setWorldEntries
     {tab==='world' && <div className="resource-world"><WorldbookEditor entries={worldEntries} onChange={setWorldEntries} personLabel={displayName}/></div>}
     {tab==='mcp' && <>
       {mcpFormOpen ? <>
-        <div className="worldbook-form-head"><button type="button" className="worldbook-back" onClick={() => { setMcpFormOpen(false); setMcpEdit([]); setMcpDraft({ name: '', url: '', token: '', owner: 'all' }); setMcpTest({ busy: false, message: '' }) }}><IconBack className="ui-icon-inline" size={14}/> 返回</button><b>{mcpEdit.length ? '编辑 MCP 服务' : '新增 MCP 服务'}</b></div>
+        <div className="worldbook-form-head"><button type="button" className="worldbook-back" onClick={() => { setMcpFormOpen(false); setMcpEdit(''); setMcpDraft({ name: '', url: '', token: '', owner: 'all' }); setMcpTest({ busy: false, message: '' }) }}><IconBack className="ui-icon-inline" size={14}/> 返回</button><b>{mcpEdit ? '编辑 MCP 服务' : '新增 MCP 服务'}</b></div>
         <form className="resource-form" onSubmit={addMcp}>
           <label>服务名称<input value={mcpDraft.name} onChange={e=>setMcpDraft({...mcpDraft,name:e.target.value})} placeholder="例如：记事本服务" required/></label>
           <label>主机地址<input value={mcpDraft.url} onChange={e=>setMcpDraft({...mcpDraft,url:e.target.value})} placeholder="https://example.com/mcp" type="url" required/></label>
-          <label>Token（可选）<span className="mcp-token-field"><input value={mcpDraft.token} onChange={e=>setMcpDraft({...mcpDraft,token:e.target.value})} type={mcpShowToken ? "text" : "password"} autoComplete="new-password" placeholder={mcpEdit.length?'留空表示不修改':'需要鉴权时再填'}/><button type="button" className="mcp-token-eye" aria-label={mcpShowToken?'隐藏 Token':'显示 Token'} onClick={()=>setMcpShowToken(v=>!v)}>{mcpShowToken?'隐藏':'显示'}</button></span></label>
-          <div className="resource-form-actions"><button type="submit" disabled={mcpBusy}>{mcpBusy?'正在保存…':(mcpEdit.length?'保存修改':'添加服务')}</button><button type="button" className="ghost" disabled={mcpBusy||mcpTest.busy||!mcpDraft.url.trim()} onClick={()=>void testMcp()}>{mcpTest.busy?'测试中…':'测试链接'}</button></div>
+          <label>Token（可选）<span className="mcp-token-field"><input value={mcpDraft.token} onChange={e=>setMcpDraft({...mcpDraft,token:e.target.value})} type={mcpShowToken ? "text" : "password"} autoComplete="new-password" placeholder={mcpEdit?'留空表示不修改':'需要鉴权时再填'}/><button type="button" className="mcp-token-eye" aria-label={mcpShowToken?'隐藏 Token':'显示 Token'} onClick={()=>setMcpShowToken(v=>!v)}>{mcpShowToken?'隐藏':'显示'}</button></span></label>
+          <div className="resource-form-actions"><button type="submit" disabled={mcpBusy}>{mcpBusy?'正在保存…':(mcpEdit?'保存修改':'添加服务')}</button><button type="button" className="ghost" disabled={mcpBusy||mcpTest.busy||!mcpDraft.url.trim()} onClick={()=>void testMcp()}>{mcpTest.busy?'测试中…':'测试链接'}</button></div>
           {mcpTest.message&&<small className={'mcp-test'+(mcpTest.ok===false?' bad':mcpTest.ok?' ok':'')}>{mcpTest.ok?<IconCheck className="ui-icon-inline" size={13}/>:<IconClose className="ui-icon-inline" size={13}/>} {mcpTest.message}</small>}
           <small>添加后所有助手都可用；到聊天窗口的「世界书 / MCP」里再按助手打开或关闭。</small>
         </form>
       </> : <>
-        <div className="mcp-list-head"><button type="button" className="worldbook-add-btn" onClick={() => { setMcpFormOpen(true); setMcpEdit([]); setMcpDraft({ name: '', url: '', token: '', owner: 'all' }); setMcpTest({ busy: false, message: '' }) }}><IconPlus className="ui-icon-inline" size={14}/> 添加 MCP 服务</button></div>
+        <div className="mcp-list-head"><button type="button" className="worldbook-add-btn" onClick={() => { setMcpFormOpen(true); setMcpEdit(''); setMcpDraft({ name: '', url: '', token: '', owner: 'all' }); setMcpTest({ busy: false, message: '' }) }}><IconPlus className="ui-icon-inline" size={14}/> 添加 MCP 服务</button></div>
         <div className="mcp-tool-picker">
           {mcp.error && <p className="mcp-error">{mcp.error}</p>}
           {mcpGroups.length === 0 && <p className="muted mcp-empty">还没有 MCP 服务，点上面的按钮添加。</p>}
