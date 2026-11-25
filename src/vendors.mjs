@@ -213,6 +213,8 @@ export function normalizeVendors(raw) {
       responseApi: s ? s.responseApi === true : false,
       promptCacheKey: s ? s.promptCacheKey === true : false,
       subscription: s ? !!s.subscription : false,
+      subscriptionChannel: str(s?.subscriptionChannel),
+      subscriptionAccountId: str(s?.subscriptionAccountId),
       keys: s ? normalizeKeys(s.keys) : [],
       models: s ? normalizeModels(s.models, v.models) : [],
       modelOverrides: s ? normalizeOverrides(s.modelOverrides) : {},
@@ -235,6 +237,8 @@ export function normalizeVendors(raw) {
       responseApi: v.responseApi === true,
       promptCacheKey: v.promptCacheKey === true,
       subscription: !!v.subscription,
+      subscriptionChannel: str(v.subscriptionChannel),
+      subscriptionAccountId: str(v.subscriptionAccountId),
       keys: normalizeKeys(v.keys),
       models: normalizeModels(v.models, []),
       modelOverrides: normalizeOverrides(v.modelOverrides),
@@ -295,19 +299,17 @@ export function resolveVendorKey(vendors, keyId) {
 // 旧的「按助手一份」Key 永远排在最后，保证老配置零影响。
 export function resolveKeyCandidates(vendors, keyId, fallbackKey = '', vendorId = '') {
   const all = allVendorKeys(vendors)
-  const scoped = vendorId ? all.filter((k) => k.vendorId === vendorId) : all.slice()
-  if (keyId) {
-    const i = scoped.findIndex((k) => k.id === keyId)
-    if (i > 0) scoped.unshift(scoped.splice(i, 1)[0])
-    else if (i < 0) {
-      const found = all.find((k) => k.id === keyId)
-      if (found) scoped.unshift(found)
-    }
-  }
-  const out = []
-  for (const k of scoped) if (k.value && !out.includes(k.value)) out.push(k.value)
+  const owner = vendorId || all.find(k => k.id === keyId)?.vendorId
+  const vendor = (Array.isArray(vendors) ? vendors : []).find(v => v.id === owner)
+  const subscription = !!(vendor?.subscription || vendor?.subscriptionChannel)
+  const scoped = all.filter(k => k.vendorId === owner && (vendorId || !subscription))
+  const selected = scoped.findIndex(k => k.id === keyId)
+  if (selected > 0) scoped.unshift(scoped.splice(selected, 1)[0])
+  const out = [...new Set(scoped.map(k => k.value))]
   const fb = str(fallbackKey)
-  if (fb && !out.includes(fb)) out.push(fb)
+  const belongsElsewhere = (Array.isArray(vendors) ? vendors : []).some(v =>
+    v?.id !== owner && v?.keys?.some(k => str(k?.value) === fb))
+  if (!subscription && fb && !belongsElsewhere && !out.includes(fb)) out.push(fb)
   return out.slice(0, 6)
 }
 

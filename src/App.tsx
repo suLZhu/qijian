@@ -56,7 +56,7 @@ import { createToolExecutionBudget } from './toolExecutionBudget.mjs'
 import { clipContextText, compactToolSchema, takeWithinBudget } from './contextBudget.mjs'
 import { restoreModelConfigs, emptyBinding, normalizeProfiles, normalizeBindings, normalizePool, isInPool, togglePool, poolLabel, resolveModelConfig, resolveMcpConnections, isWorldEntryBound, toggleWorldEntryBinding, toggleMcpId, type ModelProfile, type PersonBinding, type ChatPool } from './resourceBindings.mjs'
 // 供应商中心：预置服务商 + 模型多选 + 多 KEY；勾选结果同步进模型预设池。
-import { normalizeVendors, syncVendorProfiles, allVendorKeys, resolveVendorKey, resolveKeyCandidates, chatRequestUrl, modelListUrl, groupModels, orderedKeys, DEFAULT_API_PATH, type Vendor } from './vendors.mjs'
+import { normalizeVendors, syncVendorProfiles, allVendorKeys, resolveKeyCandidates, chatRequestUrl, modelListUrl, groupModels, orderedKeys, DEFAULT_API_PATH, type Vendor } from './vendors.mjs'
 // 订阅账号：本地持久化归一化；极简账号登录面板单独放一个文件。
 import { SUBSCRIPTION_STORAGE_KEY, normalizeSubscriptions, type SubscriptionAccount } from './subscriptionChannels.mjs'
 import { SubscriptionAccounts } from './SubscriptionAccounts'
@@ -1257,7 +1257,7 @@ export default function App() {
     const activeVendor = activeModel.vendorId ? vendors.find(v=>v.id===activeModel.vendorId) : undefined
     const activeChatUrl = activeVendor ? chatRequestUrl(activeVendor) : ''
     const apiKeyCandidates = resolveKeyCandidates(vendors, bindings[target]?.keyId || '', apiKey[target] || '', activeModel.vendorId || '')
-    const activeApiKey = apiKeyCandidates[0] || resolveVendorKey(vendors, bindings[target]?.keyId || '') || apiKey[target] || ''
+    const activeApiKey = apiKeyCandidates[0] || ''
     // 统一模型线路层：当前逻辑模型挂了显式线路时，改走「主线路 → 自动 fallback」。
     // 没有线路就完全沿用上面的老链路（订阅登录 / 模型预设 / 多 KEY 零影响）。
     const logicalId = activeLogicalId(routeState, target, logicalModelId(activeModel.model || ''))
@@ -2013,7 +2013,7 @@ export default function App() {
     const activeVendor = activeModel.vendorId ? vendors.find(v=>v.id===activeModel.vendorId) : undefined
     const activeChatUrl = activeVendor ? chatRequestUrl(activeVendor) : ''
     const apiKeyCandidates = resolveKeyCandidates(vendors, bindings[target]?.keyId || '', apiKey[target] || '', activeModel.vendorId || '')
-    const activeApiKey = apiKeyCandidates[0] || resolveVendorKey(vendors, bindings[target]?.keyId || '') || apiKey[target] || ''
+    const activeApiKey = apiKeyCandidates[0] || ''
     const logicalId = activeLogicalId(routeState, target, logicalModelId(activeModel.model || ''))
     const routePlan = buildRoutePlan({routes:routeState.routes,logicalId,vendors,fallbackKeys:[],binding:{fixedRouteId:fixedRouteId(routeState,target)},maxAttempts:MAX_ROUTE_ATTEMPTS})
     const routeMode = routePlan.length>0

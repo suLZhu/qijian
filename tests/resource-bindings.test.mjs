@@ -267,3 +267,14 @@ test('模型配置兼容旧共享配置和部分助手快照，保留其他助�
   assert.equal(restored.B.model, 'initial')
   assert.equal(previous.A.model, 'initial')
 })
+
+test('换供应商后旧绑定和旧助手凭据不能跨站重试', () => {
+  const vendors = [
+    { id: 's', subscription: true, keys: [{ id: 's1', value: 'token' }] },
+    { id: 'r', keys: [{ id: 'r1', value: 'relay' }] },
+  ]
+  assert.deepEqual(resolveKeyCandidates(vendors, 's1', 'token', 'r'), ['relay'])
+  assert.deepEqual(resolveKeyCandidates(vendors, 'r1', 'legacy', 's'), ['token'])
+  assert.deepEqual(resolveKeyCandidates(vendors, '', 'legacy'), ['legacy'])
+  assert.deepEqual(resolveKeyCandidates(vendors, 's1', 'token'), [])
+})
