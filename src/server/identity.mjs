@@ -80,6 +80,8 @@ function migratePersonValues(db) {
   const personTables = ['mcp_connections', 'scheduled_tasks', 'api_keys', 'tool_call_logs', 'proactive_settings', 'proactive_events', 'assistant_inbox']
   for (const table of personTables) {
     if (!tableSql(db, table)) continue
+    const columns = db.prepare('PRAGMA table_info(' + table + ')').all()
+    if (!columns.some(column => column.name === 'person')) continue
     for (const [name, id] of Object.entries(LEGACY_NAME_TO_ID)) {
       db.prepare(`UPDATE ${table} SET person=? WHERE person=?`).run(id, name)
     }
