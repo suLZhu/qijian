@@ -464,6 +464,7 @@ async function handleChat(init) {
 async function handleModels(init) {
   let b
   try { b = await readBody(init) } catch { return json(400, { error: '请求无效' }) }
+  if (b.accountType === 'subscription') return json(502, { error: '本地兼容订阅的模型目录尚未接通专用代理，请连接栖间服务器。' })
   const raw = String(b.endpoint || '').trim().replace(/\/+$/, '')
   if (!raw) return json(400, { error: '请先填写 API 地址' })
   const apiKey = String(b.apiKey || '').trim()
@@ -690,6 +691,10 @@ export async function localHandle(path, init) {
       } catch (error) {
         return json(502, { error: (error && error.message) || '授权码换令牌失败' })
       }
+    }
+
+    if (p === '/api/subscription/oauth/refresh' && method === 'POST') {
+      return json(502, { error: '本机续期尚未接通订阅代理，请连接栖间服务器后重试。' })
     }
 
     // ── 模型列表（直连上游） ──

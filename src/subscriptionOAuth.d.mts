@@ -34,3 +34,5 @@ export function looksLikeToken(v: unknown): boolean
 export function parseOAuthCallback(raw: unknown, expectedState?: string): { ok: boolean; error?: string; token?: string; code?: string; state?: string }
 export declare function decodeJwtPayload(token: string): any | null
 export declare function chatGptAccountIdFromToken(token: string): string
+
+export declare function refreshTokenRequest(channelId: string, refreshToken: string): { url: string; headers: Record<string,string>; body: string }

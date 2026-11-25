@@ -7,7 +7,7 @@ import { startOAuthLogin } from './nativeOAuth.mjs'
 import { nativeHttpGet, nativeHttpPost, openExternalUrl } from './nativeSystem.mjs'
 // P1-9：上游原始 JSON / 错误码统一转成中文短句，原文只在「查看详情」里展开。
 import { formatLoginError, type LoginErrorInfo } from './loginError.mjs'
-import { apiFetch } from './apiBase.mjs'
+import { apiFetch, isLocalMode } from './apiBase.mjs'
 import { IconChat, IconCheck, IconChevronRight, IconGrid, IconMore, IconSparkles, IconStar, type IconComponent } from './icons'
 import {
   mergeAvailableModels, normalizeModelIds, buildSubscriptionModels,
@@ -60,7 +60,7 @@ async function fetchStandardModels(endpoint: string, token: string): Promise<{ m
   const work = (async () => {
     const r = await apiFetch('/api/models', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ endpoint: baseEndpoint, apiKey: token, modelsUrl: directModelsUrl }),
+      body: JSON.stringify({ accountType: 'subscription', endpoint: baseEndpoint, apiKey: token, modelsUrl: directModelsUrl }),
     })
     const d = await r.json().catch(() => ({}))
     if (!r.ok) return { models: [], error: String(d?.error || ('HTTP ' + r.status)).slice(0, 240) }
@@ -85,7 +85,7 @@ async function fetchCodexModels(token: string, accountId: string): Promise<{ mod
   }
   if (accountId) headers['chatgpt-account-id'] = accountId
   try {
-    const native = nativeHttpGet(url, headers)
+    const native = isLocalMode() ? nativeHttpGet(url, headers) : null
     if (native && !native.error) {
       const status = Number(native.status || 0)
       if (status >= 400) return { models: [], error: 'Codex 模型目录 HTTP ' + status + ' · ' + String(native.body || '').slice(0, 180) }
@@ -124,7 +124,7 @@ async function fetchClaudeModels(token: string): Promise<{ models: string[]; err
     Accept: 'application/json',
   }
   try {
-    const native = nativeHttpGet(url, headers)
+    const native = isLocalMode() ? nativeHttpGet(url, headers) : null
     if (native && !native.error) {
       const status = Number(native.status || 0)
       if (status >= 400) return { models: [], error: 'Claude 模型目录 HTTP ' + status + ' · ' + String(native.body || '').slice(0, 180) }
@@ -153,7 +153,7 @@ async function fetchGrokModels(token: string): Promise<{ models: string[]; error
     const ids = new Set<string>()
     let lastError = ''
     for (const url of urls) {
-      const native = nativeHttpGet(url, headers)
+      const native = isLocalMode() ? nativeHttpGet(url, headers) : null
       if (native && !native.error) {
         const status = Number(native.status || 0)
         if (status >= 400) { lastError = 'HTTP ' + status + ' · ' + String(native.body || '').slice(0, 120); continue }
@@ -268,48 +268,13 @@ export function SubscriptionAccounts({ vendors, setVendors, setModelProfiles, su
   const refreshOAuthToken = async (a: SubscriptionAccount, currentToken: string) => {
     const refreshToken = String(a.refreshToken || '')
     if (!refreshToken) return { account: a, token: currentToken, error: '登录凭证来自旧版本，请重新登录一次' }
-    let url = ''
-    let headers: Record<string,string> = {}
-    let body = ''
-    if (a.channelId === 'gpt') {
-      url = 'https://auth.openai.com/oauth/token'
-      headers = { 'Content-Type': 'application/x-www-form-urlencoded', Accept: 'application/json' }
-      body = new URLSearchParams({
-        grant_type: 'refresh_token',
-        client_id: 'app_EMoamEEZ73f0CkXaXp7hrann',
-        refresh_token: refreshToken,
-      }).toString()
-    } else if (a.channelId === 'claude') {
-      url = 'https://api.anthropic.com/v1/oauth/token'
-      headers = {
-        'Content-Type': 'application/json',
-        Accept: 'application/json',
-        'anthropic-beta': 'oauth-2025-04-20',
-        'User-Agent': 'anthropic-sdk-typescript/0.68.0 userOAuthProvider',
-      }
-      body = JSON.stringify({
-        grant_type: 'refresh_token',
-        client_id: '9d1c250a-e61b-44d9-88ed-5944d1962f5e',
-        refresh_token: refreshToken,
-      })
-    } else if (a.channelId === 'grok') {
-      url = 'https://auth.x.ai/oauth2/token'
-      headers = { 'Content-Type': 'application/x-www-form-urlencoded', Accept: 'application/json' }
-      body = new URLSearchParams({
-        grant_type: 'refresh_token',
-        client_id: GROK_CLIENT_ID,
-        refresh_token: refreshToken,
-      }).toString()
-    } else {
-      return { account: a, token: currentToken, error: '这个账号暂不支持自动续期' }
-    }
     try {
-      const native = nativeHttpPost(url, headers, body)
-      if (!native || native.error) return { account: a, token: currentToken, error: native?.error || '原生网络请求不可用' }
-      const status = Number(native.status || 0)
-      let data: any = {}
-      try { data = JSON.parse(String(native.body || '{}')) } catch { return { account: a, token: currentToken, error: '续期响应不是 JSON' } }
-      if (status >= 400 || data.error) return { account: a, token: currentToken, error: String(data.error_description || data.error || ('HTTP ' + status)) }
+      const response = await apiFetch('/api/subscription/oauth/refresh', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ channelId: a.channelId, refreshToken }),
+      })
+      const data = await response.json()
+      if (!response.ok || data.error) throw new Error(data.error_description || data.error || ('续期失败 HTTP ' + response.status))
       const token = String(data.access_token || '')
       if (!token) return { account: a, token: currentToken, error: '续期响应没有 access_token' }
       const patched: SubscriptionAccount = {
@@ -392,7 +357,7 @@ export function SubscriptionAccounts({ vendors, setVendors, setModelProfiles, su
   const grokDeviceStart = async () => {
     const headers = { 'Content-Type': 'application/x-www-form-urlencoded', Accept: 'application/json' }
     const form = new URLSearchParams({ client_id: GROK_CLIENT_ID, scope: GROK_SCOPE }).toString()
-    const native = nativeHttpPost('https://auth.x.ai/oauth2/device/code', headers, form)
+    const native = isLocalMode() ? nativeHttpPost('https://auth.x.ai/oauth2/device/code', headers, form) : null
     if (native && !native.error) {
       const status = Number(native.status || 0)
       let data: any = {}
@@ -417,7 +382,7 @@ export function SubscriptionAccounts({ vendors, setVendors, setModelProfiles, su
       client_id: GROK_CLIENT_ID,
       device_code: deviceCode,
     }).toString()
-    const native = nativeHttpPost('https://auth.x.ai/oauth2/token', headers, form)
+    const native = isLocalMode() ? nativeHttpPost('https://auth.x.ai/oauth2/token', headers, form) : null
     if (native && !native.error) {
       try { return JSON.parse(String(native.body || '{}')) } catch { return {} }
     }

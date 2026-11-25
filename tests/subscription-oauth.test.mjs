@@ -20,3 +20,16 @@ test('兼容顶层 chatgpt_account_id，坏 token 安静返回空', () => {
   assert.equal(chatGptAccountIdFromToken('not-a-jwt'), '')
   assert.equal(decodeJwtPayload('a.b'), null)
 })
+
+test('续期使用渠道自己的令牌地址、客户端 ID 和编码', async () => {
+  const { refreshTokenRequest, oauthProfile } = await import('../src/subscriptionOAuth.mjs')
+  for (const id of ['gpt', 'claude', 'grok']) {
+    const request = refreshTokenRequest(id, 'token/+ =')
+    const params = id === 'claude' ? JSON.parse(request.body) : Object.fromEntries(new URLSearchParams(request.body))
+    assert.deepEqual(params, { grant_type: 'refresh_token', client_id: oauthProfile(id).clientId, refresh_token: 'token/+ =' })
+    assert.equal(request.url, oauthProfile(id).tokenUrl)
+    assert.ok(!request.url.includes('token/+'))
+  }
+  assert.throws(() => refreshTokenRequest('custom', 'token'), /不支持/)
+  assert.throws(() => refreshTokenRequest('gpt', ''), /缺少/)
+})

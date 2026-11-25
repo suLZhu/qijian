@@ -24,7 +24,7 @@ test('渠道目录：只用官方公开地址，Claude 不预填来路不明的�
   const allowedHosts = new Set(['api.openai.com', 'api.x.ai'])
   for (const ch of SUBSCRIPTION_CHANNELS) {
     assert.ok(ch.id && ch.name && ch.hint)
-    if (!ch.endpoint) { assert.equal(ch.needsCompatibleUrl, true); continue }
+    if (!ch.endpoint) { assert.equal(ch.id, 'claude'); assert.equal(ch.needsCompatibleUrl, false); continue }
     assert.ok(allowedHosts.has(new URL(ch.endpoint).hostname))
   }
   assert.equal(channelById('claude').endpoint, '')

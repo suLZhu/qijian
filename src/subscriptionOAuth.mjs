@@ -46,6 +46,8 @@ export const OAUTH_PROFILES = {
   },
   grok: {
     channelId: 'grok',
+    tokenUrl: 'https://auth.x.ai/oauth2/token',
+    clientId: 'b1a00492-073a-47ea-816f-4c329264a828',
     label: 'Grok / X 订阅',
     flow: 'web',
     loginUrl: 'https://accounts.x.ai/',
@@ -148,6 +150,20 @@ export async function exchangeOAuthCode({ channelId, code, codeVerifier, state, 
   const token = str(data?.access_token || data?.token)
   if (!token) throw new Error('令牌接口没有返回 access_token')
   return { token, refreshToken: str(data?.refresh_token), expiresIn: Number(data?.expires_in || 0) }
+}
+
+export function refreshTokenRequest(channelId, refreshToken) {
+  const profile = oauthProfile(channelId)
+  if (!profile?.clientId || !profile.tokenUrl) throw new Error('这个账号暂不支持自动续期')
+  if (!str(refreshToken)) throw new Error('缺少续期凭证，请重新登录')
+  const params = { grant_type: 'refresh_token', client_id: profile.clientId, refresh_token: str(refreshToken) }
+  const claude = channelId === 'claude'
+  const headers = { Accept: 'application/json', 'Content-Type': claude ? 'application/json' : 'application/x-www-form-urlencoded' }
+  if (claude) {
+    headers['anthropic-beta'] = 'oauth-2025-04-20'
+    headers['User-Agent'] = 'anthropic-sdk-typescript/0.68.0 userOAuthProvider'
+  }
+  return { url: profile.tokenUrl, headers, body: claude ? JSON.stringify(params) : new URLSearchParams(params).toString() }
 }
 
 export function looksLikeToken(v) {

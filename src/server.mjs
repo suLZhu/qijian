@@ -1,4 +1,5 @@
 import { normalizeIntervalMinutes } from './localTasks.mjs'
+import { subscriptionFetch, directFetch } from './server/outboundFetch.mjs'
 import { createServer } from 'node:http'
 import { randomBytes, createHash, timingSafeEqual, createCipheriv, createDecipheriv, randomUUID, scryptSync } from 'node:crypto'
 import { isIP } from 'node:net'
@@ -53,7 +54,7 @@ import { parseSearchResults } from './webSearch.mjs'
 import { injectTimeContext } from './timeContext.mjs'
 import { readKeyCandidates, isRetryableKeyStatus } from './vendors.mjs'
 import { performSubscriptionLogin } from './subscriptionLogin.mjs'
-import { exchangeOAuthCode } from './subscriptionOAuth.mjs'
+import { exchangeOAuthCode, refreshTokenRequest } from './subscriptionOAuth.mjs'
 import { runRouteChat } from './chatRouteRunner.mjs'
 import { ensureMcpSchema, listMcpServices, boundMcpIds, replaceMcpBindings, boundMcpService, deleteMcpService } from './server/mcpStore.mjs'
 
@@ -422,7 +423,7 @@ const apiServer = createServer(async (req, res) => {
       const b = await readBody(req)
       const result = await performSubscriptionLogin({
         endpoint: b.endpoint, loginPath: b.loginPath, tokenPath: b.tokenPath,
-        username: b.username, password: b.password, fetchImpl: fetch,
+        username: b.username, password: b.password, fetchImpl: subscriptionFetch,
       })
       return send(res, 200, result)
     } catch (error) {
@@ -436,11 +437,24 @@ const apiServer = createServer(async (req, res) => {
       const b = await readBody(req)
       const result = await exchangeOAuthCode({
         channelId: b.channelId, code: b.code, codeVerifier: b.codeVerifier,
-        state: b.state, userAgent: 'anthropic', fetchImpl: fetch,
+        state: b.state, userAgent: 'anthropic', fetchImpl: subscriptionFetch,
       })
       return send(res, 200, result)
     } catch (error) {
       return send(res, 502, { error: error?.message || '授权码换令牌失败' })
+    }
+  }
+
+  if (url.pathname === '/api/subscription/oauth/refresh' && req.method === 'POST') {
+    try {
+      const { channelId, refreshToken } = await readBody(req)
+      const request = refreshTokenRequest(channelId, refreshToken)
+      const upstream = await subscriptionFetch(request.url, { method: 'POST', headers: request.headers, body: request.body, signal: AbortSignal.timeout(15000) })
+      const data = await upstream.json().catch(() => null)
+      if (!upstream.ok || !data?.access_token) return send(res, 502, { error: '订阅续期失败 · ' + (data?.error || 'HTTP ' + upstream.status) })
+      return send(res, 200, { access_token: data.access_token, refresh_token: data.refresh_token, expires_in: data.expires_in })
+    } catch (error) {
+      return send(res, 502, { error: error.message || '订阅续期失败' })
     }
   }
 
@@ -459,7 +473,7 @@ const apiServer = createServer(async (req, res) => {
         Accept: 'application/json',
       }
       if (accountId) headers['chatgpt-account-id'] = accountId
-      const upstream = await fetch('https://chatgpt.com/backend-api/codex/models?client_version=0.167.1', {
+      const upstream = await subscriptionFetch('https://chatgpt.com/backend-api/codex/models?client_version=0.167.1', {
         headers, redirect: 'error', signal: AbortSignal.timeout(15000),
       })
       const text = await upstream.text()
@@ -495,7 +509,7 @@ const apiServer = createServer(async (req, res) => {
         client_id: 'b1a00492-073a-47ea-816f-4c329264a828',
         scope: 'openid profile email offline_access grok-cli:access api:access',
       })
-      const upstream = await fetch('https://auth.x.ai/oauth2/device/code', {
+      const upstream = await subscriptionFetch('https://auth.x.ai/oauth2/device/code', {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded', Accept: 'application/json' },
         body: form.toString(), redirect: 'error', signal: AbortSignal.timeout(15000),
@@ -522,7 +536,7 @@ const apiServer = createServer(async (req, res) => {
         client_id: 'b1a00492-073a-47ea-816f-4c329264a828',
         device_code: deviceCode,
       })
-      const upstream = await fetch('https://auth.x.ai/oauth2/token', {
+      const upstream = await subscriptionFetch('https://auth.x.ai/oauth2/token', {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded', Accept: 'application/json' },
         body: form.toString(), redirect: 'error', signal: AbortSignal.timeout(15000),
@@ -550,7 +564,7 @@ const apiServer = createServer(async (req, res) => {
         'prompt-caching-scope-2026-01-05', 'mid-conversation-system-2026-04-07',
         'advanced-tool-use-2025-11-20', 'effort-2025-11-24', 'extended-cache-ttl-2025-04-11',
       ].join(',')
-      const upstream = await fetch('https://api.anthropic.com/v1/models?limit=1000', {
+      const upstream = await subscriptionFetch('https://api.anthropic.com/v1/models?limit=1000', {
         headers: {
           Authorization: 'Bearer ' + token,
           'anthropic-version': '2023-06-01',
@@ -591,7 +605,7 @@ const apiServer = createServer(async (req, res) => {
       const urls = ['https://cli-chat-proxy.grok.com/v1/models-v2', 'https://api.x.ai/v1/models']
       const results = await Promise.all(urls.map(async target => {
         try {
-          const r = await fetch(target, { headers, redirect: 'error', signal: AbortSignal.timeout(15000) })
+          const r = await subscriptionFetch(target, { headers, redirect: 'error', signal: AbortSignal.timeout(15000) })
           const text = await r.text()
           if (!r.ok) return { ok: false, error: 'HTTP ' + r.status + (text ? ' · ' + text.slice(0, 120) : '') }
           return { ok: true, data: JSON.parse(text) }
@@ -633,7 +647,8 @@ const apiServer = createServer(async (req, res) => {
       const target = /^https?:\/\//i.test(customModelsUrl)
         ? customModelsUrl
         : /\/v1$/.test(raw) ? raw + '/models' : raw + '/v1/models'
-      const upstream = await fetch(target, { headers: { Authorization: `Bearer ${apiKey}` }, redirect: 'error', signal: AbortSignal.timeout(15000) })
+      const fetchModels = b.accountType === 'subscription' ? subscriptionFetch : directFetch
+      const upstream = await fetchModels(target, { headers: { Authorization: `Bearer ${apiKey}` }, redirect: 'error', signal: AbortSignal.timeout(15000) })
       const text = await upstream.text()
       if (!upstream.ok) return send(res, 502, { error: `上游返回 HTTP ${upstream.status}${text ? ' · ' + text.slice(0, 180) : ''}` })
       let data; try { data = JSON.parse(text) } catch { return send(res, 502, { error: '上游返回的不是合法 JSON' }) }
@@ -667,6 +682,7 @@ const apiServer = createServer(async (req, res) => {
           body: b.body,
           res,
           signal: controller.signal,
+          fetchImpl: subscriptionFetch,
         })
         finished = true
         if (result.streamed) return
@@ -678,7 +694,7 @@ const apiServer = createServer(async (req, res) => {
       if (Array.isArray(b.routes) && b.routes.length) {
         const result = await runRouteChat({
           routes: b.routes, body: b.body, timeZone: b.timeZone,
-          signal: controller.signal, fetchImpl: fetch,
+          signal: controller.signal, fetchImpl: directFetch,
         })
         if (!result.ok) {
           finished = true
@@ -723,7 +739,7 @@ const apiServer = createServer(async (req, res) => {
       for (let i = 0; i < apiKeys.length; i++) {
         let upstream
         try {
-          upstream = await fetch(target, {
+          upstream = await directFetch(target, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKeys[i]}` },
             body: JSON.stringify(chatBody),

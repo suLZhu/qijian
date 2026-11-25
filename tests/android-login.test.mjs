@@ -106,6 +106,7 @@ before(async () => {
     cwd: ROOT,
     env: {
       ...process.env,
+      QIJIAN_SUBSCRIPTION_PROXY: '',
       AI_HOME_PASSWORD: PW,
       AI_HOME_SECRET_KEY: SECRET,
       AI_HOME_DB: join(dbDir, 'test.sqlite'),
@@ -244,4 +245,26 @@ test('服务端 MCP 改名与换令牌保留同址服务、原有请求头和绑
     const saved = JSON.parse(Buffer.concat([cipher.update(ciphertext), cipher.final()]).toString())
     assert.deepEqual(saved, { token: 'new-beta', headers: config.headers })
   } finally { db.close() }
+})
+
+test('服务端订阅续期与兼容目录缺代理时返回原因，普通目录仍能访问中转', async () => {
+  const { createServer } = await import('node:http')
+  const target = createServer((_req, res) => { res.end(JSON.stringify({ data: [{ id: 'same-model' }] })) })
+  await new Promise(resolve => target.listen(0, '127.0.0.1', resolve))
+  try {
+    const endpoint = 'http://127.0.0.1:' + target.address().port
+    const headers = { Authorization: 'Bearer ' + (await login()).body.token, 'Content-Type': 'application/json' }
+    const post = (path, args) => fetch(BASE + path, { method: 'POST', headers, body: JSON.stringify(args) })
+    for (const [path, data] of [
+      ['/api/subscription/oauth/refresh', { channelId: 'gpt', refreshToken: 'test-token' }],
+      ['/api/models', { accountType: 'subscription', endpoint, apiKey: 'test-token' }],
+    ]) {
+      const response = await post(path, data)
+      assert.equal(response.status, 502)
+      assert.match((await response.json()).error, /订阅.*代理/)
+    }
+    const direct = await post('/api/models', { endpoint, apiKey: 'test-key' })
+    assert.equal(direct.status, 200)
+    assert.deepEqual((await direct.json()).models, ['same-model'])
+  } finally { target.close() }
 })
