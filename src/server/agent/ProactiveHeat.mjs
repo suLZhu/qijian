@@ -34,6 +34,14 @@ export function initProactiveHeat(db) {
   }
 }
 
+// Startup runs after initAgentRuns has marked interrupted model runs failed.
+// A pending event belongs to the old process; leave an auditable failure and
+// release the one-pending-per-assistant gate for future authorized wakes.
+export function recoverInterruptedWakes(db) {
+  return db.prepare(`UPDATE proactive_events SET status='failed', updated_at=? WHERE status='pending'`)
+    .run(new Date().toISOString()).changes
+}
+
 function minHoursFor(config) {
   if (config.mode === 'quiet') return Math.max(24, config.interval_hours)
   if (config.mode === 'lively') return Math.max(2, Math.floor(config.interval_hours / 2))

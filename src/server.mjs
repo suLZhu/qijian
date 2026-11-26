@@ -44,7 +44,7 @@ import { AgentRunner } from './server/agent/AgentRunner.mjs'
 import { initToolPolicies, setPolicy, listPolicies } from './server/agent/ToolPolicy.mjs'
 import { decideApproval, isPending } from './server/agent/ApprovalGate.mjs'
 import { createTaskScheduler, recoverInterruptedTasks } from './server/agent/TaskScheduler.mjs'
-import { initProactiveHeat, tickHeat, coolHeat, readHeat, dispatchProactiveRun } from './server/agent/ProactiveHeat.mjs'
+import { initProactiveHeat, tickHeat, coolHeat, readHeat, dispatchProactiveRun, recoverInterruptedWakes } from './server/agent/ProactiveHeat.mjs'
 import { initMemoryStore, SQLiteMemoryProvider, MEMORY_LIFECYCLES, importMemoryRecords } from './server/agent/MemoryStore.mjs'
 import { initMemoryAutoOrganize, autoConfigStatus, saveAutoConfig, tickMemoryAutoOrganize, triggerAutoOrganize } from './server/agent/MemoryAutoOrganize.mjs'
 import { initWorkspace, readWorkspaceConfig, saveWorkspaceConfig, runWorkspaceAction } from './server/workspace.mjs'
@@ -134,6 +134,7 @@ initProactiveHeat(db) // needs proactive_events to exist first (adds run_id colu
 initInbox(db)
 initToolLogs(db)
 initAgentRuns(db)
+recoverInterruptedWakes(db)
 initToolPolicies(db)
 initMemoryStore(db)
 initMemoryAutoOrganize(db)

@@ -118,6 +118,12 @@ export function createTaskScheduler(ctx) {
       })
       .catch(error => {
         console.error('[scheduler] run crashed', task.id, error?.message || error)
+        // A rejected runner promise must not strand a one-off task in ready.
+        // Keep it paused for inspection; recurring tasks already moved forward.
+        if (task.recurrence === 'once') {
+          db.prepare(`UPDATE scheduled_tasks SET status='paused', updated_at=? WHERE id=? AND status='ready'`)
+            .run(new Date().toISOString(), task.id)
+        }
       })
       .finally(() => inFlight.delete(task.id))
     return true

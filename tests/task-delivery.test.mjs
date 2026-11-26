@@ -762,3 +762,21 @@ test('喝水提醒被原样复述时，服务端保留一次性任务且不会�
   assert.ok(await waitFor(() => db.prepare('SELECT status FROM scheduled_tasks WHERE id=?').get(taskId)?.status === 'paused'))
   assert.equal(listInbox(db).length, 0)
 })
+
+
+test('执行器异常拒绝时一次性任务暂停，不留 ready 卡死状态', async () => {
+  const db = makeDb()
+  const taskId = insertTask(db, { conversationId: 'conv-crash' })
+  const bus = new AgentEventBus()
+  const scheduler = createTaskScheduler({
+    db, bus,
+    runner: { start: () => ({ promise: Promise.reject(new Error('执行器崩溃')) }) },
+    deliverTask: entry => addTaskResult(db, entry),
+  })
+  assert.equal(scheduler.tick(), 1)
+  assert.ok(await waitFor(() => !scheduler.inFlight.has(taskId)))
+  assert.equal(db.prepare('SELECT status FROM scheduled_tasks WHERE id=?').get(taskId).status, 'paused')
+  assert.equal(scheduler.tick(), 0)
+  assert.equal(listInbox(db).length, 0)
+  db.close()
+})

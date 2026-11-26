@@ -20,7 +20,7 @@ import { createTaskScheduler } from '../src/server/agent/TaskScheduler.mjs'
 import { createToolRegistry } from '../src/server/agent/ToolRegistry.mjs'
 import { createFakeMcpServer, fakeMcpConnection } from '../src/server/fakeMcp.mjs'
 import { initProactive } from '../src/proactive.mjs'
-import { initProactiveHeat, dispatchProactiveRun } from '../src/server/agent/ProactiveHeat.mjs'
+import { initProactiveHeat, dispatchProactiveRun, recoverInterruptedWakes } from '../src/server/agent/ProactiveHeat.mjs'
 import { initMemoryStore, SQLiteMemoryProvider } from '../src/server/agent/MemoryStore.mjs'
 import { migrateDatabase, migrateSnapshot } from '../src/server/identity.mjs'
 import { initInbox, addTaskResult, listInbox, markInboxRead } from '../src/inbox.mjs'
@@ -585,3 +585,17 @@ test('15 version2 数据迁移不丢失不串助手', () => {
 })
 
 console.log('agent acceptance suite: 15 scenarios registered')
+
+
+test('自主唤醒重启后清理旧 pending，保留记录并允许后续唤醒', () => {
+  const db = makeDb()
+  initProactive(db)
+  initProactiveHeat(db)
+  const at = new Date(Date.now() - 86400000).toISOString()
+  db.prepare(`INSERT INTO proactive_events (id,person,reason,mood,status,created_at,updated_at)
+    VALUES ('evt-interrupted',?, 'heat', 'calm', 'pending', ?, ?)`).run(PERSON, at, at)
+  assert.equal(recoverInterruptedWakes(db), 1)
+  assert.equal(recoverInterruptedWakes(db), 0)
+  assert.equal(db.prepare('SELECT status FROM proactive_events WHERE id=?').get('evt-interrupted').status, 'failed')
+  db.close()
+})
