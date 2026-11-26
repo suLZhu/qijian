@@ -25,17 +25,36 @@ public final class GenerationService extends Service {
     private static final int FOREGROUND_ID = 73001;
     private PowerManager.WakeLock wakeLock;
     private static GenerationService active;
-    private final java.util.Set<String> owners = new java.util.HashSet<>();
+    // A short request can finish before the queued service start reaches onStartCommand.
+    // Keep that stop until its matching owner has been registered and promoted.
+    private static final java.util.Set<String> pendingStarts = java.util.concurrent.ConcurrentHashMap.newKeySet();
+    private static final java.util.Set<String> cancelledStarts = java.util.concurrent.ConcurrentHashMap.newKeySet();
+
+    static void expect(String owner) { if (owner != null && !owner.isEmpty()) pendingStarts.add(owner); }
+    static void forget(String owner) {
+        pendingStarts.remove(owner);
+        cancelledStarts.remove(owner);
+    }
+    // Insertion order lets the notification return to the previous live
+    // conversation when the latest generation finishes.
+    private final java.util.LinkedHashMap<String, Intent> owners = new java.util.LinkedHashMap<>();
 
     static void release(String owner) {
         GenerationService service = active;
-        if (service == null || owner == null || owner.isEmpty()) return;
-        if (!service.owners.remove(owner)) return;
+        if (owner == null || owner.isEmpty()) return;
+        if (service == null || service.owners.remove(owner) == null) {
+            if (pendingStarts.contains(owner)) cancelledStarts.add(owner);
+            return;
+        }
         if (service.owners.isEmpty()) {
             service.releaseWakeLock();
             service.stopForeground(true);
             service.stopSelf();
             Log.i("AiHome:gen", "fgs_stopped");
+        } else {
+            Intent previous = null;
+            for (Intent running : service.owners.values()) previous = running;
+            if (previous != null) service.showOwner(previous);
         }
     }
 
@@ -77,7 +96,17 @@ public final class GenerationService extends Service {
             stopSelf(startId);
             return START_NOT_STICKY;
         }
-        owners.add(owner);
+        pendingStarts.remove(owner);
+        owners.remove(owner);
+        owners.put(owner, new Intent(intent));
+        showOwner(intent);
+        if (cancelledStarts.remove(owner)) release(owner);
+        // The WebView owns the actual request. Recreating only this service
+        // would show a stale “generating” notification without resuming it.
+        return START_NOT_STICKY;
+    }
+
+    private void showOwner(Intent intent) {
         String assistant = intent == null ? "" : intent.getStringExtra("assistantName");
         if (assistant == null || assistant.trim().isEmpty()) assistant = "栖间";
         String assistantId = intent == null ? "" : intent.getStringExtra("assistantId");
@@ -110,11 +139,8 @@ public final class GenerationService extends Service {
             .build();
         startForeground(FOREGROUND_ID, n);
         acquireWakeLock();
-        // 真机证据：FGS 实际启动 / 停止。adb logcat -s AiHome:gen 可见。
-        Log.i("AiHome:gen", "fgs_started assistant=" + assistant + " wakelock=" + (wakeLock != null && wakeLock.isHeld()));
-        // The WebView owns the actual request. Recreating only this service
-        // would show a stale “generating” notification without resuming it.
-        return START_NOT_STICKY;
+        Log.i("AiHome:gen", "fgs_started assistant=" + assistant + " count=" + owners.size()
+            + " wakelock=" + (wakeLock != null && wakeLock.isHeld()));
     }
 
     @Override public void onDestroy() {

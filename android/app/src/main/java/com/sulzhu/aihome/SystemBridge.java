@@ -477,7 +477,11 @@ final class SystemBridge {
                 intent.putExtra("assistantId", body.optString("assistantId", ""));
                 intent.putExtra("conversationId", body.optString("conversationId", ""));
                 intent.putExtra("messageId", body.optString("messageId", ""));
-                ContextCompat.startForegroundService(ctx(), intent);
+                String owner = body.optString("messageId", "");
+                if (owner.isEmpty()) return false;
+                GenerationService.expect(owner);
+                try { ContextCompat.startForegroundService(ctx(), intent); }
+                catch (Exception e) { GenerationService.forget(owner); throw e; }
                 return true;
             }
             if ("stop".equals(action)) {
