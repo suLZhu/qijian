@@ -137,6 +137,21 @@ export default function LayoutPrototype(props:LayoutPrototypeProps = {}) {
   const submit = async () => { const text=draft.trim(); if((!text&&!attachments.length)||readingFiles||!props.onSend)return; const result=await props.onSend(text,attachments);if(result==='ok')setAttachments([]) }
   const [theme, setTheme] = useState('银杏奶灰')
   const mainRef = useRef<HTMLElement>(null)
+  const chatRef = useRef<HTMLDivElement>(null)
+  const followLatest = useRef(true)
+  const prependPosition = useRef<{ scope: string; height: number; top: number } | null>(null)
+  const [historyWindow, setHistoryWindow] = useState({ scope: '', limit: 40 })
+  const historyLimit = historyWindow.scope === scope ? historyWindow.limit : 40
+  const historyStart = Math.max(0, actualMessages.length - historyLimit)
+
+  function loadOlderMessages() {
+    const main = mainRef.current
+    if (!main) return
+    followLatest.current = false
+    prependPosition.current = { scope, height: main.scrollHeight, top: main.scrollTop }
+    setHistoryWindow({ scope, limit: historyLimit + 40 })
+  }
+
   const settingsScrollRef = useRef(0)
   const previousNav = useRef({view: 'home' as View, section: null as string | null})
   useLayoutEffect(() => {
@@ -150,6 +165,28 @@ export default function LayoutPrototype(props:LayoutPrototypeProps = {}) {
     }
     previousNav.current = {view, section}
   }, [view, section])
+  useLayoutEffect(() => {
+    if (view !== 'chat' || !mainRef.current || !chatRef.current) return
+    const main = mainRef.current
+    followLatest.current = true
+    prependPosition.current = null
+    const scrollToLatest = () => {
+      if (followLatest.current) main.scrollTop = main.scrollHeight
+    }
+    scrollToLatest()
+    const observer = new ResizeObserver(scrollToLatest)
+    observer.observe(chatRef.current)
+    return () => observer.disconnect()
+  }, [scope, view])
+
+  useLayoutEffect(() => {
+    const anchor = prependPosition.current
+    const main = mainRef.current
+    if (!anchor || !main || anchor.scope !== scope) return
+    prependPosition.current = null
+    main.scrollTop = anchor.top + main.scrollHeight - anchor.height
+  }, [historyLimit, scope])
+
   function openSection(name: string) {
     if (view === 'settings' && !section) settingsScrollRef.current = mainRef.current?.scrollTop || 0
     setSection(name)
@@ -181,7 +218,11 @@ export default function LayoutPrototype(props:LayoutPrototypeProps = {}) {
 
 
     </header>
-    <main className="qj-main" ref={mainRef}>
+    <main className="qj-main" ref={mainRef} onScroll={event => {
+      if (view !== 'chat') return
+      const main = event.currentTarget
+      followLatest.current = main.scrollHeight - main.clientHeight - main.scrollTop < 48
+    }}>
       {view === 'home' && <div className="qj-home">
         <div className="qj-home-hero"><strong>{new Date().toLocaleTimeString('zh-CN',{hour:'2-digit',minute:'2-digit',hour12:false})}</strong><span>{new Date().toLocaleDateString('zh-CN',{weekday:'long',month:'long',day:'numeric'})}</span><p>晚上好。家里很安静，说点什么吧。</p></div>
         <div className="qj-home-people">
@@ -198,9 +239,10 @@ export default function LayoutPrototype(props:LayoutPrototypeProps = {}) {
           <button className="qj-row" onClick={() => go('settings')}><span>记忆与记录</span><small>在设置中查看管理</small><i><IconChevronRight size={15}/></i></button>
         </div>
       </div>}
-      {view === 'chat' && <div className="qj-chat">
+      {view === 'chat' && <div className="qj-chat" ref={chatRef}>
         <div className="qj-chat-date">{activeConversation?.title || '暂无会话'}</div>
-        {actualMessages.map((m,i)=><div key={m.id||i} className={'qj-message '+(m.role==='user'?'mine':'from')+(m.id&&selected.includes(m.id)?' qj-message-selected':'')} onPointerDown={e=>{if(!m.id||selection?.scope===scope|| (e.target as HTMLElement).closest('button,input,textarea,summary'))return;cancelPress();pressStart.current={x:e.clientX,y:e.clientY};pressTimer.current=setTimeout(()=>{setMessageAction({scope,id:m.id!});pressTimer.current=null},500)}} onPointerMove={e=>{if(Math.hypot(e.clientX-pressStart.current.x,e.clientY-pressStart.current.y)>10)cancelPress()}} onPointerUp={cancelPress} onPointerCancel={cancelPress} onContextMenu={e=>{if(m.id){e.preventDefault();setMessageAction({scope,id:m.id})}}} onClick={()=>{if(m.id&&selection?.scope===scope)toggleSelected(m.id)}}>{m.role!=='user'&&<span className="qj-avatar">{displayName(person).slice(0,1)}</span>}<div className="qj-message-content">{m.taskRunId&&<details className="reasoning"><summary>定时任务</summary><div className="reasoning-body">{m.taskDetails||m.contextNote||'定时任务'}</div></details>}{m.role==='assistant'&&m.reasoning&&<details className="reasoning"><summary>思考过程</summary><div className="reasoning-body">{cleanupMessageText(m.reasoning)}</div></details>}{m.role==='assistant'?<RichText text={cleanupMessageText(m.content||'')}/>:<p>{m.content}</p>}{m.attachments?.map((a,j)=><div key={j} className="qj-message-attachment">{a.type?.startsWith('image/')&&(a.preview||a.dataUrl)?<img src={assetUrl(a.preview||a.dataUrl||'')} alt={a.name}/>:<span>{a.name}</span>}</div>)}{m.id&&messageAction?.scope===scope&&messageAction.id===m.id&&selection?.scope!==scope&&<div className="qj-message-actions"><button onClick={()=>{setMessageEdit({scope,id:m.id!,text:m.content});setMessageAction(null)}}>编辑</button><button onClick={()=>{setSelection({scope,ids:[m.id!]});setMessageAction(null)}}>多选</button>{m.role==='assistant'&&i===actualMessages.length-1&&<button disabled={props.sending} onClick={()=>{setMessageAction(null);void props.onRegenerateMessage?.(m.id!)}}>重新生成</button>}<button onClick={()=>setMessageAction(null)}>关闭</button></div>}{m.id&&messageEdit?.scope===scope&&messageEdit.id===m.id&&<div className="qj-pending-edit"><textarea value={messageEdit.text} onChange={e=>setMessageEdit({...messageEdit,text:e.target.value})}/><button disabled={!messageEdit.text.trim()} onClick={()=>{if(props.onEditMessage?.(m.id!,messageEdit.text))setMessageEdit(null)}}>保存</button><button onClick={()=>setMessageEdit(null)}>取消</button></div>}</div></div>)}
+        {historyStart > 0 && <button type="button" className="qj-history-more" onClick={loadOlderMessages}>加载更早消息</button>}
+        {actualMessages.slice(historyStart).map((m,i)=><div key={m.id||historyStart+i} className={'qj-message '+(m.role==='user'?'mine':'from')+(m.id&&selected.includes(m.id)?' qj-message-selected':'')} onPointerDown={e=>{if(!m.id||selection?.scope===scope|| (e.target as HTMLElement).closest('button,input,textarea,summary'))return;cancelPress();pressStart.current={x:e.clientX,y:e.clientY};pressTimer.current=setTimeout(()=>{setMessageAction({scope,id:m.id!});pressTimer.current=null},500)}} onPointerMove={e=>{if(Math.hypot(e.clientX-pressStart.current.x,e.clientY-pressStart.current.y)>10)cancelPress()}} onPointerUp={cancelPress} onPointerCancel={cancelPress} onContextMenu={e=>{if(m.id){e.preventDefault();setMessageAction({scope,id:m.id})}}} onClick={()=>{if(m.id&&selection?.scope===scope)toggleSelected(m.id)}}>{m.role!=='user'&&<span className="qj-avatar">{displayName(person).slice(0,1)}</span>}<div className="qj-message-content">{m.taskRunId&&<details className="reasoning"><summary>定时任务</summary><div className="reasoning-body">{m.taskDetails||m.contextNote||'定时任务'}</div></details>}{m.role==='assistant'&&m.reasoning&&<details className="reasoning"><summary>思考过程</summary><div className="reasoning-body">{cleanupMessageText(m.reasoning)}</div></details>}{m.role==='assistant'?<RichText text={cleanupMessageText(m.content||'')}/>:<p>{m.content}</p>}{m.attachments?.map((a,j)=><div key={j} className="qj-message-attachment">{a.type?.startsWith('image/')&&(a.preview||a.dataUrl)?<img src={assetUrl(a.preview||a.dataUrl||'')} alt={a.name}/>:<span>{a.name}</span>}</div>)}{m.id&&messageAction?.scope===scope&&messageAction.id===m.id&&selection?.scope!==scope&&<div className="qj-message-actions"><button onClick={()=>{setMessageEdit({scope,id:m.id!,text:m.content});setMessageAction(null)}}>编辑</button><button onClick={()=>{setSelection({scope,ids:[m.id!]});setMessageAction(null)}}>多选</button>{m.role==='assistant'&&historyStart+i===actualMessages.length-1&&<button disabled={props.sending} onClick={()=>{setMessageAction(null);void props.onRegenerateMessage?.(m.id!)}}>重新生成</button>}<button onClick={()=>setMessageAction(null)}>关闭</button></div>}{m.id&&messageEdit?.scope===scope&&messageEdit.id===m.id&&<div className="qj-pending-edit"><textarea value={messageEdit.text} onChange={e=>setMessageEdit({...messageEdit,text:e.target.value})}/><button disabled={!messageEdit.text.trim()} onClick={()=>{if(props.onEditMessage?.(m.id!,messageEdit.text))setMessageEdit(null)}}>保存</button><button onClick={()=>setMessageEdit(null)}>取消</button></div>}</div></div>)}
         {selection?.scope===scope&&<div className="qj-message-actions"><button disabled={!selected.length} onClick={()=>{if(window.confirm('删除选中的 '+selected.length+' 条消息？')){props.onDeleteMessages?.(selected);setSelection(null)}}}>删除（{selected.length}）</button><button onClick={()=>setSelection(null)}>取消多选</button></div>}
       </div>}
       {view === 'room' && <div className="qj-page">
