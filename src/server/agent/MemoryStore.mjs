@@ -178,15 +178,16 @@ export function SQLiteMemoryProvider(db) {
     return mapRecord(db.prepare('SELECT * FROM memory_records WHERE id=?').get(String(id || '')))
   }
 
-  function list({ person, lifecycle = '', limit = 50 } = {}) {
+  function list({ person, lifecycle = '', limit = 50, offset = 0 } = {}) {
     const capped = Math.min(1000, Math.max(1, Number(limit) || 50))
+    const skipped = Math.min(1000000, Math.max(0, Math.trunc(Number(offset) || 0)))
     if (lifecycle) {
       if (!MEMORY_LIFECYCLES.includes(lifecycle)) throw Object.assign(new Error('记忆状态无效'), { status: 400 })
-      return db.prepare('SELECT * FROM memory_records WHERE person=? AND lifecycle=? ORDER BY updated_at DESC LIMIT ?')
-        .all(person, lifecycle, capped).map(mapRecord)
+      return db.prepare('SELECT * FROM memory_records WHERE person=? AND lifecycle=? ORDER BY updated_at DESC, id DESC LIMIT ? OFFSET ?')
+        .all(person, lifecycle, capped, skipped).map(mapRecord)
     }
-    return db.prepare('SELECT * FROM memory_records WHERE person=? ORDER BY updated_at DESC LIMIT ?')
-      .all(person, capped).map(mapRecord)
+    return db.prepare('SELECT * FROM memory_records WHERE person=? ORDER BY updated_at DESC, id DESC LIMIT ? OFFSET ?')
+      .all(person, capped, skipped).map(mapRecord)
   }
 
   function transition(id, next) {

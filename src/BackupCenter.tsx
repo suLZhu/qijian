@@ -62,25 +62,28 @@ export function BackupCenter({ people, vendors, setVendors, setModelProfiles }: 
     const server: { keys?: Record<string, string>; memory?: Record<string, unknown[]> } = {}
     if (!kind || isLocalMode()) return server
     if (kind.serverKeys) {
-      try {
-        const response = await apiFetch('/api/keys', { credentials: 'include' })
-        if (response.ok) {
-          const data = await response.json()
-          if (data && data.keys && typeof data.keys === 'object') server.keys = data.keys
-        }
-      } catch { /* 服务器不可用时只备份本地可拿到的部分 */ }
+      const response = await apiFetch('/api/keys', { credentials: 'include' })
+      if (!response.ok) throw new Error('服务器 API Key 读取失败（' + response.status + '），备份未保存')
+      const data = await response.json()
+      if (!data?.keys || typeof data.keys !== 'object') throw new Error('服务器 API Key 数据无效，备份未保存')
+      server.keys = data.keys
     }
     if (kind.serverMemory && people.length) {
       const memory: Record<string, unknown[]> = {}
       await Promise.all(people.map(async person => {
-        try {
-          const response = await apiFetch('/api/memory/records?person=' + encodeURIComponent(person) + '&limit=1000', { credentials: 'include' })
-          if (!response.ok) return
+        const records: unknown[] = []
+        for (let offset = 0; ; offset += 500) {
+          if (offset > 1000000) throw new Error('记忆数量超出当前备份上限，备份未保存')
+          const response = await apiFetch('/api/memory/records?person=' + encodeURIComponent(person) + '&limit=500&offset=' + offset, { credentials: 'include' })
+          if (!response.ok) throw new Error('助手记忆读取失败（' + response.status + '），备份未保存')
           const data = await response.json()
-          if (Array.isArray(data.records)) memory[person] = data.records
-        } catch { /* 单人失败不影响其他人的记忆 */ }
+          if (!Array.isArray(data?.records)) throw new Error('助手记忆数据无效，备份未保存')
+          records.push(...data.records)
+          if (data.records.length < 500) break
+        }
+        memory[person] = records
       }))
-      if (Object.keys(memory).length) server.memory = memory
+      server.memory = memory
     }
     return server
   }

@@ -1,6 +1,8 @@
 // 分类备份：文件名、分类键过滤、整体备份恢复子类、格式校验。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
+import { DatabaseSync } from 'node:sqlite'
+import { initMemoryStore, SQLiteMemoryProvider } from '../src/server/agent/MemoryStore.mjs'
 import {
   BACKUP_KINDS, collectBackupLocal, localKeysForRestore, backupFileName, kindFromFileName,
   parseBackup, makeBackupEnvelope, summarizeBackup,
@@ -103,4 +105,17 @@ test('分类恢复拒绝备份文件中夹带的其它类别设置', () => {
   })
   assert.deepEqual(localKeysForRestore(malicious,'mcp'), {'ai-home.mcpConnections':'{"p":[]}'})
   assert.throws(() => localKeysForRestore(malicious,'world'), /类型不匹配/)
+})
+
+test('同一更新时间的多条记忆分页备份仍完整且不重复', () => {
+  const db = new DatabaseSync(':memory:')
+  try {
+    initMemoryStore(db)
+    const insert = db.prepare("INSERT INTO memory_records (id,person,title,content,updated_at,created_at) VALUES (?,?,?,?,?,?)")
+    for (const id of ['a', 'b', 'c']) insert.run(id, 'assistant-yanweixi', id, '正文', '2026-11-27T00:00:00Z', '2026-11-27T00:00:00Z')
+    const provider = SQLiteMemoryProvider(db)
+    const first = provider.list({ person: 'assistant-yanweixi', limit: 2, offset: 0 })
+    const second = provider.list({ person: 'assistant-yanweixi', limit: 2, offset: 2 })
+    assert.deepEqual([...first, ...second].map(x => x.id), ['c', 'b', 'a'])
+  } finally { db.close() }
 })

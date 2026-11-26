@@ -1119,7 +1119,8 @@ const apiServer = createServer(async (req, res) => {
     const days = Math.min(3650, Math.max(0, Number(url.searchParams.get('days')) || 0))
     const since = days ? new Date(Date.now() - days * 86400000).toISOString().slice(0, 10) : ''
     const limit = Math.min(1000, Math.max(1, Number(url.searchParams.get('limit')) || 100))
-    const records = memoryProvider.list({ person, lifecycle, limit })
+    const offset = Math.min(1000000, Math.max(0, Math.trunc(Number(url.searchParams.get('offset')) || 0)))
+    const records = memoryProvider.list({ person, lifecycle, limit, offset })
     return send(res, 200, { records: since ? records.filter(record => String(record.occurredAt || '') >= since) : records, days })
   }
   if (url.pathname === '/api/memory/records' && req.method === 'POST') {
