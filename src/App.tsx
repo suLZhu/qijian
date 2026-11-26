@@ -1,3 +1,4 @@
+import type { LedgerRound } from './usageLedger.mjs'
 import { useCallback, useEffect, useMemo, useState, useRef, type FormEvent, type ChangeEvent } from 'react'
 import './App.css'
 import LayoutPrototype from './LayoutPrototype'
@@ -124,7 +125,7 @@ function alignCardNames(cards:Record<string,CharacterCard>|null|undefined, names
 }
 type Tool = '人物设置' | '世界书' | '记忆面板' | '工作流' | '自主生活' | 'MCP' | '模型设置' | 'SKILL 技能库' | '角色外观' | '工具调用看板' | '助手档案'
 type MessageAttachment = { name: string; type: string; size: number; preview?: string; dataUrl?: string; textContent?: string; assetId?: string }
-type TokenUsage = { at?: string; model?: string; promptTokens?: number; completionTokens?: number; cachedTokens?: number; cacheReadTokens?: number; elapsedMs?: number; preflightMs?: number; firstTokenMs?: number; streamMs?: number; tokensPerSecond?: number }
+type TokenUsage = { rounds?: LedgerRound[]; at?: string; model?: string; promptTokens?: number; completionTokens?: number; cachedTokens?: number; cacheReadTokens?: number; elapsedMs?: number; preflightMs?: number; firstTokenMs?: number; streamMs?: number; tokensPerSecond?: number }
 type ChatMessage = { role: 'user' | 'assistant'; content: string; at?: string; id?: string; contextNote?: string; taskDetails?: string; attachments?: MessageAttachment[]; usage?: TokenUsage; taskRunId?: string; reasoning?: string }
 type Conversation = { id:string; title:string; messages:ChatMessage[]; updatedAt:string; summary?:string; summaryThroughId?:string; summaryThrough?:number; summaryAt?:string }
 
@@ -1440,6 +1441,7 @@ export default function App() {
         } catch { /* optional memory parse/rank failure */ }
       }
     }
+    const usageRounds: LedgerRound[] = []
     const usageTotals:TokenUsage={promptTokens:0,completionTokens:0,cachedTokens:0,cacheReadTokens:0}
     // 真机证据：流式过程中每 2s 打一次「仍在接收」，用于判断后台是否被系统暂停。
     let lastStreamLog=0
@@ -1631,13 +1633,23 @@ export default function App() {
           }else throw new Error(friendlyHttpError(response.status,detail))
         }
         if(routeMode){const used=response.headers.get('X-Route-Used')||'';const usedLabel=(()=>{try{return decodeURIComponent(response.headers.get('X-Route-Label')||'')}catch{return ''}})();if(used)setLastRouteInfo('实际使用线路：'+(usedLabel||used))}
+        const usedRouteId = response.headers.get('X-Route-Used')
+        const route = usedRouteId ? routePlan.find(r => r.routeId === usedRouteId) : undefined
+        const routeVendorId = routeState.routes.find(r => r.id === usedRouteId)?.vendorId
+        const roundUsage: LedgerRound = {
+          model: route?.model || activeModel.model,
+          vendorId: route ? routeVendorId || 'route:' + route.routeId : activeVendor?.id || '',
+          vendor: route ? vendors.find(v => v.id === routeVendorId)?.name || route.label : activeVendor?.name || '',
+          subscription: route ? route.source === 'subscription' : !!subscriptionProtocol,
+          promptTokens: 0, completionTokens: 0,
+        }
         if(!response.body) throw new Error('当前浏览器未提供流式响应读取能力')
         // 正文与思考各用一个有状态清洗器：跨 chunk 的协议标签由缓冲窗口负责识别，
         // 清洗后的增量才写进 answer / thinking（持久化与通知因此天然都是干净的）。
         const contentCleanup=createStreamCleanup();const reasoningCleanup=createStreamCleanup()
         const reader=response.body.getReader();const decoder=new TextDecoder();let buffer='';let roundText='';let thinking='';const calls:Record<number,{id:string;type:string;function:{name:string;arguments:string}}>={}
         let toolPayloadChars=0
-      while(true){const {value,done}=await reader.read();if(done)break;buffer+=decoder.decode(value,{stream:true});const lines=buffer.split(/\r?\n/);buffer=lines.pop()||'';for(const line of lines){if(!line.startsWith('data:'))continue;const data=line.slice(5).trim();if(!data||data==='[DONE]')continue;try{const chunk=JSON.parse(data);const usage=chunk.usage;if(usage&&typeof usage==='object'){const promptTokens=Number(usage.prompt_tokens??usage.input_tokens??0);const completionTokens=Number(usage.completion_tokens??usage.output_tokens??0);const cachedTokens=Number(usage.prompt_tokens_details?.cached_tokens??usage.input_tokens_details?.cached_tokens??0);const cacheReadTokens=Number(usage.prompt_tokens_details?.cache_read_input_tokens??usage.input_tokens_details?.cache_read_input_tokens??usage.cache_read_input_tokens??0);if(Number.isFinite(promptTokens))usageTotals.promptTokens=(usageTotals.promptTokens||0)+promptTokens;if(Number.isFinite(completionTokens))usageTotals.completionTokens=(usageTotals.completionTokens||0)+completionTokens;if(Number.isFinite(cachedTokens))usageTotals.cachedTokens=(usageTotals.cachedTokens||0)+cachedTokens;if(Number.isFinite(cacheReadTokens))usageTotals.cacheReadTokens=(usageTotals.cacheReadTokens||0)+cacheReadTokens}const delta=chunk.choices?.[0]?.delta;const thinkPiece=(delta as any)?.reasoning_content ?? (delta as any)?.reasoning;if(typeof thinkPiece==='string'&&thinkPiece){if(!firstTokenAt){firstTokenAt=performance.now();setGenerationStages(prev=>({...prev,[sendScope]:'streaming'}))}thinking+=reasoningCleanup.push(thinkPiece);queueStreamPaint(answer,thinking)}const piece=delta?.content;if(typeof piece==='string'&&piece){if(!firstTokenAt){firstTokenAt=performance.now();setGenerationStages(prev=>({...prev,[sendScope]:'streaming'}))}const cleanPiece=contentCleanup.push(piece);roundText+=cleanPiece;answer+=cleanPiece;{const _now=Date.now();if(_now-lastStreamLog>2000){lastStreamLog=_now;genDebug('stream_receiving',{person:target,conversationId:sendConversationId,messageId:assistantMessageId,len:answer.length})}queueStreamPaint(answer,thinking)}}for(const call of (delta?.tool_calls||[])){const idx=call.index??0;calls[idx]??={id:'',type:'function',function:{name:'',arguments:''}};if(call.id)calls[idx].id+=call.id;if(call.type)calls[idx].type=call.type;if(call.function?.name)calls[idx].function.name+=call.function.name;if(call.function?.arguments)calls[idx].function.arguments+=call.function.arguments}}catch{}}}
+      while(true){const {value,done}=await reader.read();if(done)break;buffer+=decoder.decode(value,{stream:true});const lines=buffer.split(/\r?\n/);buffer=lines.pop()||'';for(const line of lines){if(!line.startsWith('data:'))continue;const data=line.slice(5).trim();if(!data||data==='[DONE]')continue;try{const chunk=JSON.parse(data);const usage=chunk.usage;if(usage&&typeof usage==='object'){const promptTokens=Number(usage.prompt_tokens??usage.input_tokens??0);const completionTokens=Number(usage.completion_tokens??usage.output_tokens??0);const cachedTokens=Number(usage.prompt_tokens_details?.cached_tokens??usage.input_tokens_details?.cached_tokens??0);const cacheReadTokens=Number(usage.prompt_tokens_details?.cache_read_input_tokens??usage.input_tokens_details?.cache_read_input_tokens??usage.cache_read_input_tokens??0);if(!usageRounds.includes(roundUsage))usageRounds.push(roundUsage);roundUsage.promptTokens+=Number.isFinite(promptTokens)?promptTokens:0;roundUsage.completionTokens+=Number.isFinite(completionTokens)?completionTokens:0;if(Number.isFinite(promptTokens))usageTotals.promptTokens=(usageTotals.promptTokens||0)+promptTokens;if(Number.isFinite(completionTokens))usageTotals.completionTokens=(usageTotals.completionTokens||0)+completionTokens;if(Number.isFinite(cachedTokens))usageTotals.cachedTokens=(usageTotals.cachedTokens||0)+cachedTokens;if(Number.isFinite(cacheReadTokens))usageTotals.cacheReadTokens=(usageTotals.cacheReadTokens||0)+cacheReadTokens}const delta=chunk.choices?.[0]?.delta;const thinkPiece=(delta as any)?.reasoning_content ?? (delta as any)?.reasoning;if(typeof thinkPiece==='string'&&thinkPiece){if(!firstTokenAt){firstTokenAt=performance.now();setGenerationStages(prev=>({...prev,[sendScope]:'streaming'}))}thinking+=reasoningCleanup.push(thinkPiece);queueStreamPaint(answer,thinking)}const piece=delta?.content;if(typeof piece==='string'&&piece){if(!firstTokenAt){firstTokenAt=performance.now();setGenerationStages(prev=>({...prev,[sendScope]:'streaming'}))}const cleanPiece=contentCleanup.push(piece);roundText+=cleanPiece;answer+=cleanPiece;{const _now=Date.now();if(_now-lastStreamLog>2000){lastStreamLog=_now;genDebug('stream_receiving',{person:target,conversationId:sendConversationId,messageId:assistantMessageId,len:answer.length})}queueStreamPaint(answer,thinking)}}for(const call of (delta?.tool_calls||[])){const idx=call.index??0;calls[idx]??={id:'',type:'function',function:{name:'',arguments:''}};if(call.id)calls[idx].id+=call.id;if(call.type)calls[idx].type=call.type;if(call.function?.name)calls[idx].function.name+=call.function.name;if(call.function?.arguments)calls[idx].function.arguments+=call.function.arguments}}catch{}}}
         // 本轮流结束：冲刷清洗器缓冲，把暂缓的尾部补回；未闭合的抑制块由 flush 丢弃，
         // 绝不把半截系统注入写进聊天记录或下一轮工具请求。
         const contentTail=contentCleanup.flush()
@@ -1868,7 +1880,7 @@ export default function App() {
       const preflightMs=Math.max(0,Math.round(preflightFinishedAt-requestStartedAt))
       const firstTokenMs=firstTokenAt?Math.max(0,Math.round(firstTokenAt-upstreamStartedAt)):undefined
       const streamMs=firstTokenAt?Math.max(0,Math.round(performance.now()-firstTokenAt)):undefined
-      const finalUsage:TokenUsage|undefined=hasUsage?{...usageTotals,model:activeModel.model,at:new Date().toISOString(),elapsedMs,preflightMs,firstTokenMs,streamMs,tokensPerSecond:completionTokens&&streamMs?Math.round(completionTokens/(streamMs/1000)*10)/10:undefined}:undefined
+      const finalUsage:TokenUsage|undefined=hasUsage?{...usageTotals,rounds:usageRounds,model:activeModel.model,at:new Date().toISOString(),elapsedMs,preflightMs,firstTokenMs,streamMs,tokensPerSecond:completionTokens&&streamMs?Math.round(completionTokens/(streamMs/1000)*10)/10:undefined}:undefined
       if(!answer){
         // 重新生成拿到空白回复：不覆盖旧回复，恢复原样并提示（防止有效回复被空白顶掉）。
         if(regen){restoreRegenerate();setChatError('重新生成没有返回内容，已保留原来的回复。');return 'fail'}
