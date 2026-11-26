@@ -153,3 +153,5 @@
 .qj-chat-scroll { scrollbar-width: none; }
 .qj-chat-scroll::-webkit-scrollbar { display: none; }
 .qj-chat .qj-history-more { padding: 0 12px; border-radius: 12px; color: var(--qj-muted); font-size: 12px; }
+
+.qj-message-meta { margin-bottom: 3px; color: var(--qj-muted); font-size: 11px; }

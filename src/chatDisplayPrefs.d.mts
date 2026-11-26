@@ -1,4 +1,5 @@
 export type ChatDisplayPrefs = {
+  fontSize: number
   assistantAvatar: boolean
   userAvatar: boolean
   assistantName: boolean

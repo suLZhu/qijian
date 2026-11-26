@@ -25,7 +25,7 @@ function Option({ checked, label, onChange }: { checked: boolean; label: string;
   </label>
 }
 
-export function ChatDisplaySettings() {
+export function ChatDisplaySettings({ compact = false }: { compact?: boolean } = {}) {
   const [prefs, setPrefs] = useState<ChatDisplayPrefs>(() => loadChatDisplay())
   const patch = (key: keyof ChatDisplayPrefs, value: boolean | string | number) => {
     const next = { ...prefs, [key]: value } as ChatDisplayPrefs
@@ -36,11 +36,16 @@ export function ChatDisplaySettings() {
     <b>聊天展示设置</b>
     <p className="muted">勾选的内容才会出现在对话气泡周围；不勾选就保持干净。时间与名称并排显示在气泡上方。</p>
 
+    {compact && <label className="chat-tool-limit">聊天字号
+      <select value={prefs.fontSize} onChange={e => patch('fontSize', Number(e.target.value))}>
+        {[12, 13, 14, 15, 16].map(size => <option key={size} value={size}>{size} 号</option>)}
+      </select>
+    </label>}
     <div className="chat-display-grid">
       <Option checked={prefs.assistantAvatar} label="助手头像" onChange={(v) => patch('assistantAvatar', v)}/>
-      <Option checked={prefs.userAvatar} label="用户头像" onChange={(v) => patch('userAvatar', v)}/>
+      {!compact && <Option checked={prefs.userAvatar} label="用户头像" onChange={(v) => patch('userAvatar', v)}/>}
       <Option checked={prefs.assistantName} label="助手名称" onChange={(v) => patch('assistantName', v)}/>
-      <Option checked={prefs.userName} label="用户名称" onChange={(v) => patch('userName', v)}/>
+      {!compact && <Option checked={prefs.userName} label="用户名称" onChange={(v) => patch('userName', v)}/>}
       <Option checked={prefs.time} label="发送消息时间" onChange={(v) => patch('time', v)}/>
       <Option checked={prefs.token} label="Token 用量" onChange={(v) => patch('token', v)}/>
     </div>
@@ -49,10 +54,12 @@ export function ChatDisplaySettings() {
       <h3>思考模式</h3>
       <p className="muted">只展示模型接口实际返回的思考内容；默认折叠，不会生成或猜测隐藏推理。</p>
       <Option checked={prefs.showReasoning} label="显示思考过程（折叠卡片）" onChange={v=>patch('showReasoning',v)}/>
+      {!compact && <>
       <Option checked={prefs.autoTranslateReasoning} label="自动翻译英文思考内容（需额外请求）" onChange={v=>patch('autoTranslateReasoning',v)}/>
       <Option checked={prefs.showReasoningDuration} label="显示思考耗时" onChange={v=>patch('showReasoningDuration',v)}/>
       <h3>工具调用</h3>
       <Option checked={prefs.showToolCalls} label="显示工具调用记录（折叠卡片）" onChange={v=>patch('showToolCalls',v)}/>
+      </>}
       <label className="chat-tool-limit">连续工具调用最大轮数
         <select value={prefs.toolRoundLimit} onChange={e=>patch('toolRoundLimit',Number(e.target.value))}>
           {[5,10,15,20].map(n=><option key={n} value={n}>{n} 轮</option>)}

@@ -44,8 +44,8 @@ import { cleanupMessageText, createStreamCleanup } from './messageCleanup.mjs'
 import { formatDuration, summarizeTokenUsage, groupToolCalls, needsChineseTranslation, buildTranslationMessages } from './messagePresentation.mjs'
 // 消息操作：重新生成目标解析 + 历史消息 id 补齐/对齐（编辑、删除、重新生成按 id 定位）。
 import { resolveRegenerateContext, alignMessageIds } from './messageOps.mjs'
-import { needsUpload, assetIdsOfMessages, collectReferencedAssetIds, releasedAssetIds } from './attachmentRefs.mjs'
-import { extractDocumentText, supportedDocumentName } from './documentText'
+import { assetIdsOfMessages, collectReferencedAssetIds, releasedAssetIds } from './attachmentRefs.mjs'
+import { readChatAttachment } from './chatAttachment'
 import { messageWithVision, historyVisionMessageIndexes, historicalMessageWithoutVision } from './visionAttachments.mjs'
 // 会话内消息搜索（微信式）：纯字符串匹配 + 上一条/下一条循环 + messageId 定位。
 import { searchMessages, stepMatchIndex, type ChatSearchResult } from './chatSearch.mjs'
@@ -1883,6 +1883,8 @@ export default function App() {
         }
         if(toolBudget.isLastRound(round)) throw new Error('连续工具调用已达到所选上限（'+toolBudget.roundLimit+' 轮），请缩小任务或调整轮数后继续。')
       }
+      abortController.signal.throwIfAborted()
+      if (streamPaintTimer !== undefined) flushStreamPaint()
       genDebug('generation_completed',{person:target,conversationId:sendConversationId,messageId:assistantMessageId,elapsedMs:Math.max(1,Math.round(performance.now()-requestStartedAt)),completionTokens:usageTotals.completionTokens||0})
       const elapsedMs=Math.max(1,Math.round(performance.now()-requestStartedAt))
       const completionTokens=usageTotals.completionTokens||0
@@ -1894,6 +1896,7 @@ export default function App() {
       if(!answer){
         // 重新生成拿到空白回复：不覆盖旧回复，恢复原样并提示（防止有效回复被空白顶掉）。
         if(regen){restoreRegenerate();setChatError('重新生成没有返回内容，已保留原来的回复。');return 'fail'}
+        if (options.pendingId) throw new Error('模型没有返回可用回复，请确认后重试')
         updateActiveConversationMessages(target,prev=>prev.map(m=>m.id===assistantMessageId?{...m,content:'（接口已响应，但没有收到文本内容。请检查模型名称、工具调用兼容性或接口的流式支持。）',usage:finalUsage}:m),sendConversationId)
       }
       else if(finalUsage) updateActiveConversationMessages(target,prev=>prev.map(m=>m.id===assistantMessageId?{...m,usage:finalUsage}:m),sendConversationId)
@@ -1907,6 +1910,7 @@ export default function App() {
       genOutcome='ok'
       return 'ok'
     } catch(err) {
+      if (streamPaintTimer !== undefined) flushStreamPaint()
       const msg=err instanceof Error?err.message:String(err)
       // 用户删除「正在生成」的回复会触发中止：消息已不在，不写错误文案、也不弹错误提示。
       if(!abortController.signal.aborted){
@@ -1923,7 +1927,6 @@ export default function App() {
       genOutcome='fail'
       return 'fail'
     } finally {
-      if (streamPaintTimer !== undefined) flushStreamPaint()
       if(sendAbortRef.current[sendScope]?.id===assistantMessageId)delete sendAbortRef.current[sendScope]
       delete sendingRef.current[sendScope]
       setSendingScopes(prev=>({...prev,[sendScope]:false}));setGenerationStages(prev=>({...prev,[sendScope]:''}))
@@ -3491,58 +3494,14 @@ function Chat(p: any) {
     window.addEventListener('focus',resume)
     return ()=>{document.removeEventListener('visibilitychange',resume);window.removeEventListener('pageshow',resume);window.removeEventListener('focus',resume);timers.forEach(window.clearTimeout)}
   },[chatPerson,activeChatConversationId])
-  // 图片上传换稳定引用：字节存后端（见 server/attachments.mjs），preview 持久化为
-  // /api/attachments/<id>，聊天记录只带 assetId+URL，Base64 永不进 localStorage/云端快照。
-  // 时机选在「选择图片」而非「发送」：loadFiles 本就是 async，
-  // 上传后的稳定引用对普通发送与待发送卡片（pendingSend）两条路径都直接可用，发送逻辑无需改动。
-  async function uploadAttachment(item:MessageAttachment):Promise<{id:string,url:string}|null>{
-    try{
-      const dataUrl=item.dataUrl||''
-      const comma=dataUrl.indexOf(',')
-      if(comma<0)return null
-      const res=await apiFetch('/api/attachments',{method:'POST',credentials:'include',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:item.name,mime:item.type,data:dataUrl.slice(comma+1)})})
-      if(!res.ok)return null
-      const body=await res.json()
-      if(!body||!body.id||!body.url)return null
-      return {id:String(body.id),url:String(body.url)}
-    }catch{return null}
-  }
   async function loadFiles(list: FileList | null, imagesOnly=false) {
-    if(!list)return
-    const selected=Array.from(list).slice(0,8)
-    const loaded:MessageAttachment[]=[]
-    let uploadFailed=0
-    for(const file of selected){
-      if(imagesOnly&&!file.type.startsWith('image/'))continue
-      if(file.size>12*1024*1024){p.setChatError('单个文件不能超过 12 MB：'+file.name);continue}
-      const item:MessageAttachment={name:file.name,type:file.type||'application/octet-stream',size:file.size}
-      if(file.type.startsWith('image/')){
-        item.dataUrl=await new Promise<string>((resolve,reject)=>{const r=new FileReader();r.onload=()=>resolve(String(r.result));r.onerror=()=>reject(new Error('图片读取失败'));r.readAsDataURL(file)})
-        item.preview=URL.createObjectURL(file)
-        // 图片表情包（preview 本就是持久的 data:）不重复上传，保持既有链路。
-        if(needsUpload(item)){
-          const saved=await uploadAttachment(item)
-          if(saved){item.preview=saved.url;item.assetId=saved.id}
-          else uploadFailed++   // 降级：保留 blob: 本次会话仍可见，但刷新会失效，必须明示
-        }
-      } else if(supportedDocumentName(file.name)){
-        try{
-          const extracted=await extractDocumentText(file)
-          item.textContent=extracted.text
-          if(extracted.truncated)console.info('[attachments] extracted text truncated for',file.name)
-        }catch(error){
-          p.setChatError('文档读取失败：'+file.name+' · '+(error instanceof Error?error.message:'无法解析文档'))
-          continue
-        }
-      } else {
-        p.setChatError('暂不支持读取此文件格式：'+file.name)
-        continue
-      }
-      loaded.push(item)
+    if (!list) return
+    const loaded: MessageAttachment[] = []
+    for (const file of Array.from(list).slice(0, 8)) {
+      if (imagesOnly && !file.type.startsWith('image/')) continue
+      try { loaded.push(await readChatAttachment(file)) }
+      catch (error) { p.setChatError(file.name + ' · ' + (error instanceof Error ? error.message : '附件读取失败')) }
     }
-    // 附件持久化失败不再打断聊天：当前图片仍保留 dataUrl，可正常随本轮请求发送。
-    // 这里只记开发日志；不要把“云端失败”作为每次发图都会弹出的用户提示。
-    if(uploadFailed)console.warn('[attachments] persistence failed for',uploadFailed,'image(s); keeping in-session data only')
     setFiles(prev=>[...prev,...loaded].slice(0,8))
     if(imageInput.current)imageInput.current.value=''
     if(fileInput.current)fileInput.current.value=''

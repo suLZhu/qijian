@@ -1,8 +1,10 @@
+import { ChatDisplaySettings, useChatDisplay } from './ChatDisplay'
+import { formatMessageTime } from './chatDisplayPrefs.mjs'
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
-import { apiFetch, assetUrl } from './apiBase.mjs'
+import { assetUrl } from './apiBase.mjs'
 import { RichText } from './RichText'
 import { cleanupMessageText } from './messageCleanup.mjs'
-import { extractDocumentText, supportedDocumentName } from './documentText'
+import { readChatAttachment } from './chatAttachment'
 import { LEGACY_ASSISTANTS, migrateLocalStorage } from './assistantIdentity'
 import './LayoutPrototype.css'
 import { IconBook, IconPlug, IconBack, IconChevronRight, IconClose, IconHome, IconChat, IconMenu, IconPlus, IconSend, IconStop, IconSettings } from './icons'
@@ -18,7 +20,7 @@ import { RoomAssistantPreview } from './RoomAssistantPreview'
 type View = 'home' | 'chat' | 'room' | 'settings' | 'theme' | 'profile'
 type Person = string
 type AssistantView = { id: string; name: string }
-type MessageView = { role:string; content:string; id?:string; reasoning?:string; taskRunId?:string; contextNote?:string; taskDetails?:string; attachments?:Attachment[] }
+type MessageView = { at?: string; usage?: { at?: string; promptTokens?: number; completionTokens?: number }; role:string; content:string; id?:string; reasoning?:string; taskRunId?:string; contextNote?:string; taskDetails?:string; attachments?:Attachment[] }
 type ConversationView = { archived?: boolean; id: string; title: string; messages: MessageView[]; updatedAt?:string }
 type Attachment = { name:string; type:string; size:number; preview?:string; dataUrl?:string; textContent?:string; assetId?:string }
 type LayoutPrototypeProps = {
@@ -112,19 +114,8 @@ export default function LayoutPrototype(props:LayoutPrototypeProps = {}) {
     const added:Attachment[]=[]
     try {
       for(const file of Array.from(list).slice(0,8-attachments.length)){
-        if(file.size>12*1024*1024){setAttachmentError('文件超过 12 MB：'+file.name);continue}
-        const item:Attachment={name:file.name,type:file.type||'application/octet-stream',size:file.size}
-        if(file.type.startsWith('image/')){
-          item.dataUrl=await new Promise<string>((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(String(reader.result));reader.onerror=()=>reject(new Error('图片读取失败'));reader.readAsDataURL(file)})
-          item.preview=item.dataUrl
-          try {
-            const response=await apiFetch('/api/attachments',{method:'POST',credentials:'include',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:item.name,mime:item.type,data:item.dataUrl.split(',')[1]})})
-            if(response.ok){const data=await response.json();if(data.id&&data.url){item.assetId=String(data.id);item.preview=String(data.url)}}
-          }catch{/* Keep the in-memory image if the persistence endpoint is unavailable. */}
-        }else if(supportedDocumentName(file.name)){
-          item.textContent=(await extractDocumentText(file)).text
-        }else{setAttachmentError('暂不支持此文件格式：'+file.name);continue}
-        added.push(item)
+        try { added.push(await readChatAttachment(file)) }
+        catch (error) { setAttachmentError(file.name + ' · ' + (error instanceof Error ? error.message : '附件读取失败')) }
       }
       setAttachments(old=>[...old,...added].slice(0,8))
     }catch(error){setAttachmentError(error instanceof Error?error.message:'附件读取失败')}
@@ -135,7 +126,7 @@ export default function LayoutPrototype(props:LayoutPrototypeProps = {}) {
   const activeConversation = availableConversations.find(c=>!c.archived && c.id===data.activeIds[person]) || availableConversations.find(c=>!c.archived && c.id===conversation) || availableConversations.find(c=>!c.archived)
   const actualMessages = props.messages || activeConversation?.messages || stored<Record<string,MessageView[]>>('ai-home.messages', {})[activeConversation?.id || ''] || []
   const draft = props.draft ?? ''
-  const submit = async () => { const text=draft.trim(); if((!text&&!attachments.length)||readingFiles||!props.onSend)return; const result=await props.onSend(text,attachments);if(result==='ok')setAttachments([]) }
+  const submit = async () => { const text=draft.trim(); if((!text&&!attachments.length)||readingFiles||!props.onSend)return; const result=await props.onSend(text,attachments);if(result==='ok')setAttachments(old=>old.filter(attachment=>!attachments.includes(attachment))) }
   const [theme, setTheme] = useState('银杏奶灰')
   const mainRef = useRef<HTMLElement>(null)
   const chatRef = useRef<HTMLDivElement>(null)
@@ -143,6 +134,7 @@ export default function LayoutPrototype(props:LayoutPrototypeProps = {}) {
   const prependPosition = useRef<{ scope: string; height: number; top: number } | null>(null)
   const [historyWindow, setHistoryWindow] = useState({ scope: '', limit: 40 })
   const historyLimit = historyWindow.scope === scope ? historyWindow.limit : 40
+  const display = useChatDisplay()
   const stage = props.generationStage
   const showGeneration = props.sending && stage !== 'streaming'
   const generationLabel = stage === 'tools' ? '调用工具' : stage === 'connecting' ? '连接中' : '准备中'
@@ -244,10 +236,12 @@ export default function LayoutPrototype(props:LayoutPrototypeProps = {}) {
           <button className="qj-row" onClick={() => go('settings')}><span>记忆与记录</span><small>在设置中查看管理</small><i><IconChevronRight size={15}/></i></button>
         </div>
       </div>}
-      {view === 'chat' && <div className="qj-chat" ref={chatRef}>
+      {view === 'chat' && <div className="qj-chat" ref={chatRef} style={{ fontSize: display.fontSize }}>
         <div className="qj-chat-date">{activeConversation?.title || '暂无会话'}</div>
         {historyStart > 0 && <button type="button" className="qj-history-more" onClick={loadOlderMessages}>加载更早消息</button>}
-        {actualMessages.slice(historyStart).map((m,i)=><div key={m.id||historyStart+i} className={'qj-message '+(m.role==='user'?'mine':'from')+(m.id&&selected.includes(m.id)?' qj-message-selected':'')} onPointerDown={e=>{if(!m.id||selection?.scope===scope|| (e.target as HTMLElement).closest('button,input,textarea,summary'))return;cancelPress();pressStart.current={x:e.clientX,y:e.clientY};pressTimer.current=setTimeout(()=>{setMessageAction({scope,id:m.id!});pressTimer.current=null},500)}} onPointerMove={e=>{if(Math.hypot(e.clientX-pressStart.current.x,e.clientY-pressStart.current.y)>10)cancelPress()}} onPointerUp={cancelPress} onPointerCancel={cancelPress} onContextMenu={e=>{if(m.id){e.preventDefault();setMessageAction({scope,id:m.id})}}} onClick={()=>{if(m.id&&selection?.scope===scope)toggleSelected(m.id)}}>{m.role!=='user'&&<span className="qj-avatar">{displayName(person).slice(0,1)}</span>}<div className="qj-message-content">{m.taskRunId&&<details className="reasoning"><summary>定时任务</summary><div className="reasoning-body">{m.taskDetails||m.contextNote||'定时任务'}</div></details>}{m.role==='assistant'&&m.reasoning&&<details className="reasoning"><summary>思考过程</summary><div className="reasoning-body">{cleanupMessageText(m.reasoning)}</div></details>}{m.role==='assistant'?<RichText text={cleanupMessageText(m.content||'')}/>:<p>{m.content}</p>}{m.attachments?.map((a,j)=><div key={j} className="qj-message-attachment">{a.type?.startsWith('image/')&&(a.preview||a.dataUrl)?<img src={assetUrl(a.preview||a.dataUrl||'')} alt={a.name}/>:<span>{a.name}</span>}</div>)}{m.id&&messageAction?.scope===scope&&messageAction.id===m.id&&selection?.scope!==scope&&<div className="qj-message-actions"><button onClick={()=>{setMessageEdit({scope,id:m.id!,text:m.content});setMessageAction(null)}}>编辑</button><button onClick={()=>{setSelection({scope,ids:[m.id!]});setMessageAction(null)}}>多选</button>{m.role==='assistant'&&historyStart+i===actualMessages.length-1&&<button disabled={props.sending} onClick={()=>{setMessageAction(null);void props.onRegenerateMessage?.(m.id!)}}>重新生成</button>}<button onClick={()=>setMessageAction(null)}>关闭</button></div>}{m.id&&messageEdit?.scope===scope&&messageEdit.id===m.id&&<div className="qj-pending-edit"><textarea value={messageEdit.text} onChange={e=>setMessageEdit({...messageEdit,text:e.target.value})}/><button disabled={!messageEdit.text.trim()} onClick={()=>{if(props.onEditMessage?.(m.id!,messageEdit.text))setMessageEdit(null)}}>保存</button><button onClick={()=>setMessageEdit(null)}>取消</button></div>}</div></div>)}
+        {actualMessages.slice(historyStart).map((m,i)=><div key={m.id||historyStart+i} className={'qj-message '+(m.role==='user'?'mine':'from')+(m.id&&selected.includes(m.id)?' qj-message-selected':'')} onPointerDown={e=>{if(!m.id||selection?.scope===scope|| (e.target as HTMLElement).closest('button,input,textarea,summary'))return;cancelPress();pressStart.current={x:e.clientX,y:e.clientY};pressTimer.current=setTimeout(()=>{setMessageAction({scope,id:m.id!});pressTimer.current=null},500)}} onPointerMove={e=>{if(Math.hypot(e.clientX-pressStart.current.x,e.clientY-pressStart.current.y)>10)cancelPress()}} onPointerUp={cancelPress} onPointerCancel={cancelPress} onContextMenu={e=>{if(m.id){e.preventDefault();setMessageAction({scope,id:m.id})}}} onClick={()=>{if(m.id&&selection?.scope===scope)toggleSelected(m.id)}}>{m.role!=='user'&&display.assistantAvatar&&<span className="qj-avatar">{displayName(person).slice(0,1)}</span>}<div className="qj-message-content">{(display.time || (display.assistantName && m.role === 'assistant')) && <div className="qj-message-meta">
+          {display.assistantName && m.role === 'assistant' && displayName(person)} {display.time && formatMessageTime(m)}
+        </div>}{m.taskRunId&&<details className="reasoning"><summary>定时任务</summary><div className="reasoning-body">{m.taskDetails||m.contextNote||'定时任务'}</div></details>}{m.role==='assistant'&&display.showReasoning&&m.reasoning&&<details className="reasoning"><summary>思考过程</summary><div className="reasoning-body">{cleanupMessageText(m.reasoning)}</div></details>}{m.role==='assistant'?<RichText text={cleanupMessageText(m.content||'')}/>:<p>{m.content}</p>}{display.token && m.usage && <details className="reasoning"><summary>Token 用量</summary><div className="reasoning-body">输入 {m.usage.promptTokens ?? '—'} · 输出 {m.usage.completionTokens ?? '—'}</div></details>}{m.attachments?.map((a,j)=><div key={j} className="qj-message-attachment">{a.type?.startsWith('image/')&&(a.preview||a.dataUrl)?<img src={assetUrl(a.preview||a.dataUrl||'')} alt={a.name}/>:<span>{a.name}</span>}</div>)}{m.id&&messageAction?.scope===scope&&messageAction.id===m.id&&selection?.scope!==scope&&<div className="qj-message-actions"><button onClick={()=>{setMessageEdit({scope,id:m.id!,text:m.content});setMessageAction(null)}}>编辑</button><button onClick={()=>{setSelection({scope,ids:[m.id!]});setMessageAction(null)}}>多选</button>{m.role==='assistant'&&historyStart+i===actualMessages.length-1&&<button disabled={props.sending} onClick={()=>{setMessageAction(null);void props.onRegenerateMessage?.(m.id!)}}>重新生成</button>}<button onClick={()=>setMessageAction(null)}>关闭</button></div>}{m.id&&messageEdit?.scope===scope&&messageEdit.id===m.id&&<div className="qj-pending-edit"><textarea value={messageEdit.text} onChange={e=>setMessageEdit({...messageEdit,text:e.target.value})}/><button disabled={!messageEdit.text.trim()} onClick={()=>{if(props.onEditMessage?.(m.id!,messageEdit.text))setMessageEdit(null)}}>保存</button><button onClick={()=>setMessageEdit(null)}>取消</button></div>}</div></div>)}
         {showGeneration && <span className="qj-generation-status" role="status">
           <span className="qj-generation-dot" aria-hidden="true"/>{generationLabel}
         </span>}
@@ -273,7 +267,7 @@ export default function LayoutPrototype(props:LayoutPrototypeProps = {}) {
             section === '工具与扩展' ? <AdvancedSettingsPreview kind="tools" /> :
             section === '应用与设备' ? <AdvancedSettingsPreview kind="device" /> :
             section === '记忆与上下文' ? <ContentSettingsPreview type="memory" /> :
-            section === '聊天与消息' ? <ContentSettingsPreview type="chat" /> :
+            section === '聊天与消息' ? <ChatDisplaySettings compact /> :
             section === '诊断与维护' ? <ContentSettingsPreview type="diagnostic" /> :
             section === '房间与助手' ? <RoomAssistantPreview /> :
             <SettingsSectionsPreview section={section} onTheme={() => go('theme')} />}

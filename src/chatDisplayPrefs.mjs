@@ -4,6 +4,7 @@ export const CHAT_DISPLAY_KEY = 'ai-home.chatDisplay'
 export const CHAT_DISPLAY_EVENT = 'aihome:chatdisplay'
 
 export const DEFAULT_CHAT_DISPLAY = {
+  fontSize: 12,
   assistantAvatar: true,
   userAvatar: true,
   assistantName: false,
@@ -25,6 +26,7 @@ export function normalizeChatDisplay(raw) {
     if (typeof raw[k] === 'boolean') d[k] = raw[k]
   }
   if ([5,10,15,20].includes(Number(raw.toolRoundLimit))) d.toolRoundLimit = Number(raw.toolRoundLimit)
+  if ([12, 13, 14, 15, 16].includes(Number(raw.fontSize))) d.fontSize = Number(raw.fontSize)
   if (raw.timePos === 'above' || raw.timePos === 'below') d.timePos = raw.timePos
   return d
 }
