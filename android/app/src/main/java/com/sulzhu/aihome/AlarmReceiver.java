@@ -23,6 +23,10 @@ public class AlarmReceiver extends BroadcastReceiver {
             JSONObject item = new JSONObject(raw);
             String runId = item.optString("runId", "");
             if (runId.isEmpty()) return;
+            if (!SystemAlarms.isCurrent(context, runId)) {
+                Log.i("AiHome:gen", "task_alarm_stale runId=" + runId);
+                return;
+            }
             String key = "task:" + runId;
             if (SystemStore.wasDelivered(context, key)) return; // 重复广播 / 重启重放
 

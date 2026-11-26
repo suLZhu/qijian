@@ -172,6 +172,18 @@ final class SystemAlarms {
         return register(c, filter(c, SystemStore.plan(c), System.currentTimeMillis(), true));
     }
 
+    /** Reject a queued broadcast after a task was cancelled, paused or rescheduled. */
+    static synchronized boolean isCurrent(Context c, String runId) {
+        if (runId == null || runId.isEmpty()) return false;
+        JSONArray plan = SystemStore.plan(c);
+        for (int i = 0; i < plan.length(); i++) {
+            JSONObject item = plan.optJSONObject(i);
+            if (item != null && runId.equals(item.optString("runId", ""))
+                    && "scheduled".equals(item.optString("status", "scheduled"))) return true;
+        }
+        return false;
+    }
+
     /** 重复任务触发后，在原生层续排下一次（App 可能长期不打开）。 */
     static synchronized void scheduleNext(Context c, JSONObject item) {
         String previousRunId = item.optString("runId", "");

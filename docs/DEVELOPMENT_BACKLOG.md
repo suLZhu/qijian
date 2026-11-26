@@ -382,3 +382,9 @@
 - 构建通过：Android :app:compileDebugJavaWithJavac 离线通过；git diff --check 通过。
 - 自动化测试：此改动为 Android 原生生命周期，尚无设备级自动化验证。
 - 实机验收：未通过／待测；需 Ace 3 锁屏和系统后台启动限制验证。进程被杀后仍需真正的原生执行器。
+
+### 2026-11-26 原生闹钟旧任务校验
+- 代码已实现：AlarmReceiver 投递通知和保活前核对原生持久化计划中的 runId 与 scheduled 状态，取消／改期后滞留的广播直接丢弃。
+- 构建通过：Android :app:compileDebugJavaWithJavac 离线通过，git diff --check 通过。
+- 自动化测试：尚无 Android 闹钟竞态设备测试。
+- 实机验收：待 Ace 3 验证取消、改期和锁屏到点。进程被杀后本地模式的模型配置仍位于 WebView 本地存储，原生服务无法独立执行；需统一持久化与执行路径后再接入，不宣称已完成。
