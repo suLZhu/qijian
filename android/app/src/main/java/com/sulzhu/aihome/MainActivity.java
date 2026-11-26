@@ -48,10 +48,13 @@ import java.util.concurrent.Executors;
 public class MainActivity extends BridgeActivity {
     private static java.lang.ref.WeakReference<MainActivity> taskHost = new java.lang.ref.WeakReference<>(null);
 
-    static void dispatchTaskFire(String runId) {
+    static boolean hasTaskHost() { return taskHost.get() != null; }
+
+    static boolean dispatchTaskFire(String runId) {
         MainActivity host = taskHost.get();
-        if (host == null || runId == null || runId.isEmpty()) return;
+        if (host == null || runId == null || runId.isEmpty()) return false;
         host.evalJs("window.__aihomeTaskFire && window.__aihomeTaskFire(" + JSONObject.quote(runId) + ")");
+        return true;
     }
 
     // 不再把本 Activity 的 fontScale 固定为 1（那等于全局禁止用户放大字体）。

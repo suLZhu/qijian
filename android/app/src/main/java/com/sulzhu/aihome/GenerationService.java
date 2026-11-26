@@ -6,6 +6,8 @@ import android.app.Service;
 import android.content.Intent;
 import android.os.Build;
 import android.os.IBinder;
+import android.os.Handler;
+import android.os.Looper;
 import android.os.PowerManager;
 import android.util.Log;
 import androidx.annotation.Nullable;
@@ -24,6 +26,8 @@ public final class GenerationService extends Service {
     public static final String ACTION_STOP = "com.sulzhu.aihome.generation.STOP";
     private static final int FOREGROUND_ID = 73001;
     private PowerManager.WakeLock wakeLock;
+    private final Handler handler = new Handler(Looper.getMainLooper());
+    private final java.util.Map<String, Runnable> handoffTimeouts = new java.util.HashMap<>();
     private static GenerationService active;
     // A short request can finish before the queued service start reaches onStartCommand.
     // Keep that stop until its matching owner has been registered and promoted.
@@ -39,9 +43,15 @@ public final class GenerationService extends Service {
     // conversation when the latest generation finishes.
     private final java.util.LinkedHashMap<String, Intent> owners = new java.util.LinkedHashMap<>();
 
+    private void clearHandoff(String owner) {
+        Runnable timeout = handoffTimeouts.remove(owner);
+        if (timeout != null) handler.removeCallbacks(timeout);
+    }
+
     static void release(String owner) {
         GenerationService service = active;
         if (owner == null || owner.isEmpty()) return;
+        if (service != null) service.clearHandoff(owner);
         if (service == null || service.owners.remove(owner) == null) {
             if (pendingStarts.contains(owner)) cancelledStarts.add(owner);
             return;
@@ -97,6 +107,20 @@ public final class GenerationService extends Service {
             return START_NOT_STICKY;
         }
         pendingStarts.remove(owner);
+        // A fast WebView may claim the run before this alarm intent is handled.
+        // Never downgrade an active generation to a timed handoff.
+        if (intent.getBooleanExtra("alarmPending", false)
+                && owners.containsKey(owner)
+                && !owners.get(owner).getBooleanExtra("alarmPending", false)) return START_NOT_STICKY;
+        clearHandoff(owner);
+        if (intent.getBooleanExtra("alarmPending", false)) {
+            Runnable timeout = () -> {
+                Log.w("AiHome:gen", "task_handoff_timeout runId=" + owner);
+                release(owner);
+            };
+            handoffTimeouts.put(owner, timeout);
+            handler.postDelayed(timeout, 60000);
+        }
         owners.remove(owner);
         owners.put(owner, new Intent(intent));
         showOwner(intent);
@@ -127,10 +151,11 @@ public final class GenerationService extends Service {
         } catch (Exception ignored) { }
         PendingIntent content = PendingIntent.getActivity(this, FOREGROUND_ID, click, contentFlags);
 
+        boolean pending = intent != null && intent.getBooleanExtra("alarmPending", false);
         Notification n = new NotificationCompat.Builder(this, SystemNotifier.GENERATION_CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_stat_aihome)
-            .setContentTitle(assistant + " 正在回复")
-            .setContentText("切到后台也会继续生成")
+            .setContentTitle(assistant + (pending ? " 准备执行任务" : " 正在回复"))
+            .setContentText(pending ? "正在交接给助手" : "切到后台也会继续生成")
             .setContentIntent(content)
             .setOngoing(true)
             .setOnlyAlertOnce(true)
@@ -146,6 +171,8 @@ public final class GenerationService extends Service {
     @Override public void onDestroy() {
         if (active == this) active = null;
         owners.clear();
+        for (Runnable timeout : handoffTimeouts.values()) handler.removeCallbacks(timeout);
+        handoffTimeouts.clear();
         releaseWakeLock();
         stopForeground(true);
         super.onDestroy();

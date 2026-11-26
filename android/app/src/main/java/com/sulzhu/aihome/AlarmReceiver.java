@@ -4,6 +4,7 @@ import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
 import android.util.Log;
+import androidx.core.content.ContextCompat;
 
 import org.json.JSONObject;
 
@@ -55,7 +56,24 @@ public class AlarmReceiver extends BroadcastReceiver {
             // If the existing WebView is alive, settle this exact alarm now.
             // A killed process has no host; its persisted alarm remains a reminder
             // until a real background executor can read the task snapshot.
-            MainActivity.dispatchTaskFire(runId);
+            // Exact-alarm delivery is the opportunity to promote the already-live WebView
+            // before a background JS bridge call may be rejected by the OS.
+            if (MainActivity.hasTaskHost()) {
+                Intent handoff = new Intent(context, GenerationService.class);
+                handoff.setAction(GenerationService.ACTION_START);
+                handoff.putExtra("messageId", runId);
+                handoff.putExtra("assistantName", title);
+                handoff.putExtra("assistantId", assistantId);
+                handoff.putExtra("conversationId", item.optString("conversationId", ""));
+                handoff.putExtra("alarmPending", true);
+                GenerationService.expect(runId);
+                try { ContextCompat.startForegroundService(context, handoff); }
+                catch (Exception e) {
+                    GenerationService.forget(runId);
+                    Log.w("AiHome:gen", "task_handoff_service_failed runId=" + runId, e);
+                }
+                MainActivity.dispatchTaskFire(runId);
+            }
         } catch (Exception ignored) { }
     }
 }
