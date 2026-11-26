@@ -340,3 +340,9 @@
 - 用户已有云服务器。待第四批和正式功能验收后，评估将心潮·念作为可选自托管服务接入栖间；它自带 OB 记忆库，不能再建立一套重复的 OB 服务。
 - 接入前核对上游 4.2+ 自建系统接口、MCP/OAuth、实时动态桥与许可证；设计助手及会话隔离、数据写入规则、现有世界书/聊天记忆共存与旧数据迁移。现阶段未部署、未接线、未验收。
 - 第四批当前继续处理定时任务与自主生活。Android 原生闹钟已能到点通知，但本地模式锁屏时模型仍依赖 WebView 恢复前台；下阶段围绕原生后台执行与持久结果回写，不能把通知当作生成成功。
+
+### 第 4 批：后台生成实现依据（Operit / dsh-Go 源码核对）
+- Operit 的 AIForegroundService 注释明确说明服务只用常驻通知提高进程优先级，实际聊天工作由别处执行；不能把其通知实现误当后台执行器。参考 AAswordman/Operit 的 app/src/main/java/com/ai/assistance/operit/api/chat/AIForegroundService.kt。
+- dsh-Go 的 DshService 在前台服务中持有本机引擎、PARTIAL_WAKE_LOCK、网络回调，并以有效持久快照有条件 START_STICKY 恢复；作者的 docs/design/background-execution.md 明确区分重启引擎与续跑对话，不能声称抗强退或自动续跑任务。
+- 栖间 GenerationService 当前只保住已经由 WebView 发起的回复。AlarmReceiver 仅通知，App.tsx 在 document.hidden 时主动跳过 /api/tasks/run，localBackend.mjs 又只读 WebView localStorage 和 IndexedDB；因此仅增加唤醒锁或让隐藏页定时器继续运行不能保证锁屏或进程被回收后的模型结果。
+- 落地要求：复用现有任务 runId、权限、模型路由、原会话与收件箱确认链路；执行者须能在 UI 不存在时读取持久配置、发真实模型请求、原子写入结果，并在重启后区分已完成、未开始和结果未知。Android 服务类型、后台启动和设备锁屏需实机检验。当前仅完成源码核对，后台生成未实现。
