@@ -445,7 +445,7 @@ async function runLocalConversationTask(task, nowMs) {
       const state = readJSON(K.state, {}) || {}
       const conversations = state.conversations?.[task.person] || []
       const conversation = conversations.find(item => item?.id === task.conversation_id)
-      if (!conversation) return
+      if (!conversation) throw new Error('绑定会话不可用，任务已暂停')
       const bindings = readJSON('ai-home.bindings', state.bindings || {}) || {}
       const binding = bindings[task.person] || {}
       const profiles = readJSON('ai-home.modelProfiles', state.modelProfiles || [])

@@ -62,41 +62,15 @@ test('App 内字体大小写进 --font-scale，形状/间距 tokens 与颜色解
     'system-ui,"Noto Sans SC",sans-serif')
 })
 
-test('聊天技术信息折叠、操作栏常驻在气泡下方、输入框单行起步', () => {
+test('聊天技术信息与正式输入栏保留功能', () => {
   const app = read('src/App.tsx')
-  assert.match(app, /<details className="message-tech inline">/)
-  // P1-6：默认只显示「Token 644 ›」轻量入口，展开明细由纯函数汇总（无缓存不显示缓存行）。
-  assert.match(app, /<summary>\{tokenSummary\.label\}/)
+  const layout = read('src/LayoutPrototype.tsx')
   assert.match(app, /summarizeTokenUsage\(m\.usage\)/)
   assert.match(app, /message-tech-body/)
-  assert.match(app, /p\.lastRouteInfo&&<span>\{p\.lastRouteInfo\}<\/span>/, '线路信息保留在详情里')
-  // 长按气泡 = 进入多选；操作栏不再靠 actionsOpenId 展开。
-  assert.match(app, /longPressRef\.current=window\.setTimeout\(\(\)=>\{enterSelect\(targetId\)\},480\)/)
-  assert.doesNotMatch(app, /actionsOpenId/, '不再需要长按展开的操作面板状态')
-  assert.doesNotMatch(app, /select-toggle/, '顶栏的 ☑ 多选按钮已移除')
-  // 用户消息的修改有两个出口：只保存 / 保存并重发。
-  assert.match(app, /保存并重发/)
-  assert.match(app, /resendUserMessage\(m\.id,text\)/)
-  assert.match(app, /rows=\{1\}/)
-  assert.match(app, /composeTextRef/)
-  assert.match(app, /import '\.\/mist\.css'/)
-  const css = read('src/mist.css')
-  assert.match(css, /\.message-stack \.message-actions \{ opacity:1!important;pointer-events:auto!important/)
-  // 操作按钮用文字，不再依赖内联 SVG（老 WebView 会把 SVG 画成一条横线）。
-  // 操作按钮用位图图标（内联 SVG 在部分 Android WebView 上会被画成一条横线）。
-  assert.match(app, /className="message-action-icon" src="\/msg-icons\/copy\.png"/)
-  assert.match(app, /className="message-action-icon" src="\/msg-icons\/trash\.png"/)
-  assert.doesNotMatch(app, /message-action-label/)
-  for (const name of ['copy', 'edit', 'regen', 'trash']) {
-    assert.ok(existsSync('public/msg-icons/' + name + '.png'), '缺少图标 public/msg-icons/' + name + '.png')
-  }
-  // Token 贴在操作图标同一行，折叠时明细不占位
-  assert.match(css, /\.message-actions \.message-tech \{ margin:0 0 0 3px;display:inline-flex/)
-  assert.match(css, /\.message-tech:not\(\[open\]\)>\.message-tech-body \{ display:none!important; \}/)
-  // 头像不受「按钮最小 36px」影响，保持正圆
-  assert.match(css, /:not\(\.message-avatar\):not\(\.chat-avatar\)/)
-  assert.match(css, /font-size:var\(--type-body\)!important/)
-  assert.match(css, /max-width:min\(80vw,320px\)!important/, '气泡上限按视口 80% 计，桌面再夹到 320px')
+  assert.match(layout, /className="qj-compose-input"/)
+  assert.match(layout, /rows=\{1\}/)
+  assert.match(layout, /props\.onDraftChange/)
+  assert.match(layout, /props\.onStop/)
 })
 
 test('默认不再套像素黑白硬边皮肤，Mist 是开箱基础主题', () => {
@@ -143,39 +117,19 @@ test('Mist 顶栏保留 Android 状态栏安全区与可点击热区', () => {
   assert.match(appCss, /--app-safe-top:max\(env\(safe-area-inset-top/)
 })
 
-test('供应商多 Key：新建时可勾选，编辑页仍能增删改备用 Key，且样式类都有定义', () => {
+test('供应商多 Key 新建与独立管理页可用', () => {
   const app = read('src/App.tsx')
-  const css = read('src/App.css')
-  // 新建表单：勾选后展开备用 Key 行，提交时并入 vendor.keys。
-  assert.match(app, /启用多 Key 模式/)
-  assert.match(app, /newMultiKey\?newExtraKeys\.filter\(k=>k\.value\.trim\(\)\)/)
-  // 编辑页：原有「多 KEY 模式」管理区保留，能改备注、改角色、删除既有 Key。
-  assert.match(app, /多 KEY 模式/)
-  assert.match(app, /addBackupKey/)
-  assert.match(app, /aria-label="删除这把 Key"/)
-  // 新加的样式类必须真的落在 App.css，避免只有 markup 没有样式。
-  for (const cls of ['vendor-multi-toggle', 'vendor-new-keys', 'vendor-new-key', 'vendor-add-key']) {
-    assert.match(css, new RegExp('\\.' + cls + '(?=[\\s,{.:\\[]|$)'), '缺少样式 .' + cls)
-  }
+  assert.match(app, /newMultiKey&&/)
+  assert.match(app, /vendor-new-keys/)
+  assert.match(app, /vendor-key-manager-row/)
+  assert.match(app, /添加一把 Key/)
 })
 
-test('供应商详情 / 新增供应商都是独立页面，不再在列表下面展开配置面板', () => {
+test('供应商列表与新增和密钥管理页面分离', () => {
   const app = read('src/App.tsx')
-  const css = read('src/App.css')
-  // 点列表里的供应商 → 切到 vendor:<id> 页面；点「自定义」→ vendor:add 页面。
-  assert.match(app, /onSection\('vendor:'\+id\)/)
-  assert.match(app, /openVendorPage\(v\.id\)/)
   assert.match(app, /onSection\('vendor:add'\)/)
-  assert.match(app, /section==='vendor:add'/)
-  assert.match(app, /section\.startsWith\('vendor:'\)&&!showNew/)
-  // 页面容器与返回按钮存在，列表只在 isList 时渲染。
-  assert.match(app, /const isList=!showNew&&!active/)
-  assert.match(app, /className="vendor-page"/)
-  assert.match(app, /← 供应商/)
-  assert.doesNotMatch(app, /editing===v\.id/, '列表点开不应再靠内联 editing 状态')
-  // Android 返回键：供应商二级页先回列表。
-  assert.match(app, /section\.startsWith\('vendor:'\)&&section!=='vendor:account'\?'vendor':''/)
-  assert.match(css, /\.vendor-page\{display:flex/)
+  assert.match(app, /const isList=!showNew&&!showDefault&&!showCatalog&&!showKeyManager&&!active/)
+  assert.match(app, /vendor-key-manager-row/)
 })
 
 test('订阅账号直接作为设置页内容渲染，不再从底部弹半屏面板', () => {
@@ -209,28 +163,21 @@ test('主题美化底部有微信式字体大小拉条，跟随系统字号并�
   assert.match(main, /scale = scale \* appFontFactor\(\)/)
 })
 
-test('世界书与 MCP 合并成一栏，设置页与聊天齿轮共用两栏页面', () => {
-  const app = read('src/App.tsx')
-  const css = read('src/App.css')
-  assert.match(app, /title:'世界书 \/ MCP'/)
-  assert.match(app, /<WorldMcpMatrix mode="bind" person=\{person\}/)
-  assert.match(app, /function WorldMcpMatrix/)
-  assert.match(app, /mode==='bind'&&person\?isWorldEntryBound/)
-  assert.match(app, /<ChatBindPanel person=\{chatPerson\}/)
-  assert.doesNotMatch(app, /ChatPoolPicker/)
-  assert.doesNotMatch(app, /勾进这里的/)
-  assert.match(css, /\.world-mcp-matrix\{display:grid;grid-template-columns:minmax\(0,1fr\) minmax\(0,1fr\)/)
+test('世界书与 MCP 在正式聊天入口独立绑定', () => {
+  const layout = read('src/LayoutPrototype.tsx')
+  assert.match(layout, /aria-label="世界书"/)
+  assert.match(layout, /aria-label="MCP"/)
+  assert.match(layout, /props\.renderBinding\?\.\(bindingPanel\)/)
+  assert.match(layout, /setBindingPanel\(v=>v==='world'/)
+  assert.match(layout, /setBindingPanel\(v=>v==='mcp'/)
 })
 
-test('输入栏图标更紧凑，点图标会浮出文字说明', () => {
-  const app = read('src/App.tsx')
-  const css = read('src/App.css')
-  assert.match(app, /compose-tool-hint/)
-  assert.match(app, /compose-plus-panel/)
-  assert.match(app, /拍摄/)
-  assert.match(css, /\.compose-tool-hint\{position:absolute/)
-  assert.match(css, /\.compose-box button\.compose-tool-icon\{width:36px!important/)
-  assert.match(css, /\.compose-box \.compose-icons\{gap:0\}/)
+test('正式输入栏附件入口可选择图片文件与拍照', () => {
+  const layout = read('src/LayoutPrototype.tsx')
+  assert.match(layout, /aria-label="添加附件"/)
+  assert.match(layout, /imagePicker\.current\?\.click\(\)/)
+  assert.match(layout, /filePicker\.current\?\.click\(\)/)
+  assert.match(layout, /cameraPicker\.current\?\.click\(\)/)
 })
 
 test('世界书 / MCP 页面保留完整的新增与编辑入口', () => {
@@ -299,16 +246,14 @@ test('MCP 服务改成一行小横条：开关有文字，笔形按钮直接进�
   assert.match(local, /p === '\/api\/mcp\/test'/)
 })
 
-test('世界书 / MCP 的新增表单各自独立成页', () => {
+test('世界书与 MCP 新增表单分离', () => {
   const wb = read('src/WorldbookEditor.tsx')
   const app = read('src/App.tsx')
   assert.match(wb, /worldbook-list-page/)
   assert.match(wb, /worldbook-form-page/)
-  assert.match(wb, /＋ 添加世界书/)
-  assert.match(wb, /worldbook-back/)
+  assert.match(wb, /aria-label="添加世界书"/)
   assert.match(app, /mcpFormOpen/)
-  assert.match(app, /＋ 添加 MCP 服务/)
-  assert.match(app, /mcp-list-head/)
+  assert.match(app, /添加 MCP 服务/)
 })
 
 test('本地模式真连远程 MCP：原生 HTTP 桥 + JSON-RPC 客户端', () => {

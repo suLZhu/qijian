@@ -303,3 +303,18 @@ test('到期提醒使用原助手的订阅令牌，代理错误时保留任务',
   assert.equal((await call('/api/inbox')).data.messages.length, 0)
   assert.equal(globalThis.fetch.mock.callCount(), 0)
 })
+
+
+test('自然提醒绑定会话消失时暂停并保留任务，不向其他会话投递', async () => {
+  localStorage.clear()
+  const person = 'assistant-001'
+  await put('/api/state', { state: { conversations: { [person]: [] } } })
+  const created = await post('/api/workflows/manage', { person, action: 'create', title: '提醒喝水', prompt: '提醒阿懒喝水', runAt: iso(T0 - 1000), temporary: true, conversationId: 'missing' })
+  assert.equal(created.status, 201)
+  await post('/api/tasks/run', { now: iso(T0), conversationIds: { [person]: ['missing'] } })
+  const tasks = (await call('/api/tasks?person=' + person)).data.tasks
+  assert.equal(tasks.length, 1)
+  assert.equal(tasks[0].status, 'paused')
+  assert.match(tasks[0].last_error, /绑定会话不可用/)
+  assert.equal((await call('/api/inbox')).data.messages.length, 0)
+})
