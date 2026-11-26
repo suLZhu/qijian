@@ -13,6 +13,7 @@
 //  - cancellation is cooperative via AbortController.
 import { chat } from './OpenAICompatibleProvider.mjs'
 import { createToolRegistry } from './ToolRegistry.mjs'
+import { settings as proactiveSettings } from '../../proactive.mjs'
 import { executeToolCall } from './ToolExecutor.mjs'
 import { getAgentRun, finishAgentRun } from './AgentRunStore.mjs'
 import { buildTimeContext, timeContextText, normalizeTimeZone, DEFAULT_TIME_ZONE } from '../../timeContext.mjs'
@@ -117,7 +118,7 @@ export async function runAgent(ctx, run, { signal, timedOut } = {}) {
     const registry = await createToolRegistry({
       db,
       person: run.assistantId,
-      allowedTools: run.source === 'proactive' ? ['memory_search'] : null,
+      allowedTools: run.source === 'proactive' ? (proactiveSettings(db, run.assistantId)?.allow_memory_search ? ['memory_search'] : []) : null,
       mcpList: row => ctx.mcpList(row),
       mcpCall: (row, name, args) => ctx.mcpCall(row, name, args),
     })

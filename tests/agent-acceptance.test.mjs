@@ -18,6 +18,7 @@ import { initToolPolicies, setPolicy } from '../src/server/agent/ToolPolicy.mjs'
 import { decideApproval, pendingList } from '../src/server/agent/ApprovalGate.mjs'
 import { createTaskScheduler } from '../src/server/agent/TaskScheduler.mjs'
 import { createToolRegistry } from '../src/server/agent/ToolRegistry.mjs'
+import { executeToolCall } from '../src/server/agent/ToolExecutor.mjs'
 import { createFakeMcpServer, fakeMcpConnection } from '../src/server/fakeMcp.mjs'
 import { initProactive, isQuietHour, configure as configureProactive, wake as wakeProactive, proactiveTokenUsage } from '../src/proactive.mjs'
 import { initProactiveHeat, dispatchProactiveRun, recoverInterruptedWakes } from '../src/server/agent/ProactiveHeat.mjs'
@@ -703,5 +704,55 @@ test('自主生活 Token 警戒值按实际上报用量阻止后续唤醒，缺�
   const missing = createAgentRun(db, { assistantId: PERSON, source: 'proactive', prompt: '旧供应商' })
   finishAgentRun(db, missing.id, { status: 'failed', errorMessage: '无用量回报' })
   assert.equal(wakeProactive(db, PERSON, {manual: true,now}).reason, 'usage_unavailable')
+  db.close()
+})
+
+
+test('关闭主动聊天权限后不唤醒，独立关闭记忆读取不影响纯聊天', async () => {
+  const db = makeDb()
+  initProactive(db)
+  const base = { enabled: true, mode: 'natural', quiet_start: 0, quiet_end: 0, interval_hours: 2, daily_wake_limit: 6, daily_token_limit: 12000 }
+  configureProactive(db, PERSON, { ...base, allow_chat: 0, allow_memory_search: 1 })
+  assert.equal(wakeProactive(db, PERSON, {manual: true}).reason, 'chat_not_allowed')
+  configureProactive(db, PERSON, { ...base, allow_chat: 1, allow_memory_search: 0 })
+  assert.equal(db.prepare('SELECT allow_memory_search FROM proactive_settings WHERE person=?').get(PERSON).allow_memory_search, 0)
+  const registry = await createToolRegistry({ db, person: PERSON, allowedTools: [], mcpList: () => { throw Error('MCP should not be listed') }, mcpCall: () => {} })
+  assert.equal(registry.definitions.length, 0)
+  assert.equal(registry.describe('memory_search'), null)
+  assert.equal(wakeProactive(db, PERSON, {manual: true}).queued, true)
+  db.close()
+})
+
+
+test('撤销记忆读取权限后真实自主模型请求不包含任何工具', async () => {
+  const db = makeDb()
+  initProactive(db)
+  initProactiveHeat(db)
+  configureProactive(db, PERSON, { enabled: true, mode: 'natural', quiet_start: 0, quiet_end: 0, interval_hours: 2, daily_wake_limit: 6, daily_token_limit: 12000, allow_chat: 1, allow_memory_search: 0 })
+  const at = new Date().toISOString()
+  db.prepare(`INSERT INTO proactive_events (id,person,reason,mood,status,created_at,updated_at)
+    VALUES ('evt-read-off',?, 'manual', 'calm', 'pending', ?, ?)`).run(PERSON, at, at)
+  const requests = installModel([textReply('阿懒，今天过得怎么样？')])
+  const runner = new AgentRunner(makeCtx(db, createFakeMcpServer()))
+  dispatchProactiveRun({db,runner,bus:new AgentEventBus(),person:PERSON,eventId:'evt-read-off',reason:'manual',deliver:()=>{}})
+  assert.ok(await waitFor(() => db.prepare("SELECT status FROM proactive_events WHERE id='evt-read-off'").get().status !== 'pending'))
+  assert.equal(requests.length, 1)
+  assert.equal(requests[0].tools, undefined)
+  db.close()
+})
+
+
+test('模型请求在途时撤销记忆权限，调用前重新检查并记录拒绝', async () => {
+  const db = makeDb()
+  initProactive(db)
+  const base = { enabled: true, mode: 'natural', quiet_start: 0, quiet_end: 0, interval_hours: 2, daily_wake_limit: 6, daily_token_limit: 12000 }
+  configureProactive(db, PERSON, { ...base, allow_memory_search: 1 })
+  const registry = await createToolRegistry({ db, person: PERSON, allowedTools: ['memory_search'], mcpList: () => [], mcpCall: () => {} })
+  const run = createAgentRun(db, { assistantId: PERSON, source: 'proactive', prompt: '看看记忆' })
+  configureProactive(db, PERSON, { ...base, allow_memory_search: 0 })
+  const result = await executeToolCall({ db, bus: new AgentEventBus(), registry, run, round: 1, callId: 'call-1', name: 'memory_search', rawArgs: JSON.stringify({query:'阿懒'}), signal: new AbortController().signal })
+  assert.equal(result.ok, false)
+  assert.match(result.content, /没有读取记忆的权限/)
+  assert.ok(listToolLogs(db, { person: PERSON }).some(row => row.errorCode === 'PROACTIVE_PERMISSION_REVOKED'))
   db.close()
 })

@@ -157,7 +157,7 @@ function settleEvent({ db, bus, deliver, person, eventId, finished }) {
   const event = db.prepare('SELECT status FROM proactive_events WHERE id=? AND person=?').get(eventId, person)
   const config = proactiveSettings(db, person)
   if (!event || event.status !== 'pending') return
-  if (!config?.enabled || isQuietHour(config, new Date(), proactiveTimeZone(db))) {
+  if (!config?.enabled || !config.allow_chat || isQuietHour(config, new Date(), proactiveTimeZone(db))) {
     markEvent(db, eventId, 'dismissed')
     bus.publish({ type: 'proactive_settled', eventId, person, status: 'dismissed' })
     return

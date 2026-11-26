@@ -52,6 +52,16 @@ export async function executeToolCall({ db, bus, registry, run, round, callId, n
     eventId: `${run.id}:${round}:${callId}`.slice(0, 120),
   }
 
+  if (run.source === 'proactive') {
+    const permission = db.prepare('SELECT enabled, allow_memory_search FROM proactive_settings WHERE person=?').get(person)
+    if (!permission?.enabled || !permission.allow_memory_search || name !== 'memory_search') {
+      const log = createToolLog(db, logInput)
+      finishToolLog(db, log.id, { status: 'cancelled', errorCode: 'PROACTIVE_PERMISSION_REVOKED', errorMessage: '自主行动的记忆读取权限已关闭' })
+      bus.publish({ type: 'tool_finished', runId: run.id, logId: log.id, tool: name, status: 'cancelled' })
+      return { ok: false, content: '[权限] 自主行动没有读取记忆的权限。' }
+    }
+  }
+
   if (mode === 'deny') {
     const log = createToolLog(db, logInput)
     finishToolLog(db, log.id, { status: 'cancelled', errorCode: 'POLICY_DENIED', errorMessage: '工具权限策略拒绝了这次调用' })
