@@ -462,7 +462,7 @@ const apiServer = createServer(async (req, res) => {
       // 订阅账号：ChatGPT/Codex、Claude、Grok 的协议和 OpenAI 兼容接口不同，走专用适配器。
       if (b.subscriptionProtocol) {
         // 与标准链路一致：每次请求都用当前时间重新生成时间上下文。
-        if (b.body && Array.isArray(b.body.messages)) {
+        if (b.timeEnabled !== false && b.body && Array.isArray(b.body.messages)) {
           b.body.messages = injectTimeContext(b.body.messages, new Date(), b.timeZone)
         }
         const result = await handleSubscriptionChat({
@@ -483,7 +483,7 @@ const apiServer = createServer(async (req, res) => {
       // 没有 routes 时沿用下面的老链路，多 KEY 行为与旧客户端完全一致。
       if (Array.isArray(b.routes) && b.routes.length) {
         const result = await runRouteChat({
-          routes: b.routes, body: b.body, timeZone: b.timeZone,
+          routes: b.routes, timeEnabled: b.timeEnabled, body: b.body, timeZone: b.timeZone,
           signal: controller.signal, fetchImpl: directFetch, subscriptionFetchImpl: subscriptionFetch,
         })
         if (!result.ok) {
@@ -522,7 +522,7 @@ const apiServer = createServer(async (req, res) => {
       // 作为独立的 system 消息放在最前面；不覆盖人物设定/世界书/长期记忆。
       // 流式聊天与工具调用后的续轮都是独立的 /api/chat 请求，因此每轮都拿到当前时间。
       // 前端可在请求体外带 timeZone（IANA 时区名），非法或缺省回退 Asia/Shanghai。
-      chatBody.messages = injectTimeContext(chatBody.messages, new Date(), b.timeZone)
+      if (b.timeEnabled !== false) chatBody.messages = injectTimeContext(chatBody.messages, new Date(), b.timeZone)
       const target = /^https?:\/\//i.test(String(b.chatUrl || ''))
         ? String(b.chatUrl).trim()
         : /\/chat\/completions$/.test(raw) ? raw : raw.endsWith('/v1') ? raw + '/chat/completions' : raw + '/v1/chat/completions'

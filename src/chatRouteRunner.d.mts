@@ -32,6 +32,7 @@ export declare function routeChatTarget(route: ChatRoute): string
 export declare function runRouteChat(args: {
   routes?: unknown
   body?: Record<string, unknown>
+  timeEnabled?: boolean
   timeZone?: string
   signal?: AbortSignal | null
   subscriptionFetchImpl?: typeof fetch

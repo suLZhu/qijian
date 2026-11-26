@@ -177,3 +177,17 @@ test('订阅限流后使用普通备用站自己的 Key，代理故障直接报�
   assert.match(blocked.error, /代理不可用/)
   assert.equal(direct, 1)
 })
+
+test('关闭时间注入后，线路请求保留原消息', async () => {
+  const messages = [{ role: 'user', content: '你好' }]
+  const result = await runRouteChat({
+    routes: [{ routeId: 'a', endpoint: 'https://relay.test/v1', apiKeys: ['key'] }],
+    body: { model: 'model', messages },
+    timeEnabled: false,
+    fetchImpl: async (_url, init) => {
+      assert.deepEqual(JSON.parse(init.body).messages, messages)
+      return new Response('{}')
+    },
+  })
+  assert.equal(result.ok, true)
+})

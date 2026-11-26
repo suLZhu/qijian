@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, type ReactNode } from 'react'
 import { ChatDisplaySettings } from './ChatDisplay'
 import './ContentSettingsPreview.css'
 
@@ -51,7 +51,7 @@ const entries = [
   {id:'b',title:'页面设计习惯',desc:'界面保持紧凑，返回时保留位置'},
   {id:'c',title:'重要约定',desc:'定时任务要自然地发消息，不朗读任务描述'},
 ]
-export function ContentSettingsPreview({ type }: {type:'memory'|'chat'|'diagnostic'}) {
+export function ContentSettingsPreview({ type, renderWorldbook }: {type:'memory'|'chat'|'diagnostic'; renderWorldbook?:()=>ReactNode}) {
   const [topic, setTopic] = useState('')
   const [dialog, setDialog] = useState<Dialog|null>(null)
   const [who,setWho] = useState<'小晏'|'言朔'>('小晏')
@@ -67,11 +67,12 @@ export function ContentSettingsPreview({ type }: {type:'memory'|'chat'|'diagnost
   return <div className="qj-content-page">
     <header className="qj-content-title">
       {topic&&<button className="qj-content-back" onClick={()=>setTopic('')}>‹ 返回分类</button>}
-      <h2>{topic||title}</h2><p>交互布局预览 · 模拟数据不会写入真实设置</p>
+      <h2>{topic||title}</h2>{topic!=='世界书'&&<p>交互布局预览 · 模拟数据不会写入真实设置</p>}
     </header>
     {!topic && groups.map(group=><section className="qj-content-group" key={group.title}><h3>{group.title}</h3><div className="qj-content-list">{group.rows.map(x=>previewRow(x.name,x.desc,()=>open(x.name)))}</div></section>)}
     {!!topic && <>
-      {type==='memory' && ['记忆条目','记忆搜索','世界书'].includes(topic) ? <>
+      {type==='memory' && topic==='世界书' && renderWorldbook?.()}
+      {type==='memory' && ['记忆条目','记忆搜索'].includes(topic) ? <>
         <div className="qj-content-tabs">{(['小晏','言朔'] as const).map(x=><button key={x} className={who===x?'active':''} onClick={()=>setWho(x)}>{x}</button>)}</div>
         <input className="qj-content-input" placeholder={'搜索'+topic+'（演示）'} value={search} onChange={e=>setSearch(e.target.value)}/>
         <div className="qj-content-list">{entries.filter(x=>(x.title+x.desc).includes(search)).map(x=>previewRow(x.title,x.desc,()=>setDialog({name:x.title,desc:'查看内容、修改或删除时，正式版将打开对应助手的真实条目。',choices:['预览编辑','预览删除']})))}</div>

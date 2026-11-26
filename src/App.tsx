@@ -1541,10 +1541,12 @@ export default function App() {
       for(const e of matched.filter(e=>e.target==='user'&&e.position==='depth').slice(0,4)){const at=Math.max(system?1:0,requestMessages.length-1-Math.max(0,e.depth));requestMessages.splice(at,0,{role:'user',content:'【世界书：'+clipContextText(e.title,120)+'】\n'+clipContextText(e.content,1800)})}
       // Load tools only from the active character's server-side MCP bindings.
       const toolRoutes=new Map<string,{id:string;person:Person;name:string;connectionName:string}>()
+      const chatPrefs = loadChatDisplay()
       const openAITools:any[]=[]
       let mcpToolSchemaChars=0
       let mcpToolCount=0
       // The active assistant may manage only worldbook entries bound to itself.
+      if (chatPrefs.toolsEnabled) {
       openAITools.push({type:'function',function:{name:'worldbook_create_entry',description:'在当前助手自己的世界书中新增条目。仅当用户明确要求记录或更新世界设定时使用；不要写入用户未确认的重大设定。',parameters:{type:'object',properties:{title:{type:'string'},keywords:{type:'string'},content:{type:'string'},always:{type:'boolean'},enabled:{type:'boolean'}},required:['title','keywords','content'],additionalProperties:false}}})
       openAITools.push({type:'function',function:{name:'worldbook_search_entries',description:'搜索当前助手有权限访问的世界书条目。',parameters:{type:'object',properties:{query:{type:'string'}},required:['query'],additionalProperties:false}}})
       openAITools.push({type:'function',function:{name:'worldbook_update_entry',description:'更新当前助手已绑定的世界书条目；必须先搜索并使用准确条目 ID。',parameters:{type:'object',properties:{id:{type:'string'},title:{type:'string'},keywords:{type:'string'},content:{type:'string'},always:{type:'boolean'},enabled:{type:'boolean'}},required:['id'],additionalProperties:false}}})
@@ -1617,11 +1619,12 @@ export default function App() {
           }
         }
       } catch { /* MCP is optional; continue with normal model chat. */ }
-      const toolBudget=createToolExecutionBudget({roundLimit:loadChatDisplay().toolRoundLimit})
+      }
+      const toolBudget=createToolExecutionBudget({roundLimit:chatPrefs.toolRoundLimit})
       for(let round=0;round<toolBudget.roundLimit&&!finished;round++){
         const requestBody:any={model:activeModel.model.trim(),messages:requestMessages,stream:true,stream_options:{include_usage:true}}
         if(openAITools.length){requestBody.tools=openAITools;requestBody.tool_choice='auto'}
-        const chatProxy=()=>apiFetch('/api/chat',{method:'POST',credentials:'include',headers:{'Content-Type':'application/json'},signal:abortController.signal,body:JSON.stringify({endpoint:activeModel.endpoint.trim(),chatUrl:activeChatUrl,apiKey:activeApiKey.trim(),apiKeys:apiKeyCandidates,timeZone,body:requestBody,...(subscriptionProtocol?{subscriptionProtocol,subscriptionAccountId}:{}),...(routeMode?{routes:routePlan}:{})})})
+        const chatProxy=()=>apiFetch('/api/chat',{method:'POST',credentials:'include',headers:{'Content-Type':'application/json'},signal:abortController.signal,body:JSON.stringify({endpoint:activeModel.endpoint.trim(),chatUrl:activeChatUrl,apiKey:activeApiKey.trim(),apiKeys:apiKeyCandidates,timeZone,timeEnabled:chatPrefs.timeEnabled,body:requestBody,...(subscriptionProtocol?{subscriptionProtocol,subscriptionAccountId}:{}),...(routeMode?{routes:routePlan}:{})})})
         if(!upstreamStartedAt){
           preflightFinishedAt=performance.now()
           upstreamStartedAt=preflightFinishedAt
@@ -1668,6 +1671,10 @@ export default function App() {
         if(reasoningTail){thinking+=reasoningTail;updateActiveConversationMessages(target,prev=>prev.map(m=>m.id===assistantMessageId?{...m,reasoning:thinking}:m),sendConversationId)}
         const toolCalls=Object.keys(calls).map(k=>calls[Number(k)]).filter(c=>c.id&&c.function.name)
         if(!toolCalls.length){finished=true;break}
+        const allowedTools = new Set(openAITools.map(tool => tool.function.name))
+        if (!chatPrefs.toolsEnabled || toolCalls.some(call => !allowedTools.has(call.function.name))) {
+          throw new Error('模型请求了本轮未启用的工具')
+        }
         setGenerationStages(prev=>({...prev,[sendScope]:'tools'}))
         requestMessages.push({role:'assistant',content:roundText||null,tool_calls:toolCalls})
         for(const call of toolCalls){
@@ -2303,6 +2310,7 @@ export default function App() {
     onDraftChange={v=>setDraft(v)}
     onSend={prototypeSend}
     renderSubscription={()=> <SubscriptionAccounts vendors={vendors} setVendors={setVendors} setModelProfiles={setModelProfiles} subscriptions={subscriptions} setSubscriptions={setSubscriptions}/>}
+    renderResource={kind=> <ResourceLibrary key={kind} only={kind} worldEntries={worldEntries} setWorldEntries={setWorldEntries} modelProfiles={modelProfiles} setModelProfiles={setModelProfiles} bindings={bindings} setBindings={setBindings} displayName={displayName}/>}
     renderTasks={target=> <TaskManager key={target} person={target} personLabel={displayName} conversationId={activeConversationIds[target]||''}/>}
     renderUsage={()=> <UsageStats people={assistants.map(a=>a.id)} conversations={conversations} models={Object.fromEntries(assistants.map(a=>[a.id,resolveModelConfig(bindings[a.id]?.modelProfileId||defaultModelId||'',modelProfiles,modelConfig[a.id]).model]))} displayName={displayName}/>}
     vendors={vendors}

@@ -5,6 +5,8 @@ export const CHAT_DISPLAY_EVENT = 'aihome:chatdisplay'
 
 export const DEFAULT_CHAT_DISPLAY = {
   fontSize: 12,
+  toolsEnabled: true,
+  timeEnabled: true,
   assistantAvatar: true,
   userAvatar: true,
   assistantName: false,
@@ -22,7 +24,7 @@ export const DEFAULT_CHAT_DISPLAY = {
 export function normalizeChatDisplay(raw) {
   const d = { ...DEFAULT_CHAT_DISPLAY }
   if (!raw || typeof raw !== 'object') return d
-  for (const k of ['assistantAvatar', 'userAvatar', 'assistantName', 'userName', 'time', 'token', 'showReasoning', 'autoTranslateReasoning', 'showReasoningDuration', 'showToolCalls']) {
+  for (const k of ['toolsEnabled', 'timeEnabled', 'assistantAvatar', 'userAvatar', 'assistantName', 'userName', 'time', 'token', 'showReasoning', 'autoTranslateReasoning', 'showReasoningDuration', 'showToolCalls']) {
     if (typeof raw[k] === 'boolean') d[k] = raw[k]
   }
   if ([5,10,15,20].includes(Number(raw.toolRoundLimit))) d.toolRoundLimit = Number(raw.toolRoundLimit)

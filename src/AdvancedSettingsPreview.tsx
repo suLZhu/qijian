@@ -1,10 +1,12 @@
-import { useEffect, useState } from 'react'
+import { useChatDisplay } from './ChatDisplay'
+import { saveChatDisplay } from './chatDisplayPrefs.mjs'
+import { useEffect, useState, type ReactNode } from 'react'
 import { AndroidSystemSettings } from './AndroidSystemSettings'
 import { AppLockSettings } from './AppLockSettings'
 import './AdvancedSettingsPreview.css'
 
 type Panel = { id: string; title: string; note: string }
-type Dialog = { title: string; description: string; destructive?: boolean; options?: string[] }
+type Dialog = { title: string; description: string; destructive?: boolean }
 
 const toolPanels: Panel[] = [
   { id: 'mcp', title: 'MCP 服务', note: '连接配置、助手授权与连接状态' },
@@ -19,11 +21,11 @@ const devicePanels: Panel[] = [
   { id: 'lock', title: '应用锁', note: 'PIN、锁定名单与排除名单' },
   { id: 'backup', title: '备份与恢复', note: '导出、恢复及同步状态' },
 ]
-export function AdvancedSettingsPreview({ kind }: { kind: 'tools' | 'device' }) {
+export function AdvancedSettingsPreview({ kind, renderMcp }: { kind: 'tools' | 'device'; renderMcp?: () => ReactNode }) {
+  const prefs = useChatDisplay()
   const [panel, setPanel] = useState('')
   const [dialog, setDialog] = useState<Dialog | null>(null)
   const [notice, setNotice] = useState('')
-  const [tools, setTools] = useState([{ id: 'sample', name: '示例 MCP 服务', enabled: false }])
   const items = kind === 'tools' ? toolPanels : devicePanels
   useEffect(() => { setPanel(''); setDialog(null); setNotice('') }, [kind])
 
@@ -34,14 +36,14 @@ export function AdvancedSettingsPreview({ kind }: { kind: 'tools' | 'device' }) 
     <header className="qj-advanced-head">
       {panel && <button onClick={() => setPanel('')} aria-label="返回分类">‹ 返回分类</button>}
       <h2>{panel ? (items.find(x=>x.id===panel)?.title || '功能设置') : kind==='tools' ? '工具与扩展' : '应用与设备'}</h2>
-      <p>{kind==='tools' ? '连接、授权和调用记录统一管理。' : '系统能力和应用安全集中管理。'} · 布局演示</p>
+      {panel !== 'mcp' && <p>{kind==='tools' ? '连接、授权和调用记录统一管理。' : '系统能力和应用安全集中管理。'} · 布局演示</p>}
     </header>
-    {!panel && <div className="qj-advanced-list">{items.map(item => row(item.title,item.note,()=>setPanel(item.id)))}</div>}
-    {panel === 'mcp' && <div className="qj-advanced-body">
-      <div className="qj-advanced-toolbar"><strong>已保存的服务</strong><button onClick={()=>setDialog({title:'添加 MCP 服务',description:'正式版应包含名称、连接地址、传输方式、助手授权和连接测试。当前仅展示入口。'})}>＋ 添加服务</button></div>
-      <div className="qj-advanced-list">{tools.map(t=>row(t.name,t.enabled?'模拟已开启':'模拟未连接',()=>setDialog({title:t.name,description:'连接设置、测试、启停及删除操作需在接入真实 MCP 后生效。',options:['模拟启用','模拟停用','删除示例服务']}),t.enabled?'已启用 ›':'未连接 ›'))}</div>
-      <p className="qj-advanced-note">服务授权应按助手分别设置，不允许跨助手误调用。</p>
+    {kind === 'tools' && !panel && <div className="qj-advanced-body">
+      <label><input type="checkbox" checked={prefs.toolsEnabled} onChange={e => saveChatDisplay({ ...prefs, toolsEnabled: e.target.checked })}/> 聊天工具</label>
+      <label><input type="checkbox" checked={prefs.timeEnabled} onChange={e => saveChatDisplay({ ...prefs, timeEnabled: e.target.checked })}/> 注入当前时间</label>
     </div>}
+    {!panel && <div className="qj-advanced-list">{items.map(item => row(item.title,item.note,()=>setPanel(item.id)))}</div>}
+    {panel === 'mcp' && <div className="qj-advanced-body">{renderMcp?.()}</div>}
     {panel === 'skills' && <div className="qj-advanced-body">
       <div className="qj-advanced-toolbar"><strong>技能管理</strong><button onClick={()=>setDialog({title:'导入技能',description:'正式版将读取技能说明文件，确认来源与工具权限后添加。'})}>＋ 导入</button></div>
       <div className="qj-advanced-list">
@@ -87,7 +89,6 @@ export function AdvancedSettingsPreview({ kind }: { kind: 'tools' | 'device' }) 
     {notice && <p className="qj-advanced-notice" role="status">{notice}</p>}
     {dialog && <div className="qj-dialog-layer" onClick={()=>setDialog(null)}><div className="qj-dialog" role="dialog" aria-modal="true" aria-label={dialog.title} onClick={e=>e.stopPropagation()}>
       <h3>{dialog.title}</h3><p>{dialog.description}</p>
-      {dialog.options && <div className="qj-dialog-options">{dialog.options.map(opt=><button key={opt} onClick={()=>{if(panel==='mcp'&&tools.length){if(opt==='删除示例服务')setTools([]);else setTools(xs=>xs.map(x=>({...x,enabled:opt==='模拟启用'})))}setNotice('仅模拟界面操作，没有连接真实服务。');setDialog(null)}}>{opt}<span>›</span></button>)}</div>}
       {dialog.destructive&&<p className="qj-dialog-warning">演示模式不会执行破坏性操作。</p>}
       <div className="qj-dialog-actions">
         <button className="qj-dialog-cancel" onClick={()=>setDialog(null)}>{dialog.destructive?'取消':'关闭'}</button>

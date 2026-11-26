@@ -254,7 +254,7 @@ function searchLocalMemory({ person, query, exclude, limit = 5 }) {
 // 没有 routes 时下面这段老逻辑一个字都不变，老配置零影响。
 async function handleRouteChat(b, init) {
   const result = await runRouteChat({
-    routes: b.routes,
+    routes: b.routes, timeEnabled: b.timeEnabled,
     body: b.body,
     timeZone: b.timeZone,
     signal: (init && init.signal) || null,
@@ -274,7 +274,7 @@ async function handleChat(init) {
   try { b = await readBody(init) } catch { return json(400, { error: '请求无效' }) }
   if (b.subscriptionProtocol) {
     if (!nativeHttpStreamAvailable()) return json(400, { error: '订阅聊天需要 App 原生网络桥，请连接服务器或使用 APK' })
-    if (b.body) b.body.messages = injectTimeContext(b.body.messages, new Date(), b.timeZone)
+    if (b.timeEnabled !== false && b.body) b.body.messages = injectTimeContext(b.body.messages, new Date(), b.timeZone)
     return subscriptionChatResponse(b, init, subscriptionModelFetch)
   }
   if (Array.isArray(b.routes) && b.routes.length) return handleRouteChat(b, init)
@@ -287,7 +287,7 @@ async function handleChat(init) {
   const chatBody = b.body
   if (!chatBody || typeof chatBody !== 'object' || Array.isArray(chatBody)) return json(400, { error: '缺少请求体' })
   // 动态时间上下文：与服务端 /api/chat 完全同源（共享纯函数），每轮实时生成。
-  chatBody.messages = injectTimeContext(chatBody.messages, new Date(), b.timeZone)
+  if (b.timeEnabled !== false) chatBody.messages = injectTimeContext(chatBody.messages, new Date(), b.timeZone)
   const target = /^https?:\/\//i.test(String(b.chatUrl || ''))
     ? String(b.chatUrl).trim()
     : /\/chat\/completions$/.test(raw) ? raw : raw.endsWith('/v1') ? raw + '/chat/completions' : raw + '/v1/chat/completions'
