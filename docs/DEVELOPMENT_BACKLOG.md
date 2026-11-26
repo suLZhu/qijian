@@ -358,3 +358,5 @@
 - 本地自然任务的真实模型请求开始前取得现有 GenerationService 所有权，读完响应体后释放；同一服务按 messageId/runId 管理并发所有者，单条聊天或任务完成不停止另一条。沿用现有模型路由及结果收件箱，不新增任务执行器。
 - 全量 538/538、前端生产构建通过。Android 编译未运行：当前服务器 JAVA_HOME 未设置、PATH 中无 java；原生改动仍需 Java 编译、模拟器与一加 Ace 3 验证。
 - 当前只保护由 WebView 已发起的请求。锁屏时到点自动发起、进程被回收后恢复真实执行尚未实现，不能称后台生成已完成。
+
+- 补充验证：用服务器现有 JDK 21、Android SDK 36 和本地 aapt2 指定路径离线执行 :app:compileDebugJavaWithJavac，BUILD SUCCESSFUL。此前“Java 编译未运行”的记录为当时环境变量未设置，现已完成编译；锁屏真实任务仍待实机。
