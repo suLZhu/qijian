@@ -140,10 +140,11 @@ const BUILTINS = [
 
 // Registry for one run. `mcpList(row)` and `mcpCall(row, tool, args)` are
 // injected by server.mjs so the MCP transport stays in one place.
-export async function createToolRegistry({ db, person, mcpList, mcpCall }) {
-  const definitions = BUILTINS.map(b => b.definition)
+export async function createToolRegistry({ db, person, mcpList, mcpCall, allowedTools = null }) {
+  const allowed = allowedTools == null ? null : new Set(allowedTools)
+  const definitions = BUILTINS.filter(b => !allowed || allowed.has(b.name)).map(b => b.definition)
   const mcpMap = new Map()
-  const connections = db.prepare(`
+  const connections = allowed ? [] : db.prepare(`
     SELECT c.* FROM mcp_connections c
     INNER JOIN mcp_bindings b ON b.connection_id=c.id
     WHERE b.person=? AND c.enabled=1
@@ -170,6 +171,7 @@ export async function createToolRegistry({ db, person, mcpList, mcpCall }) {
   }
 
   const describe = (name) => {
+    if (allowed && !allowed.has(name)) return null
     const builtin = BUILTINS.find(b => b.name === name)
     if (builtin) return { source: builtin.source, serverName: '', readOnly: builtin.readOnly }
     const mapped = mcpMap.get(name)

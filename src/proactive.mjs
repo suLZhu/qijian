@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto"
+import { buildTimeContext } from "./timeContext.mjs"
 // Server-side wake decisions are deterministic; the model never silently invents a message.
 // Delivery requires a future authenticated model runner with a provider key.
 const PEOPLE = ['assistant-yanweixi','assistant-yanshuo']
@@ -29,13 +30,18 @@ export function configure(db,person,input) {
  db.prepare('UPDATE proactive_settings SET enabled=?,mode=?,quiet_start=?,quiet_end=?,interval_hours=?,updated_at=? WHERE person=?').run(enabled,mode,start,end,interval,new Date().toISOString(),person)
  return settings(db,person)
 }
+export function proactiveTimeZone(db) {
+ try { return JSON.parse(db.prepare('SELECT payload FROM app_state WHERE id=1').get()?.payload || '{}').timeZone } catch { return undefined }
+}
+export function isQuietHour(config,now=new Date(),timeZone) {
+ const hour=buildTimeContext(now,timeZone).hour
+ return config.quiet_start===config.quiet_end?false:config.quiet_start<config.quiet_end?hour>=config.quiet_start&&hour<config.quiet_end:hour>=config.quiet_start||hour<config.quiet_end
+}
 export function wake(db,person,{manual=false,now=new Date()}={}) {
  if(!PEOPLE.includes(person))throw new Error('无效人物')
  const config=settings(db,person)
  if(!config.enabled&&!manual)return {queued:false,reason:'disabled'}
- const hour=now.getHours()
- const quiet=config.quiet_start===config.quiet_end?false:config.quiet_start<config.quiet_end?hour>=config.quiet_start&&hour<config.quiet_end:hour>=config.quiet_start||hour<config.quiet_end
- if(quiet)return {queued:false,reason:'quiet_hours'}
+ if(isQuietHour(config,now,proactiveTimeZone(db)))return {queued:false,reason:'quiet_hours'}
  const pending=db.prepare("SELECT count(*) AS n FROM proactive_events WHERE person=? AND status='pending'").get(person).n
  if(pending)return {queued:false,reason:'pending_exists'}
  const last=db.prepare('SELECT created_at FROM proactive_events WHERE person=? ORDER BY created_at DESC LIMIT 1').get(person)

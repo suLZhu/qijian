@@ -117,6 +117,7 @@ export async function runAgent(ctx, run, { signal, timedOut } = {}) {
     const registry = await createToolRegistry({
       db,
       person: run.assistantId,
+      allowedTools: run.source === 'proactive' ? ['memory_search'] : null,
       mcpList: row => ctx.mcpList(row),
       mcpCall: (row, name, args) => ctx.mcpCall(row, name, args),
     })

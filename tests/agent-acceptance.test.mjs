@@ -19,7 +19,7 @@ import { decideApproval, pendingList } from '../src/server/agent/ApprovalGate.mj
 import { createTaskScheduler } from '../src/server/agent/TaskScheduler.mjs'
 import { createToolRegistry } from '../src/server/agent/ToolRegistry.mjs'
 import { createFakeMcpServer, fakeMcpConnection } from '../src/server/fakeMcp.mjs'
-import { initProactive } from '../src/proactive.mjs'
+import { initProactive, isQuietHour } from '../src/proactive.mjs'
 import { initProactiveHeat, dispatchProactiveRun, recoverInterruptedWakes } from '../src/server/agent/ProactiveHeat.mjs'
 import { initMemoryStore, SQLiteMemoryProvider } from '../src/server/agent/MemoryStore.mjs'
 import { migrateDatabase, migrateSnapshot } from '../src/server/identity.mjs'
@@ -478,6 +478,7 @@ test('13 主动任务绑定原会话并投递', async () => {
   const fake = createFakeMcpServer()
   initProactive(db)
   initProactiveHeat(db)
+  db.prepare('UPDATE proactive_settings SET enabled=1,quiet_start=0,quiet_end=0 WHERE person=?').run(PERSON)
   installModel([textReply('突然想提醒你带伞')])
   const runner = new AgentRunner(makeCtx(db, fake))
   const delivered = []
@@ -598,4 +599,46 @@ test('自主唤醒重启后清理旧 pending，保留记录并允许后续唤醒
   assert.equal(recoverInterruptedWakes(db), 0)
   assert.equal(db.prepare('SELECT status FROM proactive_events WHERE id=?').get('evt-interrupted').status, 'failed')
   db.close()
+})
+
+
+test('自主唤醒仅暴露记忆搜索，未公布工具无法执行', async () => {
+  const db = makeDb()
+  const registry = await createToolRegistry({ db, person: PERSON, allowedTools: ['memory_search'],
+    mcpList: () => { throw Error('不应探测 MCP') }, mcpCall: () => { throw Error('不应调用 MCP') } })
+  assert.deepEqual(registry.definitions.map(item => item.function.name), ['memory_search'])
+  assert.equal(registry.describe('memory_add'), null)
+  await assert.rejects(() => registry.invoke('memory_add', {title:'未经许可',content:'写入'}), /未知工具/)
+  db.close()
+})
+
+test('自主唤醒执行中关闭开关，不投递模型回复', async () => {
+  const db = makeDb()
+  const fake = createFakeMcpServer()
+  initProactive(db)
+  initProactiveHeat(db)
+  db.prepare('UPDATE proactive_settings SET enabled=1,quiet_start=0,quiet_end=0 WHERE person=?').run(PERSON)
+  const at = new Date().toISOString()
+  db.prepare(`INSERT INTO proactive_events (id,person,reason,mood,status,created_at,updated_at)
+    VALUES ('evt-off',?, 'heat', 'calm', 'pending', ?, ?)`).run(PERSON, at, at)
+  let release
+  globalThis.fetch = () => new Promise(resolve => { release = () => resolve(new Response(JSON.stringify(textReply('来聊天吧')), { status: 200, headers: {'content-type':'application/json'} })) })
+  const delivered = []
+  const runner = new AgentRunner(makeCtx(db, fake))
+  dispatchProactiveRun({ db, runner, bus: new AgentEventBus(), person: PERSON, eventId: 'evt-off', reason: 'heat', deliver: (_, content) => delivered.push(content) })
+  assert.ok(await waitFor(() => typeof release === 'function'))
+  db.prepare('UPDATE proactive_settings SET enabled=0 WHERE person=?').run(PERSON)
+  release()
+  assert.ok(await waitFor(() => db.prepare("SELECT status FROM proactive_events WHERE id='evt-off'").get().status !== 'pending'))
+  assert.equal(db.prepare("SELECT status FROM proactive_events WHERE id='evt-off'").get().status, 'dismissed')
+  assert.equal(delivered.length, 0)
+  db.close()
+})
+
+
+test('免打扰使用用户时区，不受服务器 UTC 时区影响', () => {
+  const config = { quiet_start: 23, quiet_end: 8 }
+  const at = new Date('2026-11-26T17:00:00Z')
+  assert.equal(isQuietHour(config, at, 'Asia/Shanghai'), true)
+  assert.equal(isQuietHour(config, at, 'America/Los_Angeles'), false)
 })

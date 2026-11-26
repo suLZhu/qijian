@@ -8,7 +8,7 @@
 // Deterministic rules only — the model never decides *whether* to wake up,
 // only what (if anything) to say once woken.
 import { createAgentRun } from './AgentRunStore.mjs'
-import { settings as proactiveSettings, wake as wakeProactive } from '../../proactive.mjs'
+import { settings as proactiveSettings, wake as wakeProactive, isQuietHour, proactiveTimeZone } from '../../proactive.mjs'
 
 export const HEAT_THRESHOLD = 100
 const HEAT_MAX = 150 // headroom so quiet hours don't lose accumulated heat
@@ -154,6 +154,14 @@ function isSilence(answer) {
 }
 
 function settleEvent({ db, bus, deliver, person, eventId, finished }) {
+  const event = db.prepare('SELECT status FROM proactive_events WHERE id=? AND person=?').get(eventId, person)
+  const config = proactiveSettings(db, person)
+  if (!event || event.status !== 'pending') return
+  if (!config?.enabled || isQuietHour(config, new Date(), proactiveTimeZone(db))) {
+    markEvent(db, eventId, 'dismissed')
+    bus.publish({ type: 'proactive_settled', eventId, person, status: 'dismissed' })
+    return
+  }
   if (!finished || finished.status !== 'succeeded' || isSilence(finished.answer)) {
     // Failure keeps the event out of the inbox; silence is a legitimate answer.
     const status = finished && finished.status === 'succeeded' ? 'silent' : 'failed'
