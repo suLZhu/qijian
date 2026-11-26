@@ -417,7 +417,7 @@ export default function App() {
   type SystemHandlers = { onOpen:(payload:any)=>void; onTaskFire:(runId:string)=>void; onStatusChanged:()=>void }
   const systemHandlersRef = useRef<SystemHandlers>({ onOpen:()=>{}, onTaskFire:()=>{}, onStatusChanged:()=>{} })
   // 原生闹钟触发时，若 WebView 进程还活着就立刻补跑一次本地任务结算。
-  const localTaskTickRef = useRef<()=>void>(()=>{})
+  const localTaskTickRef = useRef<(runId?:string)=>void>(()=>{})
   const [alarmSyncTick, setAlarmSyncTick] = useState(0)
   // Read receipts dismiss only the visible conversation's message notifications.
   // This does not stop or dismiss the foreground generation service.
@@ -512,7 +512,7 @@ export default function App() {
         }
         activateConversation(route.person, route.conversationId)
       },
-      onTaskFire: () => localTaskTickRef.current(),
+      onTaskFire: (runId) => localTaskTickRef.current(runId),
       onStatusChanged: () => {},
     }
   })
@@ -1160,9 +1160,9 @@ export default function App() {
   useEffect(()=>{
     if(authStatus!=='signedIn')return
     let alive=true
-    const tick=async()=>{
+    const tick=async(forceRunId?:string)=>{
       if(!alive)return
-      if(document.hidden){
+      if(document.hidden && !forceRunId){
         // 真机证据：后台 / 锁屏时主动任务的「执行」（写回聊天 + 结果通知）被跳过，
         // 只靠原生闹钟先弹一条提醒。对照 task_alarm_fired 与 task_exec_started 之间的缺口，
         // 即可确认「开 App 才看到 / 定点不弹」源于执行链路卡在等 WebView 回前台。
@@ -1193,9 +1193,9 @@ export default function App() {
         firstDirtyAtRef.current=Date.now()-CLOUD_FLUSH_MAX_MS
       }catch{/* 调度失败不影响聊天，下一个 tick 自动重试 */}
     }
-    // 原生层在 WebView 进程仍存活时可以回调 __aihomeTaskFire 立刻补跑一次结算；
-    // 进程被冻结时则由原生闹钟先发通知，回前台后这里再写回聊天且不重复通知。
-    localTaskTickRef.current=()=>void tick()
+    // 原生闹钟在 WebView 仍活着时回调 __aihomeTaskFire，允许这一轮隐藏页结算；
+    // 进程被系统回收时仍只有到点通知，回前台后再补跑，不宣称已后台生成。
+    localTaskTickRef.current=(runId?:string)=>void tick(runId)
     void tick()
     const timer=window.setInterval(()=>void tick(),15000)
     const onVisible=()=>{if(!document.hidden)void tick()}

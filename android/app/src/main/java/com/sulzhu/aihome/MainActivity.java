@@ -46,6 +46,14 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 public class MainActivity extends BridgeActivity {
+    private static java.lang.ref.WeakReference<MainActivity> taskHost = new java.lang.ref.WeakReference<>(null);
+
+    static void dispatchTaskFire(String runId) {
+        MainActivity host = taskHost.get();
+        if (host == null || runId == null || runId.isEmpty()) return;
+        host.evalJs("window.__aihomeTaskFire && window.__aihomeTaskFire(" + JSONObject.quote(runId) + ")");
+    }
+
     // 不再把本 Activity 的 fontScale 固定为 1（那等于全局禁止用户放大字体）。
     // 改为读取真实系统字体设置，显式写进主 WebView 的 textZoom：
     //   - setTextZoom 是绝对值，不会与系统默认值叠加；
@@ -123,6 +131,7 @@ public class MainActivity extends BridgeActivity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        taskHost = new java.lang.ref.WeakReference<>(this);
         setupEdgeToEdge();
         if (systemBridge != null) systemBridge.handleOpenIntent(getIntent());
     }
@@ -141,6 +150,12 @@ public class MainActivity extends BridgeActivity {
         injectSafeArea();
         applyFontScaleToWebView();
         if (systemBridge != null) systemBridge.onResume();
+    }
+
+    @Override
+    public void onDestroy() {
+        if (taskHost.get() == this) taskHost.clear();
+        super.onDestroy();
     }
 
     /** 供 SystemBridge 复用：主 WebView 存在时同步执行一小段 JS。 */

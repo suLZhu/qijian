@@ -52,6 +52,10 @@ public class AlarmReceiver extends BroadcastReceiver {
                 .put("messageId", "");
             SystemNotifier.post(context, payload);
             SystemAlarms.scheduleNext(context, item);
+            // If the existing WebView is alive, settle this exact alarm now.
+            // A killed process has no host; its persisted alarm remains a reminder
+            // until a real background executor can read the task snapshot.
+            MainActivity.dispatchTaskFire(runId);
         } catch (Exception ignored) { }
     }
 }

@@ -360,3 +360,7 @@
 - 当前只保护由 WebView 已发起的请求。锁屏时到点自动发起、进程被回收后恢复真实执行尚未实现，不能称后台生成已完成。
 
 - 补充验证：用服务器现有 JDK 21、Android SDK 36 和本地 aapt2 指定路径离线执行 :app:compileDebugJavaWithJavac，BUILD SUCCESSFUL。此前“Java 编译未运行”的记录为当时环境变量未设置，现已完成编译；锁屏真实任务仍待实机。
+
+### 第 4 批：存活进程的锁屏到点触发
+- Android AlarmReceiver 发到点通知并续排后，若已有 MainActivity/WebView，直接回调既有 __aihomeTaskFire；App 只对原生闹钟触发的这一轮放开 document.hidden 过滤，沿用 /api/tasks/run、原会话绑定、runId 幂等及已实现的任务请求前台服务。普通隐藏页 15 秒轮询仍暂停。
+- 生产构建、Android Java 编译及全量 538/538 通过。未有真机锁屏或进程回收验收；WebView 不存在、被系统冻结或进程被杀时，原生闹钟仍仅提醒，模型不会凭这条回调自动生成。下一步需要原生可持久执行者与结果回写，不把这一阶段算成完整后台生成。
