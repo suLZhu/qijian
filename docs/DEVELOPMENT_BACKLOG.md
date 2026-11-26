@@ -346,3 +346,8 @@
 - dsh-Go 的 DshService 在前台服务中持有本机引擎、PARTIAL_WAKE_LOCK、网络回调，并以有效持久快照有条件 START_STICKY 恢复；作者的 docs/design/background-execution.md 明确区分重启引擎与续跑对话，不能声称抗强退或自动续跑任务。
 - 栖间 GenerationService 当前只保住已经由 WebView 发起的回复。AlarmReceiver 仅通知，App.tsx 在 document.hidden 时主动跳过 /api/tasks/run，localBackend.mjs 又只读 WebView localStorage 和 IndexedDB；因此仅增加唤醒锁或让隐藏页定时器继续运行不能保证锁屏或进程被回收后的模型结果。
 - 落地要求：复用现有任务 runId、权限、模型路由、原会话与收件箱确认链路；执行者须能在 UI 不存在时读取持久配置、发真实模型请求、原子写入结果，并在重启后区分已完成、未开始和结果未知。Android 服务类型、后台启动和设备锁屏需实机检验。当前仅完成源码核对，后台生成未实现。
+
+### 第 4 批参考：dsh-Go 系统权限与实时活动
+- 源码参考：app/lib/ui/settings/system_access_page.dart 按功能汇总原生权限、返回设置页后重新读取；notification_settings.dart 同样刷新实际授权。栖间已有 SystemBridge.status/open 与 systemCapabilities.mjs，后续只校正真实状态和解释，不新增第二套权限页面。
+- dsh-Go 的 docs/design/live-activity.md 与 notify/LiveActivity.kt：一条真实运行状态通知，系统支持并允许提升时才尝试 Android Live Update；按状态变化节流更新、超时过期、锁屏脱敏、点击回原会话；系统不支持时不能冒充灵动岛。手机操控悬浮岛与系统实时活动是两个不同入口。
+- 栖间一加 Ace 3 的实际 ColorOS / Android 版本及提升资格尚未核验，不能承诺会显示系统流体云。先完成后台真实执行与结果回写，再基于同一任务状态接入可选胶囊；通知出现不代表模型已生成。
