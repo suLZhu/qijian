@@ -112,7 +112,8 @@ public class MainActivity extends BridgeActivity {
     // ERR_CONNECTION_REFUSED。这里改为在 App 内 WebView 打开授权页，并在导航到
     // 回调地址时直接拦下来取 code，再用原生 HttpURLConnection 换成令牌（不受 CORS
     // 限制）。用户点一下「登录」，登录完自动回到 App，不用填网址也不用复制地址。
-    private Dialog oauthDialog;
+    private JSONObject pendingOAuth;
+    private static final int SUBSCRIPTION_LOGIN = 47321;
     private boolean oauthHandled = false;
     private final ExecutorService oauthExecutor = Executors.newSingleThreadExecutor();
 
@@ -260,113 +261,36 @@ public class MainActivity extends BridgeActivity {
     /** 账号登录：前端把授权页 / 回调前缀 / 换令牌参数一次性传进来。 */
     private class OAuthBridge {
         @JavascriptInterface
+        public boolean proxyLoginAvailable() { return true; }
+        @JavascriptInterface
         public void login(final String configJson) {
             runOnUiThread(() -> openOAuthDialog(configJson));
         }
     }
 
-    @SuppressLint("SetJavaScriptEnabled")
     private void openOAuthDialog(String configJson) {
         try {
-            if (oauthDialog != null && oauthDialog.isShowing()) oauthDialog.dismiss();
-            oauthDialog = null;
-            final JSONObject cfg = new JSONObject(configJson);
-            final String url = cfg.optString("url", "");
-            if (url.isEmpty()) { deliverOAuth(oauthError("登录地址为空")); return; }
+            pendingOAuth = new JSONObject(configJson);
             oauthHandled = false;
-
-            Dialog dialog = new Dialog(this, android.R.style.Theme_Material_Light_NoActionBar);
-            Window win = dialog.getWindow();
-            if (win != null) {
-                win.setLayout(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT);
-                win.setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(Color.WHITE));
-                win.setStatusBarColor(Color.WHITE);
-            }
-
-            LinearLayout root = new LinearLayout(this);
-            root.setOrientation(LinearLayout.VERTICAL);
-            root.setBackgroundColor(Color.WHITE);
-
-            LinearLayout bar = new LinearLayout(this);
-            bar.setOrientation(LinearLayout.HORIZONTAL);
-            bar.setPadding(dp(18), dp(14), dp(18), dp(12));
-            bar.setBackgroundColor(Color.WHITE);
-            TextView title = new TextView(this);
-            title.setText("账号登录");
-            title.setTextSize(17);
-            title.setTextColor(Color.parseColor("#403b35"));
-            title.setGravity(android.view.Gravity.CENTER);
-            bar.addView(title, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
-            TextView close = new TextView(this);
-            close.setText("×");
-            close.setTextSize(24);
-            close.setTextColor(Color.parseColor("#8a8378"));
-            close.setPadding(dp(12), 0, 0, 0);
-            close.setOnClickListener(v -> cancelOAuth("已取消登录"));
-            bar.addView(close, new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-
-            WebView oauthView = new WebView(this);
-            WebSettings s = oauthView.getSettings();
-            s.setJavaScriptEnabled(true);
-            s.setDomStorageEnabled(true);
-            s.setDatabaseEnabled(true);
-            s.setJavaScriptCanOpenWindowsAutomatically(true);
-            s.setSupportMultipleWindows(false);
-            s.setLoadWithOverviewMode(true);
-            s.setUseWideViewPort(true);
-            s.setMixedContentMode(WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE);
-            // 官方授权页对移动端内嵌 WebView 的 UA 更挑剔，用桌面 Chrome UA。
-            s.setUserAgentString("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-                + "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36");
-            CookieManager.getInstance().setAcceptThirdPartyCookies(oauthView, true);
-            oauthView.setWebViewClient(new WebViewClient() {
-                @Override
-                public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
-                    return maybeCallback(request.getUrl().toString(), cfg);
-                }
-
-                @SuppressWarnings("deprecation")
-                @Override
-                public boolean shouldOverrideUrlLoading(WebView view, String u) {
-                    return maybeCallback(u, cfg);
-                }
-
-                @Override
-                public void onPageStarted(WebView view, String u, Bitmap favicon) {
-                    maybeCallback(u, cfg);
-                }
-            });
-            oauthView.loadUrl(url);
-
-            root.addView(bar, new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-            root.addView(oauthView, new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
-            dialog.setContentView(root);
-            dialog.setOnCancelListener(d -> cancelOAuth("已取消登录"));
-            oauthDialog = dialog;
-            dialog.show();
-        } catch (Exception e) {
-            deliverOAuth(oauthError("登录页打开失败：" + safeMessage(e)));
-        }
+            Intent page = new Intent(this, SubscriptionLoginActivity.class);
+            page.putExtra("url", pendingOAuth.getString("url"));
+            page.putExtra("callbacks", pendingOAuth.optString("callbackPrefixes", "[]"));
+            page.putExtra("userCode", pendingOAuth.optString("userCode"));
+            page.putExtra("device", pendingOAuth.optBoolean("device"));
+            startActivityForResult(page, SUBSCRIPTION_LOGIN);
+        } catch (Exception e) { deliverOAuth(oauthError("登录页打开失败：" + safeMessage(e))); }
     }
 
-    /** 命中回调前缀就永远拦住，绝不让 WebView 真的去连 localhost:1455。 */
-    private boolean maybeCallback(String u, JSONObject cfg) {
-        if (u == null || !isCallback(u, cfg)) return false;
-        if (!oauthHandled) handleOAuthCallback(u, cfg);
-        return true;
-    }
-
-    private boolean isCallback(String u, JSONObject cfg) {
-        JSONArray arr = cfg.optJSONArray("callbackPrefixes");
-        if (arr == null) return false;
-        for (int i = 0; i < arr.length(); i++) {
-            String prefix = arr.optString(i, "");
-            if (!prefix.isEmpty() && u.startsWith(prefix)) return true;
-        }
-        return false;
+    @Override
+    protected void onActivityResult(int request, int result, Intent data) {
+        if (request != SUBSCRIPTION_LOGIN) { super.onActivityResult(request, result, data); return; }
+        JSONObject config = pendingOAuth;
+        pendingOAuth = null;
+        if (config == null) return;
+        if (data != null && data.hasExtra("error")) deliverOAuth(oauthError(data.getStringExtra("error")));
+        else if (result != RESULT_OK || data == null) deliverOAuth(oauthError("已取消登录"));
+        else if (config.optBoolean("device")) deliverOAuth("{\"ok\":true,\"deviceClosed\":true}");
+        else handleOAuthCallback(data.getStringExtra("callback"), config);
     }
 
     private void handleOAuthCallback(String u, JSONObject cfg) {
@@ -378,7 +302,7 @@ public class MainActivity extends BridgeActivity {
             if (err != null && !err.isEmpty()) { deliverOAuth(oauthError("授权未完成：" + err)); return; }
             String expected = cfg.optString("state", "");
             String state = uri.getQueryParameter("state");
-            if (!expected.isEmpty() && state != null && !state.isEmpty() && !expected.equals(state)) {
+            if (!expected.isEmpty() && !expected.equals(state)) {
                 deliverOAuth(oauthError("state 校验失败，请重新登录"));
                 return;
             }
@@ -467,18 +391,8 @@ public class MainActivity extends BridgeActivity {
         return new String(bos.toByteArray(), StandardCharsets.UTF_8);
     }
 
-    private void cancelOAuth(String message) {
-        if (oauthHandled) return;
-        oauthHandled = true;
-        deliverOAuth(oauthError(message));
-    }
-
     private void deliverOAuth(final String json) {
         runOnUiThread(() -> {
-            if (oauthDialog != null) {
-                try { oauthDialog.dismiss(); } catch (Exception ignored) { }
-                oauthDialog = null;
-            }
             WebView main = (getBridge() != null) ? getBridge().getWebView() : null;
             if (main == null) return;
             main.evaluateJavascript("window.__aihomeOAuthResult && window.__aihomeOAuthResult("

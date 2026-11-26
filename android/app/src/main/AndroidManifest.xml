@@ -26,6 +26,8 @@
 
         </activity>
 
+        <activity android:name=".SubscriptionLoginActivity" android:configChanges="orientation|screenSize|keyboardHidden" android:process=":subscription_login" android:exported="false" android:theme="@android:style/Theme.Material.Light" />
+
         <!-- 应用锁：只监听前台应用切换，命中锁定名单时拉起解锁页。 -->
         <service
             android:name=".AppLockService"

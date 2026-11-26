@@ -17,22 +17,20 @@ final class ModelNetwork {
                 && (subscription || !"http".equalsIgnoreCase(target.getProtocol()))) {
             throw new IOException(subscription ? "订阅接口需要 HTTPS" : "模型接口需要 HTTP 或 HTTPS");
         }
-        Proxy route = Proxy.NO_PROXY;
-        if (subscription) {
-            ProxySelector selector = ProxySelector.getDefault();
-            List<Proxy> candidates = selector == null ? null : selector.select(target.toURI());
-            if (candidates != null) {
-                for (Proxy candidate : candidates) {
-                    if (candidate != null && candidate.type() == Proxy.Type.HTTP) {
-                        route = candidate;
-                        break;
-                    }
-                }
-            }
-            if (route == Proxy.NO_PROXY) throw new IOException("Android 未为此订阅接口配置 HTTP 代理");
-        }
+        Proxy route = subscription ? subscriptionProxy(target) : Proxy.NO_PROXY;
         HttpURLConnection connection = (HttpURLConnection) target.openConnection(route);
         connection.setInstanceFollowRedirects(false);
         return connection;
     }
+    static Proxy subscriptionProxy(URL target) throws Exception {
+        ProxySelector selector = ProxySelector.getDefault();
+        List<Proxy> candidates = selector == null ? null : selector.select(target.toURI());
+        if (candidates != null) {
+            for (Proxy candidate : candidates) {
+                if (candidate != null && candidate.type() == Proxy.Type.HTTP) return candidate;
+            }
+        }
+        throw new IOException("Android 未为此订阅接口配置 HTTP 代理");
+    }
+
 }

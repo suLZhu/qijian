@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { nativeOAuthAvailable, startOAuthLogin } from '../src/nativeOAuth.mjs'
+import { nativeOAuthAvailable, startOAuthLogin, openDeviceAuthorization } from '../src/nativeOAuth.mjs'
 
 const cfg = {
   channelId: 'gpt',
@@ -15,14 +15,14 @@ const cfg = {
 test('原生桥可用性判断', () => {
   delete globalThis.AiHomeOAuth
   assert.equal(nativeOAuthAvailable(), false)
-  globalThis.AiHomeOAuth = { login() {} }
+  globalThis.AiHomeOAuth = { proxyLoginAvailable: () => true, login() {} }
   assert.equal(nativeOAuthAvailable(), true)
   delete globalThis.AiHomeOAuth
 })
 
 test('有原生桥：配置交给 App 内 WebView，回传令牌即完成登录', async () => {
   let payload = null
-  globalThis.AiHomeOAuth = { login(json) { payload = JSON.parse(json) } }
+  globalThis.AiHomeOAuth = { proxyLoginAvailable: () => true, login(json) { payload = JSON.parse(json) } }
   const pending = startOAuthLogin(cfg)
   assert.equal(payload.url, cfg.url)
   assert.deepEqual(payload.callbackPrefixes, cfg.callbackPrefixes)
@@ -34,7 +34,7 @@ test('有原生桥：配置交给 App 内 WebView，回传令牌即完成登录'
 })
 
 test('原生回传错误会变成可读提示，不会假装登录成功', async () => {
-  globalThis.AiHomeOAuth = { login() {} }
+  globalThis.AiHomeOAuth = { proxyLoginAvailable: () => true, login() {} }
   const pending = startOAuthLogin(cfg)
   globalThis.__aihomeOAuthResult({ ok: false, error: '授权未完成：access_denied' })
   await assert.rejects(() => pending, /access_denied/)
@@ -52,4 +52,17 @@ test('没有原生桥：不打开外部页面，明确提示要在 App 内登录
 
 test('空配置直接拒绝，不会打开任何页面', async () => {
   await assert.rejects(() => startOAuthLogin(null), /登录地址为空/)
+})
+
+test('旧版桥拒绝授权，设备码授权返回后才继续轮询', async () => {
+  globalThis.AiHomeOAuth = { login() { assert.fail('旧版桥不应打开授权页') } }
+  try {
+    await assert.rejects(startOAuthLogin(cfg), /更新 APK/)
+    let sent
+    globalThis.AiHomeOAuth = { proxyLoginAvailable: () => true, login(raw) { sent = JSON.parse(raw) } }
+    const pending = openDeviceAuthorization('https://auth.x.ai', 'TEST')
+    assert.equal(sent.userCode, 'TEST')
+    globalThis.__aihomeOAuthResult({ ok: true, deviceClosed: true })
+    await pending
+  } finally { delete globalThis.AiHomeOAuth }
 })

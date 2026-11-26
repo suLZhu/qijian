@@ -28,6 +28,7 @@ export function startOAuthLogin(config) {
       if (typeof payload === 'string') {
         try { data = JSON.parse(payload) } catch { data = { ok: false, error: '登录结果无法解析' } }
       }
+      if (config.device && data?.ok && data.deviceClosed) { finish(null); return }
       if (data && data.ok && data.token) {
         finish(null, {
           token: String(data.token),
@@ -42,6 +43,10 @@ export function startOAuthLogin(config) {
     timer = setTimeout(() => finish(new Error('登录超时，请重新点一次登录')), LOGIN_TIMEOUT_MS)
     try {
       if (nativeOAuthAvailable()) {
+        if (!globalThis.AiHomeOAuth.proxyLoginAvailable?.()) {
+          finish(new Error('请更新 APK 以使用订阅授权代理'))
+          return
+        }
         globalThis.AiHomeOAuth.login(JSON.stringify(config))
       } else {
         // 电脑浏览器没有原生层，绝不再把官方授权页丢给外部浏览器——
@@ -52,4 +57,12 @@ export function startOAuthLogin(config) {
       finish(e instanceof Error ? e : new Error('无法打开登录页'))
     }
   })
+}
+
+export function openDeviceAuthorization(url, userCode) {
+  if (globalThis.AiHomeOAuth || globalThis.AiHomeSystem) {
+    return startOAuthLogin({ url, device: true, userCode, callbackPrefixes: [] })
+  }
+  globalThis.open(url, '_blank', 'noopener')
+  return Promise.resolve()
 }

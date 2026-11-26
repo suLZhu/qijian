@@ -10,3 +10,5 @@ export type OAuthLoginConfig = {
 export type NativeLoginResult = { token: string; refreshToken: string; expiresIn: number; idToken?: string }
 export function nativeOAuthAvailable(): boolean
 export function startOAuthLogin(config: OAuthLoginConfig): Promise<NativeLoginResult>
+
+export function openDeviceAuthorization(url: string, userCode: string): Promise<void>

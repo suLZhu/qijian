@@ -3,8 +3,7 @@ import { channelById, SUBSCRIPTION_CHANNELS, blankSubscription, type Subscriptio
 import { syncVendorProfiles, type Vendor, type VendorModel } from './vendors.mjs'
 import type { ModelProfile } from './resourceBindings.mjs'
 import { makePkce, buildLoginConfig, chatGptAccountIdFromToken } from './subscriptionOAuth.mjs'
-import { startOAuthLogin } from './nativeOAuth.mjs'
-import { openExternalUrl } from './nativeSystem.mjs'
+import { startOAuthLogin, openDeviceAuthorization } from './nativeOAuth.mjs'
 // P1-9：上游原始 JSON / 错误码统一转成中文短句，原文只在「查看详情」里展开。
 import { formatLoginError, type LoginErrorInfo } from './loginError.mjs'
 import { apiFetch } from './apiBase.mjs'
@@ -275,8 +274,8 @@ export function SubscriptionAccounts({ vendors, setVendors, setModelProfiles, su
       const url = String(start.verification_uri_complete || start.verification_uri || '')
       if (!start.device_code || !start.user_code || !url.startsWith('https://')) throw new Error('xAI 没有返回可用的设备码')
       setDevice({ userCode: String(start.user_code), url, status: '等待你在 xAI 页面完成授权…' })
-      if (!openExternalUrl(url)) window.open(url, '_blank')
       const deadline = Date.now() + Math.min(1800, Math.max(60, Number(start.expires_in) || 600)) * 1000
+      await openDeviceAuthorization(url, String(start.user_code))
       let interval = Math.min(60, Math.max(2, Number(start.interval) || 5)) * 1000
       while (Date.now() < deadline) {
         await sleep(interval)
@@ -480,7 +479,7 @@ export function SubscriptionAccounts({ vendors, setVendors, setModelProfiles, su
           <strong className="device-code">{device.userCode}</strong>
           <p className="device-status">{device.status}</p>
           <div className="device-actions">
-            <button type="button" onClick={() => { if (!openExternalUrl(device.url)) window.open(device.url, '_blank') }}>打开授权页</button>
+            <button type="button" onClick={() => void openDeviceAuthorization(device.url, device.userCode).catch(e => setErrorInfo(formatLoginError(e)))}>打开授权页</button>
             <button type="button" className="device-cancel" onClick={() => { deviceCancelledRef.current = true; setDevice(null) }}>取消</button>
           </div>
           <small className="device-url">{device.url}</small>
