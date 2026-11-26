@@ -206,7 +206,37 @@ async function grokModels(b, subscriptionFetch) {
   }
 }
 
+async function quota({ channelId, token, accountId }, subscriptionFetch) {
+  const codex = channelId === 'gpt'
+  const grok = channelId === 'grok'
+  if (!codex && !grok && channelId !== 'claude') return result(200, { windows: [] })
+  if (!token) return result(400, { error: '请重新登录订阅账号' })
+  const headers = { Authorization: 'Bearer ' + token, Accept: 'application/json' }
+  if (codex && accountId) headers['chatgpt-account-id'] = accountId
+  if (grok) headers['X-XAI-Token-Auth'] = 'xai-grok-cli'
+  if (channelId === 'claude') headers['anthropic-beta'] = 'oauth-2025-04-20'
+  try {
+    const url = codex ? 'https://chatgpt.com/backend-api/wham/usage' : grok ? 'https://cli-chat-proxy.grok.com/v1/billing?format=credits' : 'https://api.anthropic.com/api/oauth/usage'
+    const response = await subscriptionFetch(url, { headers, redirect: 'error', signal: AbortSignal.timeout(15000) })
+    if (!response.ok) return result(502, { error: '额度接口返回 HTTP ' + response.status })
+    const data = await response.json()
+    const entries = codex
+      ? [['主额度', data?.rate_limit?.primary_window], ['次额度', data?.rate_limit?.secondary_window]]
+      : grok ? [['本期额度', { utilization: data?.config?.creditUsagePercent, resets_at: data?.config?.currentPeriod?.end || data?.config?.billingPeriodEnd }]]
+      : [['5 小时', data?.five_hour], ['7 天', data?.seven_day]]
+    const windows = []
+    for (const [label, entry] of entries) {
+      const used = codex ? entry?.used_percent : entry?.utilization
+      if (!Number.isFinite(used) || used < 0 || used > 100) continue
+      const reset = codex ? (Number.isFinite(entry.reset_at) && entry.reset_at > 0 ? entry.reset_at * 1000 : NaN) : Date.parse(entry.resets_at)
+      windows.push({ label, remaining: 100 - used, reset: Number.isFinite(reset) && Math.abs(reset) <= 8.64e15 ? new Date(reset).toISOString() : null })
+    }
+    return result(200, { windows })
+  } catch (error) { return result(502, { error: error.message || '查询额度失败' }) }
+}
+
 export const subscriptionOperations = new Map([
+  ['/api/subscription/quota', quota],
   ['/api/subscription/login', login],
   ['/api/subscription/oauth/exchange', exchange],
   ['/api/subscription/oauth/refresh', refresh],

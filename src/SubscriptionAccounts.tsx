@@ -319,6 +319,27 @@ export function SubscriptionAccounts({ vendors, setVendors, setModelProfiles, su
     return nextAvailable
   }
 
+  const [quotaNotes, setQuotaNotes] = useState<Record<string, string>>({})
+  const checkQuota = async (a: SubscriptionAccount) => {
+    const key = a.id + '/' + a.vendorKeyId
+    const show = (note: string) => setQuotaNotes(old => ({ ...old, [key]: note }))
+    show('查询中…')
+    try {
+      const token = vendors.find(v => v.id === a.vendorId)?.keys.find(k => k.id === a.vendorKeyId)?.value || ''
+      const fresh = await ensureFreshToken(a, token)
+      if (fresh.error) throw new Error(fresh.error)
+      const response = await apiFetch('/api/subscription/quota', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ channelId: a.channelId, accountId: a.accountId, token: fresh.token }),
+      })
+      const data = await response.json()
+      if (!response.ok) throw new Error(data.error || '查询额度失败')
+      show(data.windows.map((w: { label: string; remaining: number; reset: string | null }) =>
+        w.label + '剩余 ' + Number(w.remaining.toFixed(2)) + '%' + (w.reset ? ' · ' + new Date(w.reset).toLocaleString('zh-CN') + ' 重置' : '')
+      ).join('；') || '接口未返回可用额度')
+    } catch (error) { show(error instanceof Error ? error.message : '查询额度失败') }
+  }
+
   const refreshModels = async (a: SubscriptionAccount) => {
     setBusy(a.channelId); setModelNote('')
     try {
@@ -395,10 +416,12 @@ export function SubscriptionAccounts({ vendors, setVendors, setModelProfiles, su
               </button>
             </div>
             {on && <div className="account-row-links">
+              <button type="button" disabled={quotaNotes[a!.id + '/' + a!.vendorKeyId] === '查询中…'} onClick={() => void checkQuota(a!)}>查额度</button>
               <button type="button" className={expanded ? 'active' : ''}
                 onClick={() => openModels(a!)}><IconGrid className="ui-icon-inline" size={13}/> 选择模型 · {picked.length || 0}</button>
               <button type="button" onClick={() => setMenu(menu === r.id ? '' : r.id)} aria-label="更多账号操作"><IconMore size={15}/></button>
             </div>}
+            {on && quotaNotes[a!.id + '/' + a!.vendorKeyId] && <p role="status">{quotaNotes[a!.id + '/' + a!.vendorKeyId]}</p>}
             {expanded && <div className="account-models" data-models-for={r.id}>
               <p className="account-models-lead">勾选的模型会进入聊天模型面板；可自己增删。</p>
               {a!.modelSource !== 'account' && <p className="account-model-warning">当前还没有同步到账号真实模型。可以点下面的「重新同步」；如果提示登录过期，请重新登录一次。</p>}
