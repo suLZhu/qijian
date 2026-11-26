@@ -21,7 +21,7 @@ const devicePanels: Panel[] = [
   { id: 'lock', title: '应用锁', note: 'PIN、锁定名单与排除名单' },
   { id: 'backup', title: '备份与恢复', note: '导出、恢复及同步状态' },
 ]
-export function AdvancedSettingsPreview({ kind, renderMcp, renderWorkspace }: { kind: 'tools' | 'device'; renderMcp?: () => ReactNode; renderWorkspace?: () => ReactNode }) {
+export function AdvancedSettingsPreview({ kind, renderMcp, renderWorkspace, renderBackup }: { kind: 'tools' | 'device'; renderMcp?: () => ReactNode; renderWorkspace?: () => ReactNode; renderBackup?: () => ReactNode }) {
   const prefs = useChatDisplay()
   const [weatherCity, setWeatherCity] = useState(prefs.weatherCity)
   const [panel, setPanel] = useState('')
@@ -85,11 +85,7 @@ export function AdvancedSettingsPreview({ kind, renderMcp, renderWorkspace }: { 
       <AppLockSettings />
       <p className="qj-advanced-note">应用锁已接入原生真实应用列表、PIN 与无障碍服务状态。排除名单仍是下一步要补的原生能力。</p>
     </div>}
-    {panel === 'backup' && <div className="qj-advanced-list">
-      {row('导出备份','配置、助手与聊天资料',()=>setDialog({title:'导出备份',description:'正式版复用原有导出功能，演示模式不生成真实备份。'}))}
-      {row('从备份恢复','恢复前需要核对覆盖范围',()=>setDialog({title:'恢复备份',description:'真实恢复涉及数据覆盖，必须确认。',destructive:true}))}
-      {row('同步状态','查看云端备份及失败原因',()=>setDialog({title:'同步状态',description:'正式版从真实同步记录中读取。'}))}
-    </div>}
+    {panel === 'backup' && <div className="qj-advanced-body">{renderBackup?.()}</div>}
     {notice && <p className="qj-advanced-notice" role="status">{notice}</p>}
     {dialog && <div className="qj-dialog-layer" onClick={()=>setDialog(null)}><div className="qj-dialog" role="dialog" aria-modal="true" aria-label={dialog.title} onClick={e=>e.stopPropagation()}>
       <h3>{dialog.title}</h3><p>{dialog.description}</p>
