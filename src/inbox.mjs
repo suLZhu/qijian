@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { isValidAssistantId } from './server/identity.mjs'
-import { taskResultEnvelope } from './taskResult.mjs'
+import { taskResultEnvelope, parseTaskEnvelope } from './taskResult.mjs'
 export function initInbox(db) {
  db.exec(`CREATE TABLE IF NOT EXISTS assistant_inbox (
  id TEXT PRIMARY KEY, person TEXT NOT NULL, content TEXT NOT NULL,
@@ -35,5 +35,23 @@ export function listInbox(db,since='') {
  return db.prepare('SELECT id,person,content,kind,created_at,read_at FROM assistant_inbox WHERE created_at>? ORDER BY created_at DESC LIMIT 80').all(since)
 }
 export function markInboxRead(db,id) {
- return db.prepare('UPDATE assistant_inbox SET read_at=? WHERE id=? AND read_at IS NULL').run(new Date().toISOString(),id).changes>0
+ // Chat persists the task answer before acknowledging this inbox row.
+ // Keep deletion and the acknowledgment in one transaction so a crash cannot
+ // drop the reminder before its result is safely visible in the conversation.
+ db.exec('BEGIN')
+ try {
+  const row=db.prepare('SELECT person,kind,content FROM assistant_inbox WHERE id=? AND read_at IS NULL').get(id)
+  if(!row){db.exec('COMMIT');return false}
+  if(row.kind==='task_result') {
+   const envelope=parseTaskEnvelope(row.content)
+   if(envelope?.taskId&&envelope.conversationId&&envelope.answer.trim()) {
+    db.prepare(`DELETE FROM scheduled_tasks WHERE id=? AND person=? AND conversation_id=?
+      AND recurrence='once' AND temporary=1 AND created_by=person AND status='completed'`)
+      .run(envelope.taskId,row.person,envelope.conversationId)
+   }
+  }
+  const changed=db.prepare('UPDATE assistant_inbox SET read_at=? WHERE id=? AND read_at IS NULL').run(new Date().toISOString(),id).changes>0
+  db.exec('COMMIT')
+  return changed
+ } catch(error) {db.exec('ROLLBACK');throw error}
 }

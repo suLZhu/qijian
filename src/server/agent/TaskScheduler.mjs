@@ -111,9 +111,9 @@ export function createTaskScheduler(ctx) {
             console.error('[scheduler] deliver failed', task.id, error?.message || error)
           }
         }
-        if (task.recurrence === 'once' && task.temporary && task.created_by === task.person && delivered && String(finished?.answer || '').trim() && task.conversation_id) {
-          db.prepare('DELETE FROM scheduled_tasks WHERE id=? AND person=? AND status=?').run(task.id, task.person, 'completed')
-        }
+        // Keep an assistant-created one-off task until the frontend confirms
+        // its answer is persisted in the original conversation. Inbox read
+        // acknowledgment completes the removal in inbox.mjs.
         bus.publish({ type: 'task_finished', taskId: task.id, runId: run.id, status, delivered })
       })
       .catch(error => {

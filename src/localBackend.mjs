@@ -20,7 +20,7 @@ import { injectTimeContext } from './timeContext.mjs'
 import { readKeyCandidates, isRetryableKeyStatus, resolveChatAccess, chatRequestUrl } from './vendors.mjs'
 import { resolveModelConfig } from './resourceBindings.mjs'
 import { scheduledConversationInstructions, isScheduledConversationTask, scheduledConversationContext, scheduledConversationAnswer } from './server/agent/scheduledConversation.mjs'
-import { taskResultEnvelope } from './taskResult.mjs'
+import { taskResultEnvelope, parseTaskEnvelope } from './taskResult.mjs'
 import { buildRoutePlan, logicalModelId } from './modelRoutes.mjs'
 import { normalizeRouteState, activeLogicalId, fixedRouteId } from './routeState.mjs'
 import { normalizeLocalTask, makeLocalTask, dueLocalTasks, advanceLocalTask } from './localTasks.mjs'
@@ -493,8 +493,9 @@ async function runLocalConversationTask(task, nowMs) {
     const latest = readJSON(K.tasks, [])
     const current = latest.find(item => item?.id === task.id)
     if (!current || current.status !== 'scheduled' || current.run_at !== task.run_at) return
-    const remove = task.recurrence === 'once' && task.temporary && task.created_by === task.person
-    writeJSON(K.tasks, remove ? latest.filter(item => item.id !== task.id) : latest.map(item => item.id === task.id ? advanceLocalTask(task, nowMs) : item))
+    // The assistant's one-off task is removed after the persisted conversation
+    // acknowledges this inbox result, not merely when the model finishes.
+    writeJSON(K.tasks, latest.map(item => item.id === task.id ? advanceLocalTask(task, nowMs) : item))
   } catch (error) {
     const latest = readJSON(K.tasks, [])
     const current = latest.find(item => item?.id === task.id)
@@ -1130,9 +1131,20 @@ export async function localHandle(path, init) {
       if (typeof b.id !== 'string' || b.id.length > 100) return json(400, { error: '参数无效' })
       const all = readJSON(K.inbox, [])
       const message = all.find(m => m && m.id === b.id)
-      if (message) {
+      if (message && !message.read_at) {
+        if (message.kind === 'task_result') {
+          const envelope = parseTaskEnvelope(message.content)
+          if (envelope?.taskId && envelope.conversationId && envelope.answer.trim()) {
+            const tasks = readJSON(K.tasks, [])
+            const task = tasks.find(item => item?.id === envelope.taskId && item.person === message.person && item.conversation_id === envelope.conversationId)
+            if (task?.recurrence === 'once' && task.temporary && task.created_by === task.person && task.status === 'completed') {
+              try { writeJSON(K.tasks, tasks.filter(item => item.id !== task.id)) }
+              catch { return json(500, { error: '任务结果确认失败，请稍后重试' }) }
+            }
+          }
+        }
         message.read_at = nowISO()
-        try { writeJSON(K.inbox, all) } catch { /* 已读标记失败不影响功能 */ }
+        try { writeJSON(K.inbox, all) } catch { return json(500, { error: '收件箱确认失败，请稍后重试' }) }
       }
       return json(200, { ok: true })
     }

@@ -729,10 +729,14 @@ test('一次性喝水提醒读取绑定会话，成功投递后删除助手临�
   assert.ok(requests[0].messages.some(message => message.content.includes('温柔自然地聊天') && message.content.includes('阿懒')))
   assert.ok(requests[0].messages.some(message => message.content === '今天上班有点累'))
   assert.ok(!requests[0].messages.some(message => message.content === '其他会话的内容'))
-  assert.equal(db.prepare('SELECT id FROM scheduled_tasks WHERE id=?').get(taskId), undefined)
-  const result = parseTaskEnvelope(listInbox(db)[0].content)
+  assert.equal(db.prepare('SELECT status FROM scheduled_tasks WHERE id=?').get(taskId).status, 'completed')
+  const message = listInbox(db)[0]
+  const result = parseTaskEnvelope(message.content)
   assert.equal(result.answer, '阿懒，工作辛苦啦，起来喝口水吧。')
   assert.equal(result.prompt, '十分钟后提醒阿懒喝水，起来走动')
+  assert.equal(markInboxRead(db,message.id),true)
+  assert.equal(db.prepare('SELECT id FROM scheduled_tasks WHERE id=?').get(taskId),undefined)
+  assert.equal(markInboxRead(db,message.id),false)
 })
 
 

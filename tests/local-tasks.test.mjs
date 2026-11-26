@@ -192,9 +192,11 @@ test('本地自然提醒调用真实聊天入口并持久化结果后删除一�
     const envelope = JSON.parse(inbox.data.messages[0].content)
     assert.equal(envelope.answer, '阿懒，辛苦啦，起来喝口水吧。')
     assert.equal(envelope.prompt, '十分钟后提醒阿懒喝水，起来走动')
-    assert.equal((await call('/api/tasks?person=' + person)).data.tasks.length, 0)
+    assert.equal((await call('/api/tasks?person=' + person)).data.tasks[0].status, 'completed')
     await post('/api/tasks/run', { now: iso(T0), conversationIds: { [person]: ['c1'] } })
     assert.equal((await call('/api/inbox')).data.messages.length, 1)
+    assert.equal((await post('/api/inbox/read', { id: inbox.data.messages[0].id })).status, 200)
+    assert.equal((await call('/api/tasks?person=' + person)).data.tasks.length, 0)
   } finally {
     globalThis.fetch = originalFetch
   }
@@ -267,8 +269,10 @@ test('本地提醒结果已入收件箱但任务未结算时，恢复不重复�
     const result = await post('/api/tasks/run', { now: iso(T0), conversationIds: { [person]: ['c1'] } })
     assert.equal(result.status, 200)
     assert.equal(requests, 0)
-    assert.equal((await call('/api/tasks?person=' + person)).data.tasks.length, 0)
+    assert.equal((await call('/api/tasks?person=' + person)).data.tasks[0].status, 'completed')
     assert.equal((await call('/api/inbox')).data.messages.length, 1)
+    await post('/api/inbox/read', { id: existing.id })
+    assert.equal((await call('/api/tasks?person=' + person)).data.tasks.length, 0)
   } finally {
     globalThis.fetch = originalFetch
   }
