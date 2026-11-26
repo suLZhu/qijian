@@ -74,7 +74,7 @@ export function coolHeat(db, person, amount = COOL_PER_MESSAGE) {
 // `deliver(person, content)` is injected by the server so inbox delivery
 // stays in the existing inbox module — no cross-module hacks.
 // Returns { fired, person, eventId, reason } for observability.
-export function tickHeat({ db, runner, bus, deliver, now = new Date() }) {
+export function tickHeat({ db, runner, bus, deliver, busy, now = new Date() }) {
   ensureHeatTable(db)
   const people = db.prepare('SELECT person FROM proactive_settings').all().map(r => r.person)
   const result = { fired: false, person: null, eventId: null, reason: 'none' }
@@ -98,7 +98,7 @@ export function tickHeat({ db, runner, bus, deliver, now = new Date() }) {
     writeHeat(db, person, nextHeat, now)
 
     if (nextHeat < HEAT_THRESHOLD) continue
-    const wake = wakeProactive(db, person, { now })
+    const wake = wakeProactive(db, person, { now, busy })
     if (!wake.queued) { result.reason = wake.reason; continue }
 
     // Heat is spent the moment a wake is granted, queued or not.

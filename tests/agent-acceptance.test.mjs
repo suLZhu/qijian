@@ -17,6 +17,7 @@ import { initToolLogs, listToolLogs } from '../src/toolLog.mjs'
 import { initToolPolicies, setPolicy } from '../src/server/agent/ToolPolicy.mjs'
 import { decideApproval, pendingList } from '../src/server/agent/ApprovalGate.mjs'
 import { createTaskScheduler } from '../src/server/agent/TaskScheduler.mjs'
+import { createChatActivity } from '../src/server/chatActivity.mjs'
 import { createToolRegistry } from '../src/server/agent/ToolRegistry.mjs'
 import { executeToolCall } from '../src/server/agent/ToolExecutor.mjs'
 import { createFakeMcpServer, fakeMcpConnection } from '../src/server/fakeMcp.mjs'
@@ -754,5 +755,26 @@ test('模型请求在途时撤销记忆权限，调用前重新检查并记录�
   assert.equal(result.ok, false)
   assert.match(result.content, /没有读取记忆的权限/)
   assert.ok(listToolLogs(db, { person: PERSON }).some(row => row.errorCode === 'PROACTIVE_PERMISSION_REVOKED'))
+  db.close()
+})
+
+
+test('普通聊天在途时自主唤醒延后，同助手多条流全部结束后才恢复', () => {
+  const db = makeDb()
+  initProactive(db)
+  const base = { enabled: true, mode: 'natural', quiet_start: 0, quiet_end: 0, interval_hours: 2, daily_wake_limit: 6, daily_token_limit: 12000 }
+  configureProactive(db, PERSON, base)
+  configureProactive(db, 'assistant-yanshuo', base)
+  const activity = createChatActivity()
+  const release1 = activity.begin(PERSON)
+  const release2 = activity.begin(PERSON)
+  assert.equal(wakeProactive(db, PERSON, {manual:false,busy:p=>activity.busy(p)}).reason, 'assistant_busy')
+  release1()
+  release1()
+  assert.equal(activity.busy(PERSON), true)
+  assert.equal(wakeProactive(db, 'assistant-yanshuo', {manual:false,busy:p=>activity.busy(p)}).queued, true)
+  release2()
+  assert.equal(activity.busy(PERSON), false)
+  assert.equal(wakeProactive(db, PERSON, {manual:false,busy:p=>activity.busy(p)}).queued, true)
   db.close()
 })

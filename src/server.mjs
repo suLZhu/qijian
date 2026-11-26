@@ -44,6 +44,7 @@ import { AgentRunner } from './server/agent/AgentRunner.mjs'
 import { initToolPolicies, setPolicy, listPolicies } from './server/agent/ToolPolicy.mjs'
 import { decideApproval, isPending } from './server/agent/ApprovalGate.mjs'
 import { createTaskScheduler, recoverInterruptedTasks } from './server/agent/TaskScheduler.mjs'
+import { createChatActivity } from './server/chatActivity.mjs'
 import { initProactiveHeat, tickHeat, coolHeat, readHeat, dispatchProactiveRun, recoverInterruptedWakes } from './server/agent/ProactiveHeat.mjs'
 import { initMemoryStore, SQLiteMemoryProvider, MEMORY_LIFECYCLES, importMemoryRecords } from './server/agent/MemoryStore.mjs'
 import { initMemoryAutoOrganize, autoConfigStatus, saveAutoConfig, tickMemoryAutoOrganize, triggerAutoOrganize } from './server/agent/MemoryAutoOrganize.mjs'
@@ -315,6 +316,7 @@ function displayNameFor(person) {
   } catch { /* fall through */ }
   return person
 }
+const chatActivity = createChatActivity()
 const agentRunner = new AgentRunner({
   db,
   bus: agentEvents,
@@ -457,9 +459,11 @@ const apiServer = createServer(async (req, res) => {
     const controller = new AbortController()
     let finished = false
     res.on('close', () => { if (!finished) controller.abort() })
+    let releaseChat = () => {}
     try {
       // 聊天请求可携带图片 base64，上限放宽到 32 MB。
       const b = await readBody(req, 32 * 1024 * 1024)
+      if (isValidAssistantId(b.assistantId)) releaseChat = chatActivity.begin(b.assistantId)
       // 订阅账号：ChatGPT/Codex、Claude、Grok 的协议和 OpenAI 兼容接口不同，走专用适配器。
       if (b.subscriptionProtocol) {
         // 与标准链路一致：每次请求都用当前时间重新生成时间上下文。
@@ -571,7 +575,7 @@ const apiServer = createServer(async (req, res) => {
       if (res.headersSent) { try { res.end() } catch { /* 连接已断开 */ } return }
       const msg = error?.name === 'TimeoutError' || error?.name === 'AbortError' ? '请求被中断或超时' : (error?.cause?.code || error?.message || '请求失败')
       return send(res, 502, { error: '无法连接该接口：' + msg })
-    }
+    } finally { releaseChat() }
   }
 
   if (url.pathname === '/api/diary' && req.method === 'GET') {
@@ -1345,7 +1349,7 @@ setInterval(() => {
 // the shared AgentRunner. Silence is recorded as silence, not a fake message.
 setInterval(() => {
   try {
-    const result = tickHeat({ db, runner: agentRunner, bus: agentEvents, deliver: deliverProactive })
+    const result = tickHeat({ db, runner: agentRunner, bus: agentEvents, deliver: deliverProactive, busy: person => chatActivity.busy(person) })
     if (result.fired) console.log(`[proactive] heat fired for ${result.person} (${result.eventId})`)
   } catch (error) { console.error('[proactive]', error.message) }
 }, 60_000).unref()

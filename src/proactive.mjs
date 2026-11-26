@@ -69,7 +69,7 @@ export function proactiveTokenUsage(db,person,now=new Date()) {
  return {tokens,unknown}
 }
 
-export function wake(db,person,{manual=false,now=new Date()}={}) {
+export function wake(db,person,{manual=false,now=new Date(),busy:busyCallback=()=>false}={}) {
  if(!PEOPLE.includes(person))throw new Error('无效人物')
  const config=settings(db,person)
  if(!config.enabled)return {queued:false,reason:'disabled'}
@@ -88,6 +88,7 @@ export function wake(db,person,{manual=false,now=new Date()}={}) {
   // Leave heat intact so the next tick can retry when the conversation is idle.
   const busy=db.prepare("SELECT 1 FROM agent_runs WHERE assistant_id=? AND status='running' LIMIT 1").get(person)
   if(busy)return {queued:false,reason:'assistant_busy'}
+  if(busyCallback(person))return {queued:false,reason:'assistant_busy'}
  }
  const pending=db.prepare("SELECT count(*) AS n FROM proactive_events WHERE person=? AND status='pending'").get(person).n
  if(pending)return {queued:false,reason:'pending_exists'}

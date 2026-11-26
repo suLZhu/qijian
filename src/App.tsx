@@ -1631,7 +1631,7 @@ export default function App() {
       for(let round=0;round<toolBudget.roundLimit&&!finished;round++){
         const requestBody:any={model:activeModel.model.trim(),messages:requestMessages,stream:true,stream_options:{include_usage:true}}
         if(openAITools.length){requestBody.tools=openAITools;requestBody.tool_choice='auto'}
-        const chatProxy=()=>apiFetch('/api/chat',{method:'POST',credentials:'include',headers:{'Content-Type':'application/json'},signal:abortController.signal,body:JSON.stringify({endpoint:activeModel.endpoint.trim(),chatUrl:activeChatUrl,apiKey:activeApiKey.trim(),apiKeys:apiKeyCandidates,timeZone,timeEnabled:chatPrefs.timeEnabled,body:requestBody,...(subscriptionProtocol?{subscriptionProtocol,subscriptionAccountId}:{}),...(routeMode?{routes:routePlan}:{})})})
+        const chatProxy=()=>apiFetch('/api/chat',{method:'POST',credentials:'include',headers:{'Content-Type':'application/json'},signal:abortController.signal,body:JSON.stringify({assistantId:target,endpoint:activeModel.endpoint.trim(),chatUrl:activeChatUrl,apiKey:activeApiKey.trim(),apiKeys:apiKeyCandidates,timeZone,timeEnabled:chatPrefs.timeEnabled,body:requestBody,...(subscriptionProtocol?{subscriptionProtocol,subscriptionAccountId}:{}),...(routeMode?{routes:routePlan}:{})})})
         if(!upstreamStartedAt){
           preflightFinishedAt=performance.now()
           upstreamStartedAt=preflightFinishedAt
@@ -2066,7 +2066,7 @@ export default function App() {
     if(subscriptionProtocol&&isLocalMode()&&!nativeHttpStreamAvailable())throw new Error('订阅聊天需要 App 原生网络桥，请用最新 APK 或连接服务器。')
     if(!routeMode&&!subscriptionProtocol&&(!activeModel.endpoint.trim()||!activeModel.model.trim()||!activeApiKey.trim()))throw new Error('尚未配置可用的模型，无法翻译。')
     const body={model:activeModel.model.trim(),messages:buildTranslationMessages(text),stream:false}
-    const response=await apiFetch('/api/chat',{method:'POST',credentials:'include',headers:{'Content-Type':'application/json'},body:JSON.stringify({endpoint:activeModel.endpoint.trim(),chatUrl:activeChatUrl,apiKey:activeApiKey.trim(),apiKeys:apiKeyCandidates,timeZone,body,...(subscriptionProtocol?{subscriptionProtocol,subscriptionAccountId}:{}),...(routeMode?{routes:routePlan}:{})})})
+    const response=await apiFetch('/api/chat',{method:'POST',credentials:'include',headers:{'Content-Type':'application/json'},body:JSON.stringify({assistantId:target,endpoint:activeModel.endpoint.trim(),chatUrl:activeChatUrl,apiKey:activeApiKey.trim(),apiKeys:apiKeyCandidates,timeZone,body,...(subscriptionProtocol?{subscriptionProtocol,subscriptionAccountId}:{}),...(routeMode?{routes:routePlan}:{})})})
     if(!response.ok)throw new Error('翻译请求失败（HTTP '+response.status+'）')
     const data:any=await response.json()
     const out=data?.choices?.[0]?.message?.content??data?.choices?.[0]?.text
