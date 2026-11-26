@@ -21,8 +21,9 @@ const devicePanels: Panel[] = [
   { id: 'lock', title: '应用锁', note: 'PIN、锁定名单与排除名单' },
   { id: 'backup', title: '备份与恢复', note: '导出、恢复及同步状态' },
 ]
-export function AdvancedSettingsPreview({ kind, renderMcp }: { kind: 'tools' | 'device'; renderMcp?: () => ReactNode }) {
+export function AdvancedSettingsPreview({ kind, renderMcp, renderWorkspace }: { kind: 'tools' | 'device'; renderMcp?: () => ReactNode; renderWorkspace?: () => ReactNode }) {
   const prefs = useChatDisplay()
+  const [weatherCity, setWeatherCity] = useState(prefs.weatherCity)
   const [panel, setPanel] = useState('')
   const [dialog, setDialog] = useState<Dialog | null>(null)
   const [notice, setNotice] = useState('')
@@ -42,6 +43,14 @@ export function AdvancedSettingsPreview({ kind, renderMcp }: { kind: 'tools' | '
       <label><input type="checkbox" checked={prefs.toolsEnabled} onChange={e => saveChatDisplay({ ...prefs, toolsEnabled: e.target.checked })}/> 聊天工具</label>
       <label><input type="checkbox" checked={prefs.timeEnabled} onChange={e => saveChatDisplay({ ...prefs, timeEnabled: e.target.checked })}/> 注入当前时间</label>
     </div>}
+    {kind === 'tools' && !panel && <form className="qj-advanced-body" onSubmit={e => {
+      e.preventDefault()
+      saveChatDisplay({ ...prefs, weatherCity })
+    }}>
+      <label>天气城市 <input value={weatherCity} maxLength={80} onChange={e => setWeatherCity(e.target.value)} placeholder="留空关闭天气" /></label>
+      <button type="submit">保存城市</button>
+      {prefs.weatherCity && <small>已启用 · {prefs.weatherCity} · Open-Meteo</small>}
+    </form>}
     {!panel && <div className="qj-advanced-list">{items.map(item => row(item.title,item.note,()=>setPanel(item.id)))}</div>}
     {panel === 'mcp' && <div className="qj-advanced-body">{renderMcp?.()}</div>}
     {panel === 'skills' && <div className="qj-advanced-body">
@@ -58,12 +67,7 @@ export function AdvancedSettingsPreview({ kind, renderMcp }: { kind: 'tools' | '
     {panel === 'history' && <div className="qj-advanced-body">
       <div className="qj-advanced-empty">暂无演示调用记录。正式版按助手、工具与执行时间筛选。</div>
     </div>}
-    {panel === 'workspace' && <div className="qj-advanced-list">
-      {row('工作目录','允许访问的文件夹范围',()=>setDialog({title:'工作目录',description:'正式版接入原工作区路径选择，不允许默认访问整个设备。'}))}
-      {row('读取权限','读取和搜索文件',()=>setDialog({title:'读取权限',description:'由用户授权可读取的文件范围。'}))}
-      {row('修改权限','写入、删除、执行命令',()=>setDialog({title:'修改权限',description:'敏感操作需要清楚的确认与审计。',destructive:true}))}
-      {row('工作区自检','检查状态并显示中文结论',()=>setDialog({title:'工作区自检',description:'助手自动排查尚未接入，当前仅预留布局。'}))}
-    </div>}
+    {panel === 'workspace' && <div className="qj-advanced-body">{renderWorkspace?.()}</div>}
     {panel === 'notify' && <div className="qj-advanced-body">
       <AndroidSystemSettings
         people={['assistant-yanweixi','assistant-yanshuo']}

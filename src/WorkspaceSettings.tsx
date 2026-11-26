@@ -72,6 +72,22 @@ export function WorkspaceSettings({ people, displayName, onSaved }: {
     finally { setBusy(false) }
   }
 
+  async function checkWorkspace() {
+    setBusy(true)
+    setError('')
+    setNotice('')
+    try {
+      const response = await apiFetch('/api/workspace/run', {
+        method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ person, action: 'list', args: { path: '.' } }),
+      })
+      const data = await response.json()
+      if (!response.ok) throw new Error(data.error || '工作区读取失败')
+      setNotice('检查通过。已读取该助手授权目录。')
+    } catch (error) { setError(error instanceof Error ? error.message : '工作区检查失败') }
+    finally { setBusy(false) }
+  }
+
   if (local) return <section className="workspace-settings">
     <p className="muted">本机工作区需要文件系统，而 APK 的网页层没有直接文件权限；它靠「服务器」提供文件、Git 与命令能力。</p>
     <div className="ws-local-guide">
@@ -100,6 +116,7 @@ export function WorkspaceSettings({ people, displayName, onSaved }: {
     {error && <p className="mcp-error" role="alert">{error}</p>}
     {notice && <p className="mcp-notice" role="status">{notice}</p>}
     <div className="ws-actions"><button type="button" disabled={busy || !root.trim()} onClick={() => void save()}>{busy ? '保存中…' : '保存工作区设置'}</button></div>
+    <button type="button" disabled={busy || !config?.enabled} onClick={() => void checkWorkspace()}>检查工作区</button>
     <p className="ws-warning">提示：开启命令执行后，模型可以运行任意 bash 命令。请只在自己信任的目录、且你本人能接受风险时开启；每次执行仍会弹确认。</p>
   </section>
 }

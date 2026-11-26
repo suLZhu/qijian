@@ -7,6 +7,7 @@ export const DEFAULT_CHAT_DISPLAY = {
   fontSize: 12,
   toolsEnabled: true,
   timeEnabled: true,
+  weatherCity: '',
   assistantAvatar: true,
   userAvatar: true,
   assistantName: false,
@@ -29,6 +30,7 @@ export function normalizeChatDisplay(raw) {
   }
   if ([5,10,15,20].includes(Number(raw.toolRoundLimit))) d.toolRoundLimit = Number(raw.toolRoundLimit)
   if ([12, 13, 14, 15, 16].includes(Number(raw.fontSize))) d.fontSize = Number(raw.fontSize)
+  if (typeof raw.weatherCity === 'string') d.weatherCity = raw.weatherCity.trim().slice(0, 80)
   if (raw.timePos === 'above' || raw.timePos === 'below') d.timePos = raw.timePos
   return d
 }

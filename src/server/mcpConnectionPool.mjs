@@ -25,11 +25,11 @@ export function createMcpConnectionPool({ createClient, maxConnections = 48 }) {
     if (closed) throw new Error('MCP 连接池已经关闭')
     const old = entries.get(key)
     if (old && old.version === version && !old.invalidated) return old.promise
-    if (old) await drop(key)
+    if (old) void drop(key)
     // LRU 限制后台连接数量，避免添加大量服务时耗尽 socket。
     if (entries.size >= maxConnections) {
       const leastUsed = [...entries.entries()].sort((a,b)=>a[1].usedAt-b[1].usedAt)[0]
-      if (leastUsed) await drop(leastUsed[0])
+      if (leastUsed) void drop(leastUsed[0])
     }
     const entry = { version, invalidated: false, usedAt: Date.now(), promise: null }
     entry.promise = (async () => {
@@ -49,13 +49,14 @@ export function createMcpConnectionPool({ createClient, maxConnections = 48 }) {
   }
 
   async function use(key, version, config, operation) {
-    const result = await acquire(key, version, config)
+    const pending = acquire(key, version, config)
     const entry = entries.get(key)
+    const result = await pending
     if (entry?.version === version) entry.usedAt = Date.now()
     try { return await operation(result.client) }
     catch (error) {
       // 无条件清理故障连接以供下次重连，不自动重复本次工具调用。
-      if (entries.get(key)?.version === version) await drop(key)
+      if (entries.get(key) === entry) await drop(key)
       throw error
     }
   }

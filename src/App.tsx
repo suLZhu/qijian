@@ -1,3 +1,4 @@
+import { readWeatherContext } from './weatherContext.mjs'
 import type { LedgerRound } from './usageLedger.mjs'
 import { useCallback, useEffect, useMemo, useState, useRef, type FormEvent, type ChangeEvent } from 'react'
 import './App.css'
@@ -1529,8 +1530,15 @@ export default function App() {
         6000,2000
       )
       for(const content of assistantWorld){historyWithWorld.push({role:'assistant',content})}
+      const chatPrefs = loadChatDisplay()
+      let weather = ''
+      if (chatPrefs.weatherCity) {
+        const signal = AbortSignal.any([abortController.signal, AbortSignal.timeout(1100)])
+        weather = await readWeatherContext(chatPrefs.weatherCity, { signal }).catch(() => '')
+      }
       const requestMessages:any[]=[
         ...(system?[{role:'system',content:system}]:[]),
+        ...(weather ? [{ role: 'system', content: weather }] : []),
         ...(contextSummary?[{role:'system',content:buildSummarySystemMessage(contextSummary,summaryCovered)}]:[]),
         ...(localRecallContext?[{role:'system',content:localRecallContext}]:[]),
         ...(recalledContext?[{role:'system',content:recalledContext}]:[]),
@@ -1541,7 +1549,6 @@ export default function App() {
       for(const e of matched.filter(e=>e.target==='user'&&e.position==='depth').slice(0,4)){const at=Math.max(system?1:0,requestMessages.length-1-Math.max(0,e.depth));requestMessages.splice(at,0,{role:'user',content:'【世界书：'+clipContextText(e.title,120)+'】\n'+clipContextText(e.content,1800)})}
       // Load tools only from the active character's server-side MCP bindings.
       const toolRoutes=new Map<string,{id:string;person:Person;name:string;connectionName:string}>()
-      const chatPrefs = loadChatDisplay()
       const openAITools:any[]=[]
       let mcpToolSchemaChars=0
       let mcpToolCount=0
@@ -2310,6 +2317,7 @@ export default function App() {
     onDraftChange={v=>setDraft(v)}
     onSend={prototypeSend}
     renderSubscription={()=> <SubscriptionAccounts vendors={vendors} setVendors={setVendors} setModelProfiles={setModelProfiles} subscriptions={subscriptions} setSubscriptions={setSubscriptions}/>}
+    renderWorkspace={()=> <WorkspaceSettings people={assistants.map(a=>a.id)} displayName={displayName} onSaved={config=>setWorkspaceConfigs(old=>({...old,[config.person]:config}))}/>}
     renderResource={kind=> <ResourceLibrary key={kind} only={kind} worldEntries={worldEntries} setWorldEntries={setWorldEntries} modelProfiles={modelProfiles} setModelProfiles={setModelProfiles} bindings={bindings} setBindings={setBindings} displayName={displayName}/>}
     renderTasks={target=> <TaskManager key={target} person={target} personLabel={displayName} conversationId={activeConversationIds[target]||''}/>}
     renderUsage={()=> <UsageStats people={assistants.map(a=>a.id)} conversations={conversations} models={Object.fromEntries(assistants.map(a=>[a.id,resolveModelConfig(bindings[a.id]?.modelProfileId||defaultModelId||'',modelProfiles,modelConfig[a.id]).model]))} displayName={displayName}/>}
