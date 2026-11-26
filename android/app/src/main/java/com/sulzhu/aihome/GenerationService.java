@@ -112,7 +112,9 @@ public final class GenerationService extends Service {
         acquireWakeLock();
         // 真机证据：FGS 实际启动 / 停止。adb logcat -s AiHome:gen 可见。
         Log.i("AiHome:gen", "fgs_started assistant=" + assistant + " wakelock=" + (wakeLock != null && wakeLock.isHeld()));
-        return START_REDELIVER_INTENT;
+        // The WebView owns the actual request. Recreating only this service
+        // would show a stale “generating” notification without resuming it.
+        return START_NOT_STICKY;
     }
 
     @Override public void onDestroy() {

@@ -436,8 +436,9 @@ const activeLocalTasks = new Set()
 async function runLocalConversationTask(task, nowMs) {
   if (activeLocalTasks.has(task.id)) return
   activeLocalTasks.add(task.id)
+  const runId = 'local-' + task.id + '-' + Date.parse(task.run_at)
+  let protectedRun = false
   try {
-    const runId = 'local-' + task.id + '-' + Date.parse(task.run_at)
     const inboxId = 'task-' + runId
     let inbox = readJSON(K.inbox, [])
     let result = inbox.find(item => item && item.id === inboxId)
@@ -480,14 +481,9 @@ async function runLocalConversationTask(task, nowMs) {
       const body = { model: model.model, stream: false, messages }
       // The existing Android generation service owns this request while it is in flight.
       // A completed response still goes through the same durable inbox/ack path below.
-      const protectedRun = setGenerationForeground({ action: 'start', assistantId: task.person, conversationId: task.conversation_id, messageId: runId })
-      let response, data
-      try {
-        response = await handleChat({ signal: AbortSignal.timeout(45000), body: JSON.stringify({ endpoint: model.endpoint, chatUrl: vendor ? chatRequestUrl(vendor) : '', timeZone: state.timeZone, body, ...access }) })
-        data = await response.json().catch(() => ({}))
-      } finally {
-        if (protectedRun) setGenerationForeground({ action: 'stop', messageId: runId })
-      }
+      protectedRun = setGenerationForeground({ action: 'start', assistantId: task.person, conversationId: task.conversation_id, messageId: runId })
+      const response = await handleChat({ signal: AbortSignal.timeout(45000), body: JSON.stringify({ endpoint: model.endpoint, chatUrl: vendor ? chatRequestUrl(vendor) : '', timeZone: state.timeZone, body, ...access }) })
+      const data = await response.json().catch(() => ({}))
       if (!response.ok) throw new Error(data.error || '模型请求失败')
       const answer = scheduledConversationAnswer(data.choices?.[0]?.message?.content, task.prompt)
       const current = readJSON(K.tasks, []).find(item => item?.id === task.id)
@@ -511,6 +507,7 @@ async function runLocalConversationTask(task, nowMs) {
       writeJSON(K.tasks, latest.map(item => item.id === task.id ? { ...item, status: 'paused', last_error: String(error?.message || '任务执行失败'), updated_at: nowISO() } : item))
     }
   } finally {
+    if (protectedRun) setGenerationForeground({ action: 'stop', messageId: runId })
     activeLocalTasks.delete(task.id)
   }
 }
