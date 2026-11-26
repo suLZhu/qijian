@@ -10,7 +10,7 @@
 
 const str = (v) => String(v ?? '').trim()
 const RECURRENCE = ['once', 'daily', 'weekly']
-const STATUS = ['scheduled', 'paused', 'completed']
+const STATUS = ['scheduled', 'running', 'paused', 'completed']
 const DAY = 86_400_000
 const WEEK = 604_800_000
 

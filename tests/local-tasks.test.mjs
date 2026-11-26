@@ -241,6 +241,9 @@ test('本地提醒生成中暂停任务，不投递也不覆盖暂停状态', as
     const created = await post('/api/workflows/manage', { person, action: 'create', title: '提醒喝水', prompt: '提醒阿懒喝水', runAt: iso(T0 - 1000), temporary: true, conversationId: 'c1' })
     const running = post('/api/tasks/run', { now: iso(T0), conversationIds: { [person]: ['c1'] } })
     await startedPromise
+    assert.equal((await call('/api/tasks?person=' + person)).data.tasks[0].status, 'running')
+    assert.equal((await put('/api/tasks/' + created.data.task.id, { person, status: 'scheduled' })).status, 409)
+    assert.equal((await post('/api/workflows/manage', { person, action: 'resume', id: created.data.task.id })).status, 409)
     const overlap = await post('/api/tasks/run', { now: iso(T0), conversationIds: { [person]: ['c1'] } })
     assert.equal(overlap.data.fired.length, 0)
     await put('/api/tasks/' + created.data.task.id, { person, status: 'paused' })
@@ -321,4 +324,37 @@ test('自然提醒绑定会话消失时暂停并保留任务，不向其他会�
   assert.equal(tasks[0].status, 'paused')
   assert.match(tasks[0].last_error, /绑定会话不可用/)
   assert.equal((await call('/api/inbox')).data.messages.length, 0)
+})
+
+test('本地模型请求中断后保留结果未知状态，不自动重复扣费', async () => {
+  localStorage.clear()
+  const person = 'assistant-001'
+  const created = await post('/api/workflows/manage', { person, action: 'create', title: '提醒喝水', prompt: '提醒阿懒喝水', runAt: iso(T0 - 1000), temporary: true, conversationId: 'c1' })
+  const task = created.data.task
+  localStorage.setItem('ai-home.local.tasks', JSON.stringify([{ ...task, status: 'running' }]))
+  const originalFetch = globalThis.fetch
+  let calls = 0
+  globalThis.fetch = async () => { calls++; throw Error('不应重试') }
+  try {
+    const tasks = (await call('/api/tasks?person=' + person)).data.tasks
+    assert.equal(tasks[0].status, 'paused')
+    assert.match(tasks[0].last_error, /结果未知/)
+    assert.equal((await post('/api/tasks/run', { now: iso(T0) })).data.fired.length, 0)
+    assert.equal(calls, 0)
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+})
+
+test('本地模型结果已经持久化但状态未推进时，重启只结算不重复生成', async () => {
+  localStorage.clear()
+  const person = 'assistant-001'
+  const created = await post('/api/workflows/manage', { person, action: 'create', title: '提醒喝水', prompt: '提醒阿懒喝水', runAt: iso(T0 - 1000), temporary: true, conversationId: 'c1' })
+  const task = created.data.task
+  const runId = 'local-' + task.id + '-' + Date.parse(task.run_at)
+  localStorage.setItem('ai-home.local.tasks', JSON.stringify([{ ...task, status: 'running' }]))
+  localStorage.setItem('ai-home.local.inbox', JSON.stringify([{ id: 'task-' + runId, kind: 'task_result', person, content: JSON.stringify({ runId, taskId: task.id, conversationId: 'c1', answer: '喝点水吧。' }), created_at: iso(T0), read_at: null }]))
+  const tasks = (await call('/api/tasks?person=' + person)).data.tasks
+  assert.equal(tasks[0].status, 'completed')
+  assert.equal((await post('/api/tasks/run', { now: iso(T0) })).data.fired.length, 0)
 })

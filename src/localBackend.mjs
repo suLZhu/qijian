@@ -433,6 +433,29 @@ function sseKeepAlive() {
 // a completed result if the process stops between writing it and advancing the task.
 const activeLocalTasks = new Set()
 
+// A persisted running task with no live JS owner has an unknown upstream
+// outcome. Never pay for the same turn twice after a killed WebView.
+function recoverInterruptedLocalTasks() {
+  const tasks = readJSON(K.tasks, [])
+  if (!Array.isArray(tasks) || !tasks.some(t => t?.status === 'running' && !activeLocalTasks.has(t.id))) return tasks
+  const inbox = readJSON(K.inbox, [])
+  const results = new Map((Array.isArray(inbox) ? inbox : [])
+    .filter(item => item?.kind === 'task_result')
+    .map(item => [item.id, parseTaskEnvelope(item.content)]))
+  const recovered = tasks.map(raw => {
+    if (raw?.status !== 'running' || activeLocalTasks.has(raw.id)) return raw
+    const task = normalizeLocalTask(raw)
+    if (!task) return raw
+    const runId = 'local-' + task.id + '-' + Date.parse(task.run_at)
+    const envelope = results.get('task-' + runId)
+    return envelope?.runId === runId && envelope.taskId === task.id
+      ? advanceLocalTask(task, Date.now())
+      : { ...task, status: 'paused', last_error: '上次执行在模型请求途中中断，结果未知；请检查后再手动恢复。', updated_at: nowISO() }
+  })
+  writeJSON(K.tasks, recovered)
+  return recovered
+}
+
 async function runLocalConversationTask(task, nowMs) {
   if (activeLocalTasks.has(task.id)) return
   activeLocalTasks.add(task.id)
@@ -442,6 +465,7 @@ async function runLocalConversationTask(task, nowMs) {
     const inboxId = 'task-' + runId
     let inbox = readJSON(K.inbox, [])
     let result = inbox.find(item => item && item.id === inboxId)
+    const reusedResult = !!result
     if (!result) {
       const state = readJSON(K.state, {}) || {}
       const conversations = state.conversations?.[task.person] || []
@@ -481,13 +505,20 @@ async function runLocalConversationTask(task, nowMs) {
       const body = { model: model.model, stream: false, messages }
       // The existing Android generation service owns this request while it is in flight.
       // A completed response still goes through the same durable inbox/ack path below.
+      const beforeRequest = readJSON(K.tasks, [])
+      const currentBeforeRequest = beforeRequest.find(item => item?.id === task.id)
+      if (!currentBeforeRequest || currentBeforeRequest.status !== 'scheduled' || currentBeforeRequest.run_at !== task.run_at) return
+      // The reservation is durable before the model request. A killed WebView
+      // will recover it as unknown rather than silently spending again.
+      writeJSON(K.tasks, beforeRequest.map(item => item.id === task.id
+        ? { ...item, status: 'running', updated_at: nowISO() } : item))
       protectedRun = setGenerationForeground({ action: 'start', assistantId: task.person, conversationId: task.conversation_id, messageId: runId })
       const response = await handleChat({ signal: AbortSignal.timeout(45000), body: JSON.stringify({ endpoint: model.endpoint, chatUrl: vendor ? chatRequestUrl(vendor) : '', timeZone: state.timeZone, body, ...access }) })
       const data = await response.json().catch(() => ({}))
       if (!response.ok) throw new Error(data.error || '模型请求失败')
       const answer = scheduledConversationAnswer(data.choices?.[0]?.message?.content, task.prompt)
       const current = readJSON(K.tasks, []).find(item => item?.id === task.id)
-      if (!current || current.status !== 'scheduled' || current.run_at !== task.run_at) return
+      if (!current || current.status !== 'running' || current.run_at !== task.run_at) return
       const latestState = readJSON(K.state, {}) || {}
       if (!latestState.conversations?.[task.person]?.some(item => item?.id === task.conversation_id)) throw new Error('绑定会话不可用，任务已暂停')
       result = { id: inboxId, person: task.person, kind: 'task_result', content: taskResultEnvelope({ runId, taskId: task.id, conversationId: task.conversation_id, title: task.title, prompt: task.prompt, answer }), created_at: new Date(nowMs).toISOString(), read_at: null }
@@ -496,14 +527,15 @@ async function runLocalConversationTask(task, nowMs) {
     }
     const latest = readJSON(K.tasks, [])
     const current = latest.find(item => item?.id === task.id)
-    if (!current || current.status !== 'scheduled' || current.run_at !== task.run_at) return
+    if (!current || current.run_at !== task.run_at
+      || (current.status !== 'running' && !(reusedResult && current.status === 'scheduled'))) return
     // The assistant's one-off task is removed after the persisted conversation
     // acknowledges this inbox result, not merely when the model finishes.
     writeJSON(K.tasks, latest.map(item => item.id === task.id ? advanceLocalTask(task, nowMs) : item))
   } catch (error) {
     const latest = readJSON(K.tasks, [])
     const current = latest.find(item => item?.id === task.id)
-    if (current && current.status === 'scheduled' && current.run_at === task.run_at) {
+    if (current && ['scheduled', 'running'].includes(current.status) && current.run_at === task.run_at) {
       writeJSON(K.tasks, latest.map(item => item.id === task.id ? { ...item, status: 'paused', last_error: String(error?.message || '任务执行失败'), updated_at: nowISO() } : item))
     }
   } finally {
@@ -1005,7 +1037,7 @@ export async function localHandle(path, init) {
     // 存储形状与 server.mjs 的 scheduled_tasks 同构（snake_case），前端零感知。
     if (p === '/api/tasks' && method === 'GET') {
       const person = q.get('person') || ''
-      const all = readJSON(K.tasks, [])
+      const all = recoverInterruptedLocalTasks()
       const tasks = (Array.isArray(all) ? all : [])
         .filter(t => t && (!person || t.person === person))
         .sort((a, b) => Date.parse(a.run_at) - Date.parse(b.run_at))
@@ -1027,7 +1059,7 @@ export async function localHandle(path, init) {
       const b = await readBody(init).catch(() => ({}))
       const parsed = Date.parse(String(b.now || ''))
       const nowMs = Number.isFinite(parsed) ? parsed : Date.now()
-      const all = readJSON(K.tasks, [])
+      const all = recoverInterruptedLocalTasks()
       const list = (Array.isArray(all) ? all : []).map(normalizeLocalTask).filter(Boolean)
       const due = dueLocalTasks(list, nowMs).filter(task => {
         if (!task.conversation_id || !b.conversationIds || typeof b.conversationIds !== 'object') return true
@@ -1067,6 +1099,9 @@ export async function localHandle(path, init) {
       const i = list.findIndex(t => t && t.id === taskMatch[1] && t.person === String(b.person || ''))
       if (i < 0) return json(404, { error: '找不到该人物的任务' })
       const row = list[i]
+      if (row.status === 'running' && (b.status === 'scheduled' || b.runAt !== undefined)) {
+        return json(409, { error: '任务正在生成，请等结果落盘后再修改执行时间或恢复' })
+      }
       let runAt = row.run_at
       if (b.runAt !== undefined) {
         if (!Number.isFinite(Date.parse(String(b.runAt)))) return json(400, { error: '执行时间无效' })
@@ -1105,6 +1140,7 @@ export async function localHandle(path, init) {
       const row = list.find(t => t && t.id === String(b.id || '') && t.person === person)
       if (!row) return json(404, { error: '工作流不存在或不属于当前助手' })
       if (row.created_by && row.created_by !== person) return json(403, { error: '不能自动管理用户创建的工作流' })
+      if (row.status === 'running' && b.action === 'resume') return json(409, { error: '任务正在生成，不能重复启动' })
       let next
       if (b.action === 'delete') {
         if (!row.temporary) return json(403, { error: '长期工作流禁止自动永久删除，请手动处理' })
