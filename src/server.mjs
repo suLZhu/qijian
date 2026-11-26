@@ -484,7 +484,7 @@ const apiServer = createServer(async (req, res) => {
       if (Array.isArray(b.routes) && b.routes.length) {
         const result = await runRouteChat({
           routes: b.routes, body: b.body, timeZone: b.timeZone,
-          signal: controller.signal, fetchImpl: directFetch,
+          signal: controller.signal, fetchImpl: directFetch, subscriptionFetchImpl: subscriptionFetch,
         })
         if (!result.ok) {
           finished = true

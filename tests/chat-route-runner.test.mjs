@@ -147,3 +147,33 @@ test('订阅线路未接入代理时拒绝直连和后续线路', async () => {
   assert.match(result.error, /订阅线路/)
   assert.equal(calls, 0)
 })
+
+test('订阅限流后使用普通备用站自己的 Key，代理故障直接报告', async () => {
+  const { routeRequestParams } = await import('../src/modelRoutes.mjs')
+  const vendors = [{ id: 'shared', subscriptionChannel: 'claude', keys: [
+    { id: 's', value: 'oauth-token' }, { id: 'a', value: 'relay-key' },
+  ] }]
+  const accounts = [{ vendorId: 'shared', vendorKeyId: 's', channelId: 'claude', loggedIn: true }]
+  const routes = ['s', 'a'].map(keyId => routeRequestParams({
+    id: keyId, vendorId: 'shared', baseUrl: 'https://relay.example/v1', keyId, model: 'same',
+  }, vendors, [], accounts))
+  const body = { model: 'same', messages: [], stream: false }
+  let direct = 0
+  const fetchImpl = async (url, options) => {
+    direct++
+    assert.equal(url, 'https://relay.example/v1/chat/completions')
+    assert.equal(options.headers.Authorization, 'Bearer relay-key')
+    return new Response('{}')
+  }
+  const limited = await runRouteChat({ routes, body, fetchImpl, subscriptionFetchImpl: async (url, options) => {
+    assert.equal(url, 'https://api.anthropic.com/v1/messages')
+    assert.equal(options.headers.Authorization, 'Bearer oauth-token')
+    return new Response('rate limit', { status: 429 })
+  } })
+  assert.equal(limited.routeId, 'a')
+  assert.equal(limited.ok, true)
+  const blocked = await runRouteChat({ routes, body, fetchImpl, subscriptionFetchImpl: async () => { throw new Error('订阅代理不可用') } })
+  assert.equal(blocked.ok, false)
+  assert.match(blocked.error, /代理不可用/)
+  assert.equal(direct, 1)
+})

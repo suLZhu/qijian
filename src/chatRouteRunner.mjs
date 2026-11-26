@@ -6,6 +6,8 @@
 // 一旦某个上游返回 ok，立即把 Response 交回调用方并停止尝试——调用方随即开始流式透传，
 // 正文已经写出后不会再回头换线路，避免聊天窗口出现两遍答案。
 
+import { subscriptionChatResponse } from './subscriptionChatResponse.mjs'
+import { isSubscriptionProtocol } from './server/subscriptionChat.mjs'
 import { chatRequestUrl, isRetryableKeyStatus } from './vendors.mjs'
 import { injectTimeContext } from './timeContext.mjs'
 import {
@@ -22,6 +24,7 @@ export function normalizeChatRoutes(raw) {
     .map((r) => ({
       routeId: str(r.routeId) || 'route',
       source: r.source === 'subscription' ? 'subscription' : 'api',
+      protocol: str(r.subscriptionProtocol), accountId: str(r.subscriptionAccountId),
       label: str(r.label) || str(r.routeId) || '线路',
       endpoint: str(r.endpoint),
       chatUrl: str(r.chatUrl),
@@ -45,7 +48,7 @@ export function routeChatTarget(r) {
 // 返回值：{ ok, upstream, routeId, routeLabel, report, error, status }
 export async function runRouteChat({
   routes = [], body = {}, timeZone = '', signal = null,
-  fetchImpl = fetch, maxAttempts = MAX_ROUTE_ATTEMPTS, now = new Date(),
+  fetchImpl = fetch, subscriptionFetchImpl, maxAttempts = MAX_ROUTE_ATTEMPTS, now = new Date(),
 } = {}) {
   const list = normalizeChatRoutes(routes)
   if (!list.length) return { ok: false, error: '没有可用线路：请检查线路地址与 API Key', report: createRouteReport(), status: 400 }
@@ -57,13 +60,14 @@ export async function runRouteChat({
 
   for (let ri = 0; ri < list.length && ri < limit; ri++) {
     const r = list[ri]
-    if (r.source === 'subscription') {
-      const error = '订阅线路尚未接入代理协议，请选择订阅账号直接聊天'
+    const subscribed = r.source === 'subscription'
+    if (subscribed && (!isSubscriptionProtocol(r.protocol) || !subscriptionFetchImpl)) {
+      const error = '订阅线路缺少可用的授权账号或代理协议，请重新选择账号'
       report = finishRouteReport(report, { failureReason: error })
       return { ok: false, error, report, routeId: r.routeId, routeLabel: r.label, status: 400 }
     }
     const target = routeChatTarget(r)
-    if (!target || !/^https?:\/\//i.test(target)) {
+    if (!subscribed && (!target || !/^https?:\/\//i.test(target))) {
       report = recordRouteAttempt(report, { routeId: r.routeId, label: r.label, status: 0, responseText: '线路地址无效' })
       continue
     }
@@ -74,7 +78,11 @@ export async function runRouteChat({
     for (let ki = 0; ki < keys.length; ki++) {
       let upstream
       try {
-        upstream = await fetchImpl(target, {
+        upstream = subscribed
+          ? await subscriptionChatResponse({
+              subscriptionProtocol: r.protocol, subscriptionAccountId: r.accountId, apiKey: keys[ki], body: payload,
+            }, { signal, propagateNetworkFailure: true }, subscriptionFetchImpl)
+          : await fetchImpl(target, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + keys[ki] },
           body: JSON.stringify(payload),
@@ -86,6 +94,11 @@ export async function runRouteChat({
         if (aborted) {
           report = finishRouteReport(report, { failureReason: '请求已被取消' })
           return { ok: false, error: '请求已被取消', report, routeId: r.routeId, routeLabel: r.label, status: 499 }
+        }
+        if (subscribed) {
+          const reason = error.message || '订阅代理连接失败'
+          report = recordRouteAttempt(report, { routeId: r.routeId, label: r.label, error })
+          return { ok: false, error: reason, report: finishRouteReport(report, { failureReason: reason }), status: 502 }
         }
         networkFailure = error
         report = recordRouteAttempt(report, { routeId: r.routeId, label: r.label, error, aborted: false })

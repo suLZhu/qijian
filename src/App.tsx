@@ -1263,7 +1263,7 @@ export default function App() {
     // 没有线路就完全沿用上面的老链路（订阅登录 / 模型预设 / 多 KEY 零影响）。
     const logicalId = activeLogicalId(routeState, target, logicalModelId(activeModel.model || ''))
     const routePlan = buildRoutePlan({
-      routes: routeState.routes, logicalId, vendors,
+      routes: routeState.routes, logicalId, vendors, subscriptions,
       fallbackKeys: [],
       binding: { fixedRouteId: fixedRouteId(routeState, target) },
       maxAttempts: MAX_ROUTE_ATTEMPTS,
@@ -2016,7 +2016,7 @@ export default function App() {
     const apiKeyCandidates = access.apiKeys
     const activeApiKey = apiKeyCandidates[0] || ''
     const logicalId = activeLogicalId(routeState, target, logicalModelId(activeModel.model || ''))
-    const routePlan = buildRoutePlan({routes:routeState.routes,logicalId,vendors,fallbackKeys:[],binding:{fixedRouteId:fixedRouteId(routeState,target)},maxAttempts:MAX_ROUTE_ATTEMPTS})
+    const routePlan = buildRoutePlan({routes:routeState.routes,logicalId,vendors,subscriptions,fallbackKeys:[],binding:{fixedRouteId:fixedRouteId(routeState,target)},maxAttempts:MAX_ROUTE_ATTEMPTS})
     const routeMode = routePlan.length>0
     const subscriptionProtocol = routeMode ? '' : access.protocol
     const subscriptionAccountId = access.accountId

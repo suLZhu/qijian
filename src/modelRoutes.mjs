@@ -9,6 +9,8 @@
 //    优先用 keyId 引用 vendors.keys（现成的安全方案），内联 apiKey 仅作兼容。
 // 4) 本阶段只留计费 / 延迟 / 活动价 / 优先级 / 启用状态的字段，不做自动成本算法。
 
+import { resolveChatAccess } from './vendors.mjs'
+
 const str = (v) => String(v ?? '').trim()
 const num = (v, fallback = 0) => {
   const n = Number(v)
@@ -176,7 +178,7 @@ export function planRouteOrder(routes, logicalId, options = {}) {
 // 线路 → 一次 /api/chat 请求需要的参数。
 // Key 解析顺序：keyId 引用的 vendors.keys → 线路内联 Key → 该 vendor 的候选 Key → 旧助手 Key。
 // 返回值里只有「值」，线路对象本身不出本机，方便服务端直接按数组换 Key。
-export function routeRequestParams(route, vendors = [], fallbackKeys = []) {
+export function routeRequestParams(route, vendors = [], fallbackKeys = [], subscriptions = []) {
   if (!route) return null
   const keys = []
   const push = (v) => { const s = str(v); if (s && !keys.includes(s)) keys.push(s) }
@@ -192,26 +194,43 @@ export function routeRequestParams(route, vendors = [], fallbackKeys = []) {
     for (const k of Array.isArray(v?.keys) ? v.keys : []) push(k?.value)
   }
   for (const k of Array.isArray(fallbackKeys) ? fallbackKeys : []) push(k)
-  const subscriptionVendor = (Array.isArray(vendors) ? vendors : []).find(v =>
-    v?.subscriptionChannel && (v.id === route.vendorId || (route.keyId && v.keys?.some(k => k.id === route.keyId)))
-  )
+  const owner = vendors.find(v => route.keyId && v.keys?.some(k => k.id === route.keyId))
+    || vendors.find(v => v.id === route.vendorId)
+  const linked = subscriptions.find(a => vendors.some(v => v.id === a.vendorId &&
+    v.keys?.some(k => k.id === a.vendorKeyId && keys.includes(k.value))))
+  let source = route.source === 'subscription' ? 'subscription' : 'api'
+  let protocol = '', accountId = ''
+  let candidates = keys
+  if (owner?.subscription || owner?.subscriptionChannel || linked) {
+    const vendorId = owner?.id || linked.vendorId
+    const selected = route.keyId || (route.apiKey ? owner?.keys?.find(k => k.value === route.apiKey)?.id : '') || linked?.vendorKeyId || ''
+    const access = resolveChatAccess(vendors, subscriptions, vendorId, selected, '')
+    if (access.protocol || access.error || (linked && linked.vendorId !== vendorId)) source = 'subscription'
+    if (!access.error && (!linked || linked.vendorId === vendorId)) {
+      protocol = access.protocol
+      accountId = access.accountId
+      candidates = access.apiKeys.filter(key => keys.includes(key))
+    }
+  }
   return {
     routeId: route.id,
     label: route.label,
-    source: route.source === 'subscription' || subscriptionVendor ? 'subscription' : 'api',
+    source,
+    subscriptionProtocol: protocol,
+    subscriptionAccountId: accountId,
     endpoint: route.baseUrl,
     chatUrl: route.chatUrl,
     apiPath: route.apiPath,
-    apiKeys: keys.slice(0, 6),
+    apiKeys: candidates.slice(0, 6),
     model: route.model,
   }
 }
 
 // 前端一次性生成有序候选（自动已有最大尝试次数），服务端按同一顺序执行。
-export function buildRoutePlan({ routes = [], logicalId = '', vendors = [], fallbackKeys = [], binding = {}, maxAttempts = MAX_ROUTE_ATTEMPTS } = {}) {
+export function buildRoutePlan({ routes = [], logicalId = '', vendors = [], fallbackKeys = [], subscriptions = [], binding = {}, maxAttempts = MAX_ROUTE_ATTEMPTS } = {}) {
   const fixedRouteId = str(binding?.fixedRouteId)
   const ordered = planRouteOrder(routes, logicalId, { fixedRouteId, maxAttempts })
   return ordered
-    .map((r) => routeRequestParams(r, vendors, fallbackKeys))
+    .map((r) => routeRequestParams(r, vendors, fallbackKeys, subscriptions))
     .filter((r) => r && r.apiKeys.length > 0 && (r.endpoint || r.chatUrl))
 }

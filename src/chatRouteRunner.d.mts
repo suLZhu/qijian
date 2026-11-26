@@ -34,6 +34,7 @@ export declare function runRouteChat(args: {
   body?: Record<string, unknown>
   timeZone?: string
   signal?: AbortSignal | null
+  subscriptionFetchImpl?: typeof fetch
   fetchImpl?: typeof fetch
   maxAttempts?: number
   now?: Date

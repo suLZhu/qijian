@@ -68,6 +68,7 @@ export declare function buildRoutePlan(args: {
   routes?: ModelRoute[]
   logicalId?: string
   vendors?: unknown
+  subscriptions?: import('./subscriptionChannels.mjs').SubscriptionAccount[]
   fallbackKeys?: string[]
   binding?: { fixedRouteId?: string }
   maxAttempts?: number
