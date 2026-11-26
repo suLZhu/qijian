@@ -223,7 +223,7 @@ export default function LayoutPrototype(props:LayoutPrototypeProps = {}) {
 
 
     </header>
-    <main className="qj-main" ref={mainRef} onScroll={event => {
+    <main className={view === 'chat' ? 'qj-main qj-chat-scroll' : 'qj-main'} ref={mainRef} onScroll={event => {
       if (view !== 'chat') return
       const main = event.currentTarget
       followLatest.current = main.scrollHeight - main.clientHeight - main.scrollTop < 48

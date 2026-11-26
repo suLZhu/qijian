@@ -149,3 +149,7 @@
 .qj-generation-dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; animation: qj-generation-pulse 1.2s ease-in-out infinite alternate; }
 @keyframes qj-generation-pulse { from { opacity: .35; } to { opacity: 1; } }
 @media (prefers-reduced-motion: reduce) { .qj-generation-dot { animation: none; } }
+
+.qj-chat-scroll { scrollbar-width: none; }
+.qj-chat-scroll::-webkit-scrollbar { display: none; }
+.qj-chat .qj-history-more { padding: 0 12px; border-radius: 12px; color: var(--qj-muted); font-size: 12px; }
