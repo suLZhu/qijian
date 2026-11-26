@@ -28,7 +28,7 @@ import { normalizeSubscriptions, SUBSCRIPTION_STORAGE_KEY } from './subscription
 import { subscriptionOperations } from './subscriptionOperations.mjs'
 import { runRouteChat } from './chatRouteRunner.mjs'
 import { subscriptionChatResponse } from './subscriptionChatResponse.mjs'
-import { directModelFetch, subscriptionModelFetch, nativeHttpStreamAvailable, nativeHttpGet } from './nativeSystem.mjs'
+import { directModelFetch, subscriptionModelFetch, nativeHttpStreamAvailable, nativeHttpGet, setGenerationForeground } from './nativeSystem.mjs'
 import { parseSearchResults } from './webSearch.mjs'
 import { WIDGET_TYPES, WIDGET_TITLES, defaultConfig, normalizeConfig } from './server/widgets.mjs'
 
@@ -478,8 +478,16 @@ async function runLocalConversationTask(task, nowMs) {
         { role: 'user', content: task.prompt },
       ]
       const body = { model: model.model, stream: false, messages }
-      const response = await handleChat({ signal: AbortSignal.timeout(45000), body: JSON.stringify({ endpoint: model.endpoint, chatUrl: vendor ? chatRequestUrl(vendor) : '', timeZone: state.timeZone, body, ...access }) })
-      const data = await response.json().catch(() => ({}))
+      // The existing Android generation service owns this request while it is in flight.
+      // A completed response still goes through the same durable inbox/ack path below.
+      const protectedRun = setGenerationForeground({ action: 'start', assistantId: task.person, conversationId: task.conversation_id, messageId: runId })
+      let response, data
+      try {
+        response = await handleChat({ signal: AbortSignal.timeout(45000), body: JSON.stringify({ endpoint: model.endpoint, chatUrl: vendor ? chatRequestUrl(vendor) : '', timeZone: state.timeZone, body, ...access }) })
+        data = await response.json().catch(() => ({}))
+      } finally {
+        if (protectedRun) setGenerationForeground({ action: 'stop', messageId: runId })
+      }
       if (!response.ok) throw new Error(data.error || '模型请求失败')
       const answer = scheduledConversationAnswer(data.choices?.[0]?.message?.content, task.prompt)
       const current = readJSON(K.tasks, []).find(item => item?.id === task.id)

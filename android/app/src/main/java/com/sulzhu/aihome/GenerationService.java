@@ -24,6 +24,20 @@ public final class GenerationService extends Service {
     public static final String ACTION_STOP = "com.sulzhu.aihome.generation.STOP";
     private static final int FOREGROUND_ID = 73001;
     private PowerManager.WakeLock wakeLock;
+    private static GenerationService active;
+    private final java.util.Set<String> owners = new java.util.HashSet<>();
+
+    static void release(String owner) {
+        GenerationService service = active;
+        if (service == null || owner == null || owner.isEmpty()) return;
+        if (!service.owners.remove(owner)) return;
+        if (service.owners.isEmpty()) {
+            service.releaseWakeLock();
+            service.stopForeground(true);
+            service.stopSelf();
+            Log.i("AiHome:gen", "fgs_stopped");
+        }
+    }
 
     private void acquireWakeLock() {
         try {
@@ -40,6 +54,7 @@ public final class GenerationService extends Service {
 
     @Override public void onCreate() {
         super.onCreate();
+        active = this;
         SystemNotifier.ensureGenerationChannel(this);
         // 锁屏后 CPU 可能休眠：partial wake lock 只阻止深度休眠，不点亮屏幕、不改后台网络架构。
         try {
@@ -54,12 +69,15 @@ public final class GenerationService extends Service {
     @Override public int onStartCommand(Intent intent, int flags, int startId) {
         String action = intent == null ? "" : intent.getAction();
         if (ACTION_STOP.equals(action)) {
-            releaseWakeLock();
-            stopForeground(true);
-            stopSelf();
-            Log.i("AiHome:gen", "fgs_stopped");
+            release(intent == null ? "" : intent.getStringExtra("messageId"));
             return START_NOT_STICKY;
         }
+        String owner = intent == null ? "" : intent.getStringExtra("messageId");
+        if (owner == null || owner.isEmpty()) {
+            stopSelf(startId);
+            return START_NOT_STICKY;
+        }
+        owners.add(owner);
         String assistant = intent == null ? "" : intent.getStringExtra("assistantName");
         if (assistant == null || assistant.trim().isEmpty()) assistant = "栖间";
         String assistantId = intent == null ? "" : intent.getStringExtra("assistantId");
@@ -98,6 +116,8 @@ public final class GenerationService extends Service {
     }
 
     @Override public void onDestroy() {
+        if (active == this) active = null;
+        owners.clear();
         releaseWakeLock();
         stopForeground(true);
         super.onDestroy();

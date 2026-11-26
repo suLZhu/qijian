@@ -481,8 +481,8 @@ final class SystemBridge {
                 return true;
             }
             if ("stop".equals(action)) {
-                // Do not start a background service just to stop it: Android O+ can reject that.
-                ctx().stopService(intent);
+                // Release only this generation; another assistant or timed task may still run.
+                activity.runOnUiThread(() -> GenerationService.release(body.optString("messageId", "")));
                 return true;
             }
         } catch (Exception ignored) { }
