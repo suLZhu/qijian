@@ -1142,7 +1142,7 @@ export async function localHandle(path, init) {
       const person = q.get('person') || ''
       if (!person) return json(400, { error: '无效人物' })
       const all = readJSON(K.proactive, {})
-      const settings = all[person] || { person, enabled: 0, mode: 'natural', quiet_start: 23, quiet_end: 8, interval_hours: 12, updated_at: nowISO() }
+      const settings = all[person] || { person, enabled: 0, mode: 'natural', quiet_start: 23, quiet_end: 8, interval_hours: 12, daily_wake_limit: 6, updated_at: nowISO() }
       return json(200, { settings, events: [], heat: null })
     }
     if (p === '/api/proactive' && method === 'POST') {
@@ -1151,9 +1151,9 @@ export async function localHandle(path, init) {
       if (!person) return json(400, { error: '无效人物' })
       if (b.action === 'configure') {
         const mode = ['quiet', 'natural', 'lively'].includes(b.mode) ? b.mode : 'natural'
-        const start = Number(b.quiet_start), end = Number(b.quiet_end), interval = Number(b.interval_hours)
-        if (!Number.isInteger(start) || start < 0 || start > 23 || !Number.isInteger(end) || end < 0 || end > 23 || !Number.isInteger(interval) || interval < 2 || interval > 72) return json(400, { error: '时间设置无效' })
-        const settings = { person, enabled: b.enabled === true || b.enabled === 1 ? 1 : 0, mode, quiet_start: start, quiet_end: end, interval_hours: interval, updated_at: nowISO() }
+        const start = Number(b.quiet_start), end = Number(b.quiet_end), interval = Number(b.interval_hours), limit = Number(b.daily_wake_limit ?? readJSON(K.proactive, {})[person]?.daily_wake_limit ?? 6)
+        if (!Number.isInteger(start) || start < 0 || start > 23 || !Number.isInteger(end) || end < 0 || end > 23 || !Number.isInteger(interval) || interval < 2 || interval > 72 || !Number.isInteger(limit) || limit < 1 || limit > 48) return json(400, { error: '时间或每日唤醒上限无效' })
+        const settings = { person, enabled: b.enabled === true || b.enabled === 1 ? 1 : 0, mode, quiet_start: start, quiet_end: end, interval_hours: interval, daily_wake_limit: limit, updated_at: nowISO() }
         const all = readJSON(K.proactive, {})
         all[person] = settings
         try { writeJSON(K.proactive, all) } catch { return json(500, { error: '本地存储写入失败' }) }

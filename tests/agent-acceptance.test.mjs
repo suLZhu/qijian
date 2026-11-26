@@ -19,7 +19,7 @@ import { decideApproval, pendingList } from '../src/server/agent/ApprovalGate.mj
 import { createTaskScheduler } from '../src/server/agent/TaskScheduler.mjs'
 import { createToolRegistry } from '../src/server/agent/ToolRegistry.mjs'
 import { createFakeMcpServer, fakeMcpConnection } from '../src/server/fakeMcp.mjs'
-import { initProactive, isQuietHour } from '../src/proactive.mjs'
+import { initProactive, isQuietHour, configure as configureProactive, wake as wakeProactive } from '../src/proactive.mjs'
 import { initProactiveHeat, dispatchProactiveRun, recoverInterruptedWakes } from '../src/server/agent/ProactiveHeat.mjs'
 import { initMemoryStore, SQLiteMemoryProvider } from '../src/server/agent/MemoryStore.mjs'
 import { migrateDatabase, migrateSnapshot } from '../src/server/identity.mjs'
@@ -641,4 +641,40 @@ test('免打扰使用用户时区，不受服务器 UTC 时区影响', () => {
   const at = new Date('2026-11-26T17:00:00Z')
   assert.equal(isQuietHour(config, at, 'Asia/Shanghai'), true)
   assert.equal(isQuietHour(config, at, 'America/Los_Angeles'), false)
+})
+
+
+test('自主生活每日唤醒上限按用户本地日期计数，重启迁移保留设置', () => {
+  const db = makeDb()
+  initProactive(db)
+  const cfg = configureProactive(db, PERSON, { enabled: true, mode: 'natural', quiet_start: 0, quiet_end: 0, interval_hours: 2, daily_wake_limit: 2 })
+  assert.equal(cfg.daily_wake_limit, 2)
+  const today = new Date('2026-11-26T08:00:00Z')
+  const first = wakeProactive(db, PERSON, { now: today, manual: true })
+  assert.equal(first.queued, true)
+  db.prepare("UPDATE proactive_events SET status='silent' WHERE id=?").run(first.id)
+  const second = wakeProactive(db, PERSON, { now: new Date(today.getTime() + 1000), manual: true })
+  assert.equal(second.queued, true)
+  db.prepare("UPDATE proactive_events SET status='silent' WHERE id=?").run(second.id)
+  assert.deepEqual(wakeProactive(db, PERSON, { now: new Date(today.getTime() + 2000), manual: true }), { queued: false, reason: 'daily_limit', used: 2, limit: 2 })
+  initProactive(db)
+  assert.equal(db.prepare('SELECT daily_wake_limit FROM proactive_settings WHERE person=?').get(PERSON).daily_wake_limit, 2)
+  assert.equal(wakeProactive(db, PERSON, { now: new Date(today.getTime() + 24 * 3600000), manual: true }).queued, true)
+  db.close()
+})
+
+
+test('助手已有运行中的请求时自主唤醒延后，另一个助手不受影响', () => {
+  const db = makeDb()
+  initProactive(db)
+  for (const person of [PERSON, 'assistant-yanshuo']) {
+    configureProactive(db, person, { enabled: true, mode: 'natural', quiet_start: 0, quiet_end: 0, interval_hours: 2, daily_wake_limit: 6 })
+  }
+  const run = createAgentRun(db, { assistantId: PERSON, source: 'manual', prompt: '正在聊天' })
+  const now = new Date('2026-11-26T08:00:00Z')
+  assert.equal(wakeProactive(db, PERSON, { now }).reason, 'assistant_busy')
+  assert.equal(wakeProactive(db, 'assistant-yanshuo', { now }).queued, true)
+  finishAgentRun(db, run.id, { status: 'succeeded', answer: '聊完了' })
+  assert.equal(wakeProactive(db, PERSON, { now }).queued, true)
+  db.close()
 })

@@ -1,13 +1,14 @@
 import { randomUUID } from "node:crypto"
 import { buildTimeContext } from "./timeContext.mjs"
 // Server-side wake decisions are deterministic; the model never silently invents a message.
-// Delivery requires a future authenticated model runner with a provider key.
+// Background model execution and delivery are wired by the server.
 const PEOPLE = ['assistant-yanweixi','assistant-yanshuo']
 export function initProactive(db) {
  db.exec(`CREATE TABLE IF NOT EXISTS proactive_settings (
  person TEXT PRIMARY KEY, enabled INTEGER NOT NULL DEFAULT 0,
  mode TEXT NOT NULL DEFAULT 'natural', quiet_start INTEGER NOT NULL DEFAULT 23,
  quiet_end INTEGER NOT NULL DEFAULT 8, interval_hours INTEGER NOT NULL DEFAULT 12,
+ daily_wake_limit INTEGER NOT NULL DEFAULT 6,
  updated_at TEXT NOT NULL
  );
  CREATE TABLE IF NOT EXISTS proactive_events (
@@ -16,6 +17,8 @@ export function initProactive(db) {
  created_at TEXT NOT NULL, updated_at TEXT NOT NULL
  );
  CREATE INDEX IF NOT EXISTS proactive_events_person_idx ON proactive_events(person,created_at);`)
+ const columns=db.prepare('PRAGMA table_info(proactive_settings)').all()
+ if(!columns.some(row=>row.name==='daily_wake_limit'))db.exec('ALTER TABLE proactive_settings ADD COLUMN daily_wake_limit INTEGER NOT NULL DEFAULT 6')
  for(const person of PEOPLE) db.prepare('INSERT OR IGNORE INTO proactive_settings(person,updated_at) VALUES (?,?)').run(person,new Date().toISOString())
 }
 export function settings(db,person) {return db.prepare('SELECT * FROM proactive_settings WHERE person=?').get(person)}
@@ -26,8 +29,9 @@ export function configure(db,person,input) {
  const enabled=input.enabled===true?1:0
  const start=Number(input.quiet_start),end=Number(input.quiet_end)
  const interval=Number(input.interval_hours)
- if(!Number.isInteger(start)||start<0||start>23||!Number.isInteger(end)||end<0||end>23||!Number.isInteger(interval)||interval<2||interval>72)throw new Error('时间设置无效')
- db.prepare('UPDATE proactive_settings SET enabled=?,mode=?,quiet_start=?,quiet_end=?,interval_hours=?,updated_at=? WHERE person=?').run(enabled,mode,start,end,interval,new Date().toISOString(),person)
+ const limit=Number(input.daily_wake_limit ?? settings(db,person)?.daily_wake_limit ?? 6)
+ if(!Number.isInteger(start)||start<0||start>23||!Number.isInteger(end)||end<0||end>23||!Number.isInteger(interval)||interval<2||interval>72||!Number.isInteger(limit)||limit<1||limit>48)throw new Error('时间或每日唤醒上限无效')
+ db.prepare('UPDATE proactive_settings SET enabled=?,mode=?,quiet_start=?,quiet_end=?,interval_hours=?,daily_wake_limit=?,updated_at=? WHERE person=?').run(enabled,mode,start,end,interval,limit,new Date().toISOString(),person)
  return settings(db,person)
 }
 export function proactiveTimeZone(db) {
@@ -42,6 +46,17 @@ export function wake(db,person,{manual=false,now=new Date()}={}) {
  const config=settings(db,person)
  if(!config.enabled&&!manual)return {queued:false,reason:'disabled'}
  if(isQuietHour(config,now,proactiveTimeZone(db)))return {queued:false,reason:'quiet_hours'}
+ const timeZone=proactiveTimeZone(db)
+ const today=buildTimeContext(now,timeZone).date
+ const recent=db.prepare('SELECT created_at FROM proactive_events WHERE person=? AND created_at>=?').all(person,new Date(now.getTime()-48*3600000).toISOString())
+ const used=recent.filter(row=>buildTimeContext(new Date(row.created_at),timeZone).date===today).length
+ if(used>=config.daily_wake_limit)return {queued:false,reason:'daily_limit',used,limit:config.daily_wake_limit}
+ if(!manual) {
+  // Other background and foreground model work already occupies this assistant.
+  // Leave heat intact so the next tick can retry when the conversation is idle.
+  const busy=db.prepare("SELECT 1 FROM agent_runs WHERE assistant_id=? AND status='running' LIMIT 1").get(person)
+  if(busy)return {queued:false,reason:'assistant_busy'}
+ }
  const pending=db.prepare("SELECT count(*) AS n FROM proactive_events WHERE person=? AND status='pending'").get(person).n
  if(pending)return {queued:false,reason:'pending_exists'}
  const last=db.prepare('SELECT created_at FROM proactive_events WHERE person=? ORDER BY created_at DESC LIMIT 1').get(person)
