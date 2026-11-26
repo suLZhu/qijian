@@ -26,7 +26,7 @@ import { applyPackVars, getActivePackId, loadThemePacks, normalizeThemePack, set
 import { DEFAULT_ROOM_LAYOUT, loadRoomLayout, saveRoomLayout, resetRoomLayout, type RoomItem, type RoomLayout } from './roomLayout.mjs'
 import { WorkspaceSettings, type WorkspaceConfig } from './WorkspaceSettings'
 import { confirmDialog } from './uiDialog'
-import { planCompaction, buildSummarySystemMessage, searchHistory, searchMessageList, CONTEXT_LIMITS } from './contextCompression.mjs'
+import { planCompaction, conversationExcerpt, buildSummarySystemMessage, searchHistory, searchMessageList } from './contextCompression.mjs'
 import { IconHome, IconChat, IconSettings, IconClock, IconMemory, IconCalendar, IconSun, IconPalette, IconPlug, IconChart, IconSparkles, IconFolder, IconShield, IconInfo, IconFlower, IconPlus, IconBack, IconChevronRight, IconChevronDown, IconChevronUp, IconClose, IconEdit, IconTrash, IconEye, IconEyeOff, IconArrowUp, IconArrowDown, IconSwitch, IconShare, IconTest, IconSearch, IconMinus, IconFile, IconWarning, IconMail, IconBook, IconCheck, IconCopy, IconRefresh, IconEmoji, IconPhoto, IconCoffee, IconMusic, IconLedger, IconGrid, IconMore, IconStar, IconMenu, IconMic, IconStop, IconSend, type IconComponent } from './icons'
 import { IconButton, SettingsRow } from './uiPrimitives'
 import { DEFAULT_BEAUTIFY_PACK, BEAUTIFY_PACKS } from './beautify'
@@ -127,7 +127,7 @@ type Tool = '人物设置' | '世界书' | '记忆面板' | '工作流' | '自�
 type MessageAttachment = { name: string; type: string; size: number; preview?: string; dataUrl?: string; textContent?: string; assetId?: string }
 type TokenUsage = { rounds?: LedgerRound[]; at?: string; model?: string; promptTokens?: number; completionTokens?: number; cachedTokens?: number; cacheReadTokens?: number; elapsedMs?: number; preflightMs?: number; firstTokenMs?: number; streamMs?: number; tokensPerSecond?: number }
 type ChatMessage = { role: 'user' | 'assistant'; content: string; at?: string; id?: string; contextNote?: string; taskDetails?: string; attachments?: MessageAttachment[]; usage?: TokenUsage; taskRunId?: string; reasoning?: string }
-type Conversation = { id:string; title:string; messages:ChatMessage[]; updatedAt:string; summary?:string; summaryThroughId?:string; summaryThrough?:number; summaryAt?:string }
+type Conversation = { id:string; title:string; messages:ChatMessage[]; updatedAt:string; summary?:string; summaryThroughId?:string; summaryThrough?:number; summaryAt?:string; summaryKind?:'excerpt' }
 
 async function fetchWithSoftTimeout(input:string, init:RequestInit, timeoutMs:number, parentSignal?:AbortSignal):Promise<Response>{
   const controller=new AbortController()
@@ -1460,18 +1460,28 @@ export default function App() {
       // 不再静默丢掉更早的消息：把早段压成 conversation.summary，摘要覆盖点之后的消息
       // 全部原样带上。这样任何一条消息要么在摘要里、要么在原文里，不会失忆。
       const activeConv=(conversations[target]||[]).find(c=>c.id===sendConversationId)
-      let contextSummary=String(activeConv?.summary||'')
-      let summaryThroughId=String(activeConv?.summaryThroughId||'')
-      let summaryCovered=Number(activeConv?.summaryThrough||0)
-      let coveredIndex=summaryThroughId?priorHistory.findIndex(m=>m.id===summaryThroughId):-1
-      let visibleHistory=priorHistory.slice(coveredIndex+1)
-      let summaryFailed=false
-      const compaction=planCompaction(visibleHistory)
-      if(compaction.needed){
-        // 首条真实模型请求优先：不再为了更新摘要先额外打一轮 /api/chat。
-        // 已有摘要继续使用；本轮只保留最近消息。更早的原文需要时由 conversation_search 回查。
-        summaryFailed=true
-        visibleHistory=visibleHistory.slice(-CONTEXT_LIMITS.keepMessages)
+      const anchor = activeConv?.summaryThroughId
+      const anchorIndex = anchor ? priorHistory.findIndex(m => m.id === anchor) : -1
+      const legacySummary = activeConv?.summaryKind !== 'excerpt' && anchorIndex >= 0 ? activeConv?.summary : ''
+      let summaryCovered = legacySummary ? anchorIndex + 1 : 0
+      let visibleHistory = priorHistory.slice(summaryCovered)
+      const compaction = planCompaction(visibleHistory)
+      // 摘录随原文重算，编辑、删除或重生时只读取当前轮允许看到的历史。
+      if (compaction.needed) {
+        summaryCovered += compaction.cut
+        visibleHistory = visibleHistory.slice(compaction.cut)
+      }
+      const excerpt = compaction.needed ? conversationExcerpt(priorHistory.slice(legacySummary ? anchorIndex + 1 : 0, summaryCovered)) : ''
+      const contextSummary = [legacySummary, excerpt].filter(Boolean).join('\n')
+      if (!legacySummary && !regen && activeConv && (excerpt || activeConv.summaryKind === 'excerpt')) {
+        const prefix = priorHistory.slice(0, summaryCovered)
+        const throughId = prefix[prefix.length - 1]?.id
+        if (activeConv.summary !== excerpt || activeConv.summaryThroughId !== throughId) {
+          setConversations(old => ({ ...old, [target]: (old[target] || []).map(c => {
+            if (c.id !== sendConversationId || !prefix.every((m,i) => c.messages[i]?.id === m.id && c.messages[i]?.content === m.content)) return c
+            return { ...c, summary: excerpt, summaryKind: 'excerpt', summaryThrough: summaryCovered, summaryThroughId: throughId, summaryAt: new Date().toISOString() }
+          }) }))
+        }
       }
       // 当前聊天窗优先召回：凡是因为已有摘要或本轮窗口裁剪而没有逐条发送的旧消息，
       // 都先做一次本地关键词检索。零网络、零模型调用，不增加首包前置耗时。
@@ -1521,8 +1531,7 @@ export default function App() {
       for(const content of assistantWorld){historyWithWorld.push({role:'assistant',content})}
       const requestMessages:any[]=[
         ...(system?[{role:'system',content:system}]:[]),
-        ...(contextSummary?[{role:'system',content:buildSummarySystemMessage(contextSummary,summaryCovered||Math.max(0,coveredIndex+1))}]:[]),
-        ...(summaryFailed?[{role:'system',content:'【上下文提示】更早的对话因为压缩失败没有逐条带上；本轮已自动召回部分相关旧原文。仍缺细节时用 conversation_search 工具按关键词回顾原文，不要假装记得没看到的内容。'}]:[]),
+        ...(contextSummary?[{role:'system',content:buildSummarySystemMessage(contextSummary,summaryCovered)}]:[]),
         ...(localRecallContext?[{role:'system',content:localRecallContext}]:[]),
         ...(recalledContext?[{role:'system',content:recalledContext}]:[]),
         ...historyWithWorld,

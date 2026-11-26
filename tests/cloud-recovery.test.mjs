@@ -234,3 +234,12 @@ test('部分会话快照逐助手恢复，空列表、第三助手和旧任务�
   assert.equal(recovered['assistant-yanshuo'][0].messages, history)
   assert.deepEqual(Object.keys(previous), ['assistant-third'])
 })
+
+test('恢复快照后摘录、覆盖位置与聊天原文仍属于原会话', () => {
+  const messages = [msg('user', '周五带伞'), msg('assistant', '记住啦')]
+  const original = { id: 'work', messages, summary: '用户：周五带伞', summaryKind: 'excerpt', summaryThroughId: messages[0].id, summaryThrough: 1 }
+  const snapshot = JSON.parse(JSON.stringify({ conversations: { [A]: [original], [B]: [] } }))
+  const restored = restoreConversationLists(snapshot)
+  assert.deepEqual(restored[A][0], original)
+  assert.deepEqual(restored[B], [])
+})

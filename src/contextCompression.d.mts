@@ -4,3 +4,4 @@ export function buildSummaryPrompt(previousSummary: string, messages: unknown[],
 export function buildSummarySystemMessage(summary: string, coveredMessages: number): string
 export function searchMessageList(messages: unknown[], query: string, limit?: number): { index: number; role: string; at: string; content: string; score: number }[]
 export function searchHistory(conversations: Record<string, any[]>, person: string, query: string, limit?: number): { conversationId: string; title: string; role: string; at: string; content: string; score: number }[]
+export function conversationExcerpt(messages: unknown[]): string

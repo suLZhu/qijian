@@ -13,8 +13,8 @@ test('短对话不压缩', () => {
   assert.deepEqual(planCompaction(messages(10)), { needed: false, cut: 0 })
 })
 
-test('超过 32 条：压掉最旧的，保留最近 20 条', () => {
-  const plan = planCompaction(messages(40))
+test('自定义上限：压掉最旧的，保留最近 20 条', () => {
+  const plan = planCompaction(messages(40), { maxMessages: 32, keepMessages: 20 })
   assert.equal(plan.needed, true)
   assert.equal(plan.cut, 20)
 })
@@ -81,4 +81,16 @@ test('conversation_search 检索原始消息并隔离助手', () => {
   assert.ok(!JSON.stringify(hits).includes('别的助手'))
   assert.equal(searchHistory(conversations, 'assistant-yanweixi', '桂花茶', 1).length, 1)
   assert.deepEqual(searchHistory(conversations, 'assistant-yanweixi', ''), [])
+})
+
+test('摘录保留早期背景及最近进展，编辑后按现有原文重算', async () => {
+  const { conversationExcerpt } = await import('../src/contextCompression.mjs')
+  const rows = Array.from({ length: 40 }, (_, i) => ({ role: 'user', content: '原话-' + i + '。' + '长'.repeat(500) }))
+  const summary = conversationExcerpt(rows)
+  assert.match(summary, /原话-0。/)
+  assert.match(summary, /原话-39。/)
+  assert.ok(summary.length < 2000)
+  rows[0].content = '改过的称呼'
+  assert.doesNotMatch(conversationExcerpt(rows), /原话-0。/)
+  assert.match(conversationExcerpt(rows), /改过的称呼/)
 })

@@ -181,3 +181,25 @@ export function searchHistory(conversations, person, query, limit = 6) {
   hits.sort((a, b) => b.score - a.score || String(b.at).localeCompare(String(a.at)))
   return hits.slice(0, Math.min(12, Math.max(1, Number(limit) || 6)))
 }
+
+// 对被裁剪的原文保留开头的背景和最近的进展；摘录可以在本机随编辑重新生成。
+export function conversationExcerpt(messages) {
+  const first = []
+  const recent = []
+  let count = 0
+  for (const message of messages) {
+    if (!message || !['user', 'assistant'].includes(message.role) || typeof message.content !== 'string' || !message.content.trim()) continue
+    count++
+    if (first.length < 3) first.push(message)
+    else {
+      recent.push(message)
+      if (recent.length > 7) recent.shift()
+    }
+  }
+  const format = message => {
+    const content = message.content.trim().replace(/\s+/g, ' ')
+    const excerpt = content.length > 180 ? content.slice(0, 110) + '…' + content.slice(-65) : content
+    return (message.role === 'user' ? '用户：' : '助手：') + excerpt
+  }
+  return [...first.map(format), ...(count > 10 ? ['…'] : []), ...recent.map(format)].join('\n')
+}
