@@ -75,6 +75,14 @@ test('markNeedsReview 把 pending 标记为需用户确认', () => {
   assert.deepEqual(markNeedsReview(store, 'x', 'y'), store)
 })
 
+test('编辑等待确认的消息后仍需手动确认', () => {
+  const item = makePending('原话', [], { ...A, id: 'p1', now: 1 })
+  const review = markNeedsReview(setPending({}, item), 'a', 'c1')
+  const edited = patchPendingText(review, 'a', 'c1', '新内容')
+  assert.equal(edited[pendingScopeKey('a', 'c1')].status, 'needs_review')
+  assert.equal(edited[pendingScopeKey('a', 'c1')].text, '新内容')
+})
+
 test('recoverPending 校验非法数据，绝不静默接受', () => {
   assert.equal(recoverPending(null), null)
   assert.equal(recoverPending({}), null)

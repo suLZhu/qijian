@@ -1245,7 +1245,7 @@ export default function App() {
   // 正在进行的模型请求：删除「正在生成」的助手消息时中止它；回写全部按 id 匹配，
   //   消息删除后天然无处可写，绝不会删除后又重新出现。
   const sendAbortRef = useRef<Record<string,{ id: string; controller: AbortController }>>({})
-  async function send(textInput: string, attachments: MessageAttachment[] = [], options: { assistantId?: Person; conversationId?: string; queuedIds?: string[]; insertUser?: boolean; historyEndIndex?: number; regenerate?: { replaceId: string; originalContent: string; originalUsage?: TokenUsage }; onUserInserted?: () => void } = {}): Promise<'ok'|'fail'|'noop'> {
+  async function send(textInput: string, attachments: MessageAttachment[] = [], options: { assistantId?: Person; conversationId?: string; queuedIds?: string[]; insertUser?: boolean; historyEndIndex?: number; regenerate?: { replaceId: string; originalContent: string; originalUsage?: TokenUsage }; pendingId?: string; preserveDraft?: boolean } = {}): Promise<'ok'|'fail'|'noop'> {
     const text = textInput.trim()
     const target = options.assistantId ?? person
     const requestedConversationId = options.conversationId ?? activeConversationIdsRef.current[target] ?? ''
@@ -1283,7 +1283,10 @@ export default function App() {
     }
     const sendConversationId = requestedConversationId
     const convHistory = (conversations[target]||[]).find(c=>c.id===sendConversationId)?.messages || (sendConversationId===activeConversationIds[target]?messages[target]:[])
-    const history = options.historyEndIndex!=null ? convHistory.slice(0,Math.max(0,options.historyEndIndex)) : convHistory
+    const pendingUserId = options.pendingId && 'pending-user-' + options.pendingId
+    const pendingReplyId = options.pendingId && 'pending-reply-' + options.pendingId
+    const priorHistory = pendingUserId ? convHistory.filter(m => m.id !== pendingUserId && m.id !== pendingReplyId) : convHistory
+    const history = options.historyEndIndex!=null ? convHistory.slice(0,Math.max(0,options.historyEndIndex)) : priorHistory
     const card = characters[target]
     const messageCount=history.length+1
     const runtimeKey='ai-home.worldbookRuntime.'+target
@@ -1338,11 +1341,11 @@ export default function App() {
     const attachmentLabel = attachments.length ? '\n[附件：'+attachments.map(a=>a.name).join('、')+']' : ''
     // 气泡里只显示用户输入的文字；动态时间上下文由服务端在每次模型请求前
     // 实时生成并作为独立 system 消息注入，前端不再附带任何本地上下文。
-    const userMessage: ChatMessage = {id:crypto.randomUUID(),at:new Date().toISOString(),role:'user',content:text,attachments:attachments.map(a=>({...a,preview:a.preview||a.dataUrl,dataUrl:undefined}))}
+    const userMessage: ChatMessage = {id:pendingUserId || crypto.randomUUID(),at:new Date().toISOString(),role:'user',content:text,attachments:attachments.map(a=>({...a,preview:a.preview||a.dataUrl,dataUrl:undefined}))}
     // 工具调用事件绑定：一次 send() = 一个 runId；助手消息带 id，调用卡片按 messageId 挂到消息下方。
     // 重新生成复用原回复的 id：流式回写天然落在同一条消息上（= 覆盖旧回复，不新增第二版）。
     const regen = options.regenerate || null
-    const assistantMessageId = regen ? regen.replaceId : crypto.randomUUID()
+    const assistantMessageId = regen ? regen.replaceId : pendingReplyId || crypto.randomUUID()
     const toolRunId = crypto.randomUUID()
     const toolConversationId = sendConversationId
     const abortController = new AbortController()
@@ -1379,10 +1382,8 @@ export default function App() {
       ? prev.map(m=>m.id===assistantMessageId?{...m,content:'',usage:undefined}:m)
       : options.insertUser===false
         ? [...prev,{role:'assistant',at:new Date().toISOString(),content:'',id:assistantMessageId}]
-        : [...prev,userMessage,{role:'assistant',at:new Date().toISOString(),content:'',id:assistantMessageId}],sendConversationId)
-    if(options.insertUser!==false)setDrafts(previous=>({...previous,[pendingScopeKey(target,sendConversationId)]:''}))
-    // 用户气泡一入列就算「发出去了」：待发送卡片立刻消失，不必等助手回复生成完。
-    options.onUserInserted?.()
+        : [...(pendingUserId ? prev.filter(m => m.id !== pendingUserId && m.id !== pendingReplyId) : prev),userMessage,{role:'assistant',at:new Date().toISOString(),content:'',id:assistantMessageId}],sendConversationId)
+    if(options.insertUser!==false && !options.preserveDraft)setDrafts(previous=>({...previous,[pendingScopeKey(target,sendConversationId)]:''}))
     setChatError('');sendingRef.current[sendScope]=true;setSendingScopes(prev=>({...prev,[sendScope]:true}));setGenerationStages(prev=>({...prev,[sendScope]:'preparing'}))
     // 进程被系统回收时靠这条标记恢复「上次未完成的生成」，不丢空白占位气泡。
     startGeneration(localStorage,{person:target,conversationId:sendConversationId,messageId:assistantMessageId},Date.now())
@@ -1945,6 +1946,7 @@ export default function App() {
     const target = person
     const convId = activeConversationIdsRef.current[target] || ''
     if (!target || !convId) return false
+    if (pendingSendsRef.current[pendingScopeKey(target, convId)]) return false
     const item = makePending(text, attachments, { assistantId: target, conversationId: convId })
     commitPending(setPending(pendingSendsRef.current, item))
     setDrafts(previous=>({...previous,[pendingScopeKey(target,convId)]:''}))
@@ -1952,7 +1954,7 @@ export default function App() {
     return true
   }
 
-  // 修改待发送内容（同 id；状态回到 pending）。
+  // 修改待发送内容，保留原有确认状态。
   function editPendingText(text: string): boolean {
     const target = person
     const convId = activeConversationIdsRef.current[target] || ''
@@ -1990,15 +1992,17 @@ export default function App() {
       return
     }
     flushLockRef.current.add(key)
+    // 进程中断后无法确定上游是否已处理，只能由用户确认重试。
+    commitPending(markNeedsReview(pendingSendsRef.current, assistantId, conversationId))
     try {
       const outcome = await sendRef.current(item.text, item.attachments as MessageAttachment[], {
-        assistantId, conversationId,
-        // 气泡一插入就清掉待发送卡片：用户看到「已发出」，不再等助手回复。
-        onUserInserted: () => commitPending(clearPending(pendingSendsRef.current, assistantId, conversationId)),
+        assistantId, conversationId, preserveDraft: true, pendingId: item.id,
       })
-      if (outcome !== 'ok' && pendingSendsRef.current[pendingScopeKey(assistantId, conversationId)]) {
-        // 还没走到插气泡就失败（比如没配模型）才保留卡片，方便重试。
-        commitPending(markNeedsReview(pendingSendsRef.current, assistantId, conversationId))
+      const current = pendingSendsRef.current[key]
+      if (current?.id === item.id) {
+        const unchanged = current.text === item.text
+        const settle = outcome === 'ok' && unchanged ? clearPending : markNeedsReview
+        commitPending(settle(pendingSendsRef.current, assistantId, conversationId))
       }
     } finally { flushLockRef.current.delete(key); if(pendingSendsRef.current[key]?.status==='pending'&&!sendingRef.current[key]) window.setTimeout(()=>void flushPending(assistantId,conversationId),0) }
   }
@@ -2185,6 +2189,9 @@ export default function App() {
     const target=list.find(c=>c.id===id)
     if(!target)return
     if(!(await confirmDialog({ title:'删除会话', message:'删除「'+(target.title||'新对话')+'」？此操作会删除这条会话及其消息，无法撤销。', confirmLabel:'删除', danger:true })))return
+    const scope = pendingScopeKey(person, id)
+    sendAbortRef.current[scope]?.controller.abort()
+    commitPending(clearPending(pendingSendsRef.current, person, id))
     const remaining=list.filter(c=>c.id!==id)
     const next=remaining.length?remaining:[{id:crypto.randomUUID(),title:'新对话',messages:[],updatedAt:new Date().toISOString()}]
     setConversations((old:Record<Person,Conversation[]>)=>({...old,[person]:next}))
@@ -2212,8 +2219,14 @@ export default function App() {
       if(pendingSendsRef.current[scope]) { setChatError('已有待发送消息，请先编辑或撤回，当前输入已保留。'); return Promise.resolve('fail' as const) }
       return Promise.resolve(enqueuePending(text,attachments)?'ok':'fail')
     }
+    const conversationId = activeConversationIdsRef.current[person]
+    if (!conversationId) return Promise.resolve('fail' as const)
+    const scope = pendingScopeKey(person, conversationId)
     setDraft('')
-    return send(text,attachments).then(result=>{ if(result!=='ok') setDraft(text); return result })
+    return send(text,attachments).then(result=>{
+      if(result!=='ok') setDrafts(previous=>previous[scope] ? previous : {...previous, [scope]:text})
+      return result
+    })
   }
   // 聊天页没有「← 房间」按钮：从抽屉底部或系统返回手势回房间。
   const drawerBackToRoom=()=>{setSidebarOpen(false);setChatOpen(false);setActiveTool('')}

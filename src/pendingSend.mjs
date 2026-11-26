@@ -88,7 +88,7 @@ export function patchPendingText(store, assistantId, conversationId, text) {
   const key = pendingScopeKey(assistantId, conversationId)
   const cur = store && store[key]
   if (!cur) return store || {}
-  return { ...store, [key]: { ...cur, text: String(text), status: 'pending', updatedAt: Date.now() } }
+  return { ...store, [key]: { ...cur, text: String(text), updatedAt: Date.now() } }
 }
 
 // Mark a pending that failed to send: it must be user-confirmed before retrying,
