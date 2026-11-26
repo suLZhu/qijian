@@ -25,30 +25,34 @@ export function ModelRoutesPanel({ logicalId, defaultModel, routes, vendors, fix
   const [label, setLabel] = useState('')
   const [baseUrl, setBaseUrl] = useState('')
   const [model, setModel] = useState(defaultModel)
-  const [keyChoice, setKeyChoice] = useState('__inline__')
+  const [keyChoice, setKeyChoice] = useState('')
   const [inlineKey, setInlineKey] = useState('')
   const [error, setError] = useState('')
 
   const keyOptions: SoftOption[] = [
     { value: '__inline__', label: '手动填写 API Key' },
     ...(Array.isArray(vendors) ? vendors : []).flatMap(v => (Array.isArray(v.keys) ? v.keys : [])
-      .filter(k => k && k.id)
+      .filter(k => k && k.id && k.value && v.enabled !== false && v.endpoint?.trim())
       .map(k => ({ value: k.id, label: (v.name || v.id) + ' · ' + (k.label || 'Key') }))),
   ]
 
+  const source = keyChoice || keyOptions.find(option => option.value !== '__inline__')?.value || '__inline__'
+  const vendor = vendors.find(v => v.keys?.some(k => k.id === source))
+
   const submit = () => {
-    const url = str(baseUrl)
-    const key = keyChoice === '__inline__' ? str(inlineKey) : ''
-    if (!url) { setError('请填写线路的 Base URL'); return }
-    if (!/^https?:\/\//i.test(url)) { setError('Base URL 需以 http:// 或 https:// 开头'); return }
-    if (!key && keyChoice === '__inline__') { setError('请填写 API Key，或改用「引用现有 Key」'); return }
+    const url = vendor ? str(vendor.endpoint) : str(baseUrl)
+    const key = source === '__inline__' ? str(inlineKey) : ''
+    if (!url) { setError('请填写接口地址'); return }
+    if (!/^https?:\/\//i.test(url)) { setError('接口地址需以 http:// 或 https:// 开头'); return }
+    if (!key && source === '__inline__') { setError('请填写 API Key，或改用「引用现有 Key」'); return }
     onAdd({
-      label: str(label) || '线路 ' + (routes.length + 1),
+      label: str(label) || vendor?.name || '线路 ' + (routes.length + 1),
       baseUrl: url.replace(/\/+$/, ''),
+      apiPath: vendor?.apiPath || '',
       model: str(model) || defaultModel || logicalId,
-      keyId: keyChoice === '__inline__' ? '' : keyChoice,
+      keyId: source === '__inline__' ? '' : source,
       apiKey: key,
-      vendorId: keyChoice === '__inline__' ? '' : ((Array.isArray(vendors) ? vendors : []).find(v => (v.keys || []).some(k => k.id === keyChoice))?.id || ''),
+      vendorId: source === '__inline__' ? '' : (vendor?.id || ''),
       enabled: true,
     })
     setLabel(''); setBaseUrl(''); setInlineKey(''); setError('')
@@ -71,7 +75,7 @@ export function ModelRoutesPanel({ logicalId, defaultModel, routes, vendors, fix
         </div>
         <small>{r.baseUrl || r.chatUrl || '未填地址'} · {r.model}</small>
         <div className="route-actions">
-          <button type="button" onClick={() => onPrimary(r.id)}>设主</button>
+          <button type="button" onClick={() => onPrimary(r.id)}>设为首选</button>
           <button type="button" className={fixedRouteId === r.id ? 'active' : ''} onClick={() => onFixed(fixedRouteId === r.id ? '' : r.id)}>
             {fixedRouteId === r.id ? '取消固定' : '固定'}
           </button>
@@ -80,20 +84,24 @@ export function ModelRoutesPanel({ logicalId, defaultModel, routes, vendors, fix
         </div>
       </div>)}
     </div>
-    <div className="route-add">
-      <b>添加线路</b>
+    <details className="route-add">
+      <summary>添加线路</summary>
       <div className="route-add-grid">
-        <input aria-label="线路名称" value={label} onChange={e => setLabel(e.target.value)} placeholder="线路名称，如 线路 A"/>
-        <input aria-label="线路 Base URL" value={baseUrl} onChange={e => setBaseUrl(e.target.value)} placeholder="Base URL，如 https://api.x.com/v1"/>
-        <input aria-label="实际模型 ID" value={model} onChange={e => setModel(e.target.value)} placeholder="实际模型 ID"/>
-        <SoftSelect value={keyChoice} options={keyOptions} onChange={setKeyChoice} ariaLabel="选择 API Key 来源"/>
-        {keyChoice === '__inline__' && <input aria-label="线路 API Key" type="password" value={inlineKey} onChange={e => setInlineKey(e.target.value)} placeholder="API Key（仅存本机）"/>}
+        <SoftSelect value={source} options={keyOptions} onChange={setKeyChoice} ariaLabel="选择账号"/>
+        {source === '__inline__' && <>
+          <input aria-label="接口地址" value={baseUrl} onChange={e => setBaseUrl(e.target.value)} placeholder="接口地址"/>
+          <input aria-label="线路 API Key" type="password" value={inlineKey} onChange={e => setInlineKey(e.target.value)} placeholder="API Key"/>
+        </>}
+        <details><summary>更多设置</summary>
+          <input aria-label="线路名称" value={label} onChange={e => setLabel(e.target.value)} placeholder={vendor?.name || '线路名称'}/>
+          <input aria-label="实际模型 ID" value={model} onChange={e => setModel(e.target.value)} placeholder="实际模型 ID"/>
+        </details>
       </div>
       <div className="route-add-foot">
         <small>API Key 只保存在这台设备，不进云端快照、不写入仓库。</small>
         <button type="button" className="route-add-btn" onClick={submit}><IconPlus className="ui-icon-inline" size={14}/> 添加线路</button>
       </div>
       {error && <p className="route-error">{error}</p>}
-    </div>
+    </details>
   </div>
 }
