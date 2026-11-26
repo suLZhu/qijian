@@ -20,6 +20,20 @@ function def(name, description, properties, required) {
 // the server-verified assistant id, never a model-supplied value.
 const BUILTINS = [
   {
+    name: 'proactive_plan_update', source: 'proactive', readOnly: false, proactiveOnly: true,
+    definition: def('proactive_plan_update', '更新你自己在自主生活里的简短行动计划和待办。不能创建定时任务、修改权限、预算或免打扰。', {
+      note: { type: 'string', description: '下一步想检查的事或待办，最多 600 字；可留空表示无待办' },
+    }, ['note']),
+    run(db, person, args) {
+      const note = String(args.note ?? '').trim()
+      if (note.length > 600) throw Object.assign(new Error('计划内容超过 600 字'), { status: 400 })
+      const row = db.prepare('UPDATE proactive_settings SET plan_note=?,plan_updated_at=? WHERE person=? AND enabled=1 AND allow_chat=1')
+        .run(note,new Date().toISOString(),person)
+      if (!row.changes) throw Object.assign(new Error('自主生活未授权'), { status: 403 })
+      return { ok: true, note }
+    },
+  },
+  {
     name: 'memory_search',
     source: 'worldbook',
     readOnly: true,
@@ -142,7 +156,7 @@ const BUILTINS = [
 // injected by server.mjs so the MCP transport stays in one place.
 export async function createToolRegistry({ db, person, mcpList, mcpCall, allowedTools = null }) {
   const allowed = allowedTools == null ? null : new Set(allowedTools)
-  const definitions = BUILTINS.filter(b => !allowed || allowed.has(b.name)).map(b => b.definition)
+  const definitions = BUILTINS.filter(b => allowed ? allowed.has(b.name) : !b.proactiveOnly).map(b => b.definition)
   const mcpMap = new Map()
   const connections = allowed ? [] : db.prepare(`
     SELECT c.* FROM mcp_connections c
@@ -173,6 +187,7 @@ export async function createToolRegistry({ db, person, mcpList, mcpCall, allowed
   const describe = (name) => {
     if (allowed && !allowed.has(name)) return null
     const builtin = BUILTINS.find(b => b.name === name)
+    if (builtin?.proactiveOnly && !allowed) return null
     if (builtin) return { source: builtin.source, serverName: '', readOnly: builtin.readOnly }
     const mapped = mcpMap.get(name)
     if (!mapped) return null

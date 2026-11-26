@@ -10,6 +10,7 @@ export function initProactive(db) {
  quiet_end INTEGER NOT NULL DEFAULT 8, interval_hours INTEGER NOT NULL DEFAULT 12,
  daily_wake_limit INTEGER NOT NULL DEFAULT 6, daily_token_limit INTEGER NOT NULL DEFAULT 12000,
  allow_chat INTEGER NOT NULL DEFAULT 1, allow_memory_search INTEGER NOT NULL DEFAULT 1,
+ plan_note TEXT NOT NULL DEFAULT '', plan_updated_at TEXT,
  updated_at TEXT NOT NULL
  );
  CREATE TABLE IF NOT EXISTS proactive_events (
@@ -23,6 +24,8 @@ export function initProactive(db) {
  if(!columns.some(row=>row.name==='daily_token_limit'))db.exec('ALTER TABLE proactive_settings ADD COLUMN daily_token_limit INTEGER NOT NULL DEFAULT 12000')
  if(!columns.some(row=>row.name==='allow_chat'))db.exec('ALTER TABLE proactive_settings ADD COLUMN allow_chat INTEGER NOT NULL DEFAULT 1')
  if(!columns.some(row=>row.name==='allow_memory_search'))db.exec('ALTER TABLE proactive_settings ADD COLUMN allow_memory_search INTEGER NOT NULL DEFAULT 1')
+ if(!columns.some(row=>row.name==='plan_note'))db.exec("ALTER TABLE proactive_settings ADD COLUMN plan_note TEXT NOT NULL DEFAULT ''")
+ if(!columns.some(row=>row.name==='plan_updated_at'))db.exec('ALTER TABLE proactive_settings ADD COLUMN plan_updated_at TEXT')
  for(const person of PEOPLE) db.prepare('INSERT OR IGNORE INTO proactive_settings(person,updated_at) VALUES (?,?)').run(person,new Date().toISOString())
 }
 export function settings(db,person) {return db.prepare('SELECT * FROM proactive_settings WHERE person=?').get(person)}

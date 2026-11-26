@@ -725,7 +725,7 @@ test('关闭主动聊天权限后不唤醒，独立关闭记忆读取不影响�
 })
 
 
-test('撤销记忆读取权限后真实自主模型请求不包含任何工具', async () => {
+test('撤销记忆读取权限后真实自主模型请求只保留计划工具', async () => {
   const db = makeDb()
   initProactive(db)
   initProactiveHeat(db)
@@ -738,7 +738,7 @@ test('撤销记忆读取权限后真实自主模型请求不包含任何工具',
   dispatchProactiveRun({db,runner,bus:new AgentEventBus(),person:PERSON,eventId:'evt-read-off',reason:'manual',deliver:()=>{}})
   assert.ok(await waitFor(() => db.prepare("SELECT status FROM proactive_events WHERE id='evt-read-off'").get().status !== 'pending'))
   assert.equal(requests.length, 1)
-  assert.equal(requests[0].tools, undefined)
+  assert.deepEqual(requests[0].tools.map(item => item.function.name), ['proactive_plan_update'])
   db.close()
 })
 
@@ -753,7 +753,7 @@ test('模型请求在途时撤销记忆权限，调用前重新检查并记录�
   configureProactive(db, PERSON, { ...base, allow_memory_search: 0 })
   const result = await executeToolCall({ db, bus: new AgentEventBus(), registry, run, round: 1, callId: 'call-1', name: 'memory_search', rawArgs: JSON.stringify({query:'阿懒'}), signal: new AbortController().signal })
   assert.equal(result.ok, false)
-  assert.match(result.content, /没有读取记忆的权限/)
+  assert.match(result.content, /未获得此项权限/)
   assert.ok(listToolLogs(db, { person: PERSON }).some(row => row.errorCode === 'PROACTIVE_PERMISSION_REVOKED'))
   db.close()
 })
@@ -776,5 +776,26 @@ test('普通聊天在途时自主唤醒延后，同助手多条流全部结束�
   release2()
   assert.equal(activity.busy(PERSON), false)
   assert.equal(wakeProactive(db, PERSON, {manual:false,busy:p=>activity.busy(p)}).queued, true)
+  db.close()
+})
+
+
+test('哨兵仅能更新自己的便签计划，不改权限、预算或用户定时任务', async () => {
+  const db = makeDb()
+  initProactive(db)
+  const base = {enabled:true,mode:'natural',quiet_start:0,quiet_end:0,interval_hours:2,daily_wake_limit:2,daily_token_limit:1000,allow_chat:1,allow_memory_search:0}
+  configureProactive(db, PERSON, base)
+  const registry = await createToolRegistry({ db, person: PERSON, allowedTools: ['proactive_plan_update'], mcpList:()=>[],mcpCall:()=>{} })
+  const run = createAgentRun(db, {assistantId:PERSON,source:'proactive',prompt:'更新待办'})
+  const result = await executeToolCall({db,bus:new AgentEventBus(),registry,run,round:1,callId:'plan-1',name:'proactive_plan_update',rawArgs:JSON.stringify({note:'下次看看今天有没有新消息',daily_token_limit:999999}),signal:new AbortController().signal})
+  assert.equal(result.ok,true)
+  const own = db.prepare('SELECT plan_note,daily_token_limit,allow_chat FROM proactive_settings WHERE person=?').get(PERSON)
+  assert.equal(own.plan_note,'下次看看今天有没有新消息')
+  assert.equal(own.daily_token_limit,1000)
+  assert.equal(own.allow_chat,1)
+  assert.equal(db.prepare('SELECT plan_note FROM proactive_settings WHERE person=?').get('assistant-yanshuo').plan_note,'')
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM scheduled_tasks').get().n,0)
+  const manual = await createToolRegistry({db,person:PERSON,mcpList:()=>[],mcpCall:()=>{}})
+  assert.equal(manual.describe('proactive_plan_update'),null)
   db.close()
 })

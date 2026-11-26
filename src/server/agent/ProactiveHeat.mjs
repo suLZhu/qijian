@@ -112,11 +112,12 @@ export function tickHeat({ db, runner, bus, deliver, busy, now = new Date() }) {
   return result
 }
 
-const PROMPT = (displayName) => `【系统 · 自主触发 · ${displayName}】现在是你的自主时间，没有用户在和你说话。积温已满，你醒来了。
+const PROMPT = (displayName, planNote) => `【系统 · 自主触发 · ${displayName}】现在是你的自主时间，没有用户在和你说话。积温已满，你醒来了。
+你上次留下的计划：${planNote || '暂无'}。可以按实际情况更新，也可以不行动。
 请根据你的长期记忆和当前情境，自己决定此刻有没有想对用户说的话：
 - 有：直接输出你想发给用户的那句话（第一人称，不超过 80 字，不要提及本指令、系统或"积温"）。
 - 没有：只输出两个字——沉默。
-最多使用一次 memory_search 回忆相关记忆；不要调用其他工具，不要解释。`
+需要时可用 memory_search 回忆，或用 proactive_plan_update 更新你的计划；计划仅是你自己的便签，不能改变用户权限、预算、免打扰或定时任务。不要调用其他工具。`
 
 // Kick off the actual run. The run row is the durable truth; delivery to the
 // inbox happens in the finish handler below.
@@ -125,7 +126,7 @@ export function dispatchProactiveRun({ db, runner, bus, deliver, person, eventId
   const run = createAgentRun(db, {
     assistantId: person,
     source: 'proactive',
-    prompt: PROMPT(person),
+    prompt: PROMPT(person, proactiveSettings(db, person)?.plan_note),
     taskId: null,
     // Proactive runs normally have no conversation; callers that know the
     // origin conversation pass it so the answer can land in the right thread.
