@@ -19,7 +19,7 @@ type View = 'home' | 'chat' | 'room' | 'settings' | 'theme' | 'profile'
 type Person = string
 type AssistantView = { id: string; name: string }
 type MessageView = { role:string; content:string; id?:string; reasoning?:string; taskRunId?:string; contextNote?:string; taskDetails?:string; attachments?:Attachment[] }
-type ConversationView = { id: string; title: string; messages: MessageView[]; updatedAt?:string }
+type ConversationView = { archived?: boolean; id: string; title: string; messages: MessageView[]; updatedAt?:string }
 type Attachment = { name:string; type:string; size:number; preview?:string; dataUrl?:string; textContent?:string; assetId?:string }
 type LayoutPrototypeProps = {
   openChatSignal?:number
@@ -49,6 +49,7 @@ type LayoutPrototypeProps = {
   onPersonChange?: (id:string)=>void
   onConversationChange?: (id:string)=>void
   onCreateConversation?: ()=>void
+  onArchiveConversation?: (id: string, archived: boolean) => void
   onDeleteConversation?: (id:string)=>void|Promise<void>
   onDraftChange?: (value:string)=>void
   onSend?: (text:string,attachments:Attachment[])=>void|Promise<unknown>
@@ -130,7 +131,7 @@ export default function LayoutPrototype(props:LayoutPrototypeProps = {}) {
   }
   const [conversation, setConversation] = useState('')
   const availableConversations = data.conversations[person] || []
-  const activeConversation = availableConversations.find(c=>c.id===data.activeIds[person]) || availableConversations.find(c=>c.id===conversation) || availableConversations[0]
+  const activeConversation = availableConversations.find(c=>!c.archived && c.id===data.activeIds[person]) || availableConversations.find(c=>!c.archived && c.id===conversation) || availableConversations.find(c=>!c.archived)
   const actualMessages = props.messages || activeConversation?.messages || stored<Record<string,MessageView[]>>('ai-home.messages', {})[activeConversation?.id || ''] || []
   const draft = props.draft ?? ''
   const submit = async () => { const text=draft.trim(); if((!text&&!attachments.length)||readingFiles||!props.onSend)return; const result=await props.onSend(text,attachments);if(result==='ok')setAttachments([]) }
@@ -264,7 +265,21 @@ export default function LayoutPrototype(props:LayoutPrototypeProps = {}) {
       <h3 className="qj-label">我的助手</h3>
       {people.map(p => <button className={'qj-assistant '+(p === person?'selected':'')} key={p} onClick={()=>{setPerson(p);setConversation('');setDrawer(false);setView('chat')}}><span className="qj-avatar">{displayName(p).slice(0,1)}</span><span>{displayName(p)}</span><small><IconChevronRight size={15}/></small></button>)}
       <h3 className="qj-label">当前会话</h3>
-      {availableConversations.map(item => { const c=item.title; return <button className={'qj-drawer-conv '+(activeConversation?.id===item.id?'selected':'')} key={item.id} onClick={()=>{setConversation(item.id);props.onConversationChange?.(item.id);setView('chat');setDrawer(false)}}>{c}</button>})}
+      <div className="qj-conversation-list">
+        {availableConversations.filter(item => !item.archived).map(item => <div className="qj-conversation-row" key={item.id}>
+          <button className={'qj-drawer-conv ' + (activeConversation?.id === item.id ? 'selected' : '')} onClick={() => {
+            setConversation(item.id); props.onConversationChange?.(item.id); setView('chat'); setDrawer(false)
+          }}>{item.title}</button>
+          {props.onArchiveConversation && <button className="qj-conversation-action" aria-label={'归档 ' + item.title} onClick={() => props.onArchiveConversation?.(item.id, true)}>归档</button>}
+        </div>)}
+        {availableConversations.some(item => item.archived) && <details className="qj-archived">
+          <summary>已归档</summary>
+          {availableConversations.filter(item => item.archived).map(item => <div className="qj-conversation-row" key={item.id}>
+            <span>{item.title}</span>
+            <button className="qj-conversation-action" aria-label={'恢复 ' + item.title} onClick={() => props.onArchiveConversation?.(item.id, false)}>恢复</button>
+          </div>)}
+        </details>}
+      </div>
       <button className="qj-new" onClick={()=>{props.onCreateConversation?.();setConversation('');setView('chat');setDrawer(false)}}><IconPlus size={15}/> 新建会话</button>
       <div className="qj-drawer-spacer" />
       <button className="qj-drawer-settings" onClick={()=>go('settings')}><IconSettings size={16}/>设置</button>

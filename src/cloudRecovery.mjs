@@ -117,7 +117,7 @@ export function pickActiveConversationIds(convs, activeIds) {
   const result = {}
   for (const key of Object.keys(source)) {
     const list = Array.isArray(source[key]) ? source[key] : []
-    result[key] = list.some(c => c && c.id === ids[key]) ? ids[key] : (list[0] && list[0].id) || ''
+    result[key] = list.some(c => c && !c.archived && c.id === ids[key]) ? ids[key] : list.find(c => c && !c.archived)?.id || ''
   }
   return result
 }

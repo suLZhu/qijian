@@ -243,3 +243,11 @@ test('恢复快照后摘录、覆盖位置与聊天原文仍属于原会话', ()
   assert.deepEqual(restored[A][0], original)
   assert.deepEqual(restored[B], [])
 })
+
+test('恢复时从常用会话选当前项，并保留已归档的历史', () => {
+  const archived = { id: 'archive', archived: true, messages: [msg('user', '旧对话')] }
+  const current = { id: 'current', messages: [] }
+  const restored = restoreConversationLists({ conversations: { [A]: [archived, current], [B]: [archived] } })
+  assert.equal(restored[A][0], archived)
+  assert.deepEqual(pickActiveConversationIds(restored, { [A]: archived.id, [B]: archived.id }), { [A]: current.id, [B]: '' })
+})

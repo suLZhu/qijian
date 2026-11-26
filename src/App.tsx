@@ -127,7 +127,7 @@ type Tool = '人物设置' | '世界书' | '记忆面板' | '工作流' | '自�
 type MessageAttachment = { name: string; type: string; size: number; preview?: string; dataUrl?: string; textContent?: string; assetId?: string }
 type TokenUsage = { rounds?: LedgerRound[]; at?: string; model?: string; promptTokens?: number; completionTokens?: number; cachedTokens?: number; cacheReadTokens?: number; elapsedMs?: number; preflightMs?: number; firstTokenMs?: number; streamMs?: number; tokensPerSecond?: number }
 type ChatMessage = { role: 'user' | 'assistant'; content: string; at?: string; id?: string; contextNote?: string; taskDetails?: string; attachments?: MessageAttachment[]; usage?: TokenUsage; taskRunId?: string; reasoning?: string }
-type Conversation = { id:string; title:string; messages:ChatMessage[]; updatedAt:string; summary?:string; summaryThroughId?:string; summaryThrough?:number; summaryAt?:string; summaryKind?:'excerpt' }
+type Conversation = { archived?:boolean; id:string; title:string; messages:ChatMessage[]; updatedAt:string; summary?:string; summaryThroughId?:string; summaryThrough?:number; summaryAt?:string; summaryKind?:'excerpt' }
 
 async function fetchWithSoftTimeout(input:string, init:RequestInit, timeoutMs:number, parentSignal?:AbortSignal):Promise<Response>{
   const controller=new AbortController()
@@ -2193,6 +2193,23 @@ export default function App() {
     if(!title)return
     setConversations((old:Record<Person,Conversation[]>)=>({...old,[person]:(old[person]||[]).map(c=>c.id===id?{...c,title}:c)}))
   }
+  function drawerArchive(id: string, archived: boolean) {
+    const list = conversationsRef.current[person] || []
+    if (!list.some(c => c.id === id)) return
+    const isCurrent = archived && activeConversationIdsRef.current[person] === id
+    const replacement = isCurrent ? list.find(c => c.id !== id && !c.archived) ||
+      { id: crypto.randomUUID(), title: '新对话', messages: [], updatedAt: new Date().toISOString() } : null
+    setConversations(old => {
+      const next = (old[person] || []).map(c => c.id === id ? { ...c, archived } : c)
+      if (replacement && !next.some(c => c.id === replacement.id)) next.push(replacement)
+      return { ...old, [person]: next }
+    })
+    if (replacement) {
+      setActiveConversationIds(old => ({ ...old, [person]: replacement.id }))
+      setMessages(old => ({ ...old, [person]: replacement.messages }))
+      setChatError('')
+    }
+  }
   async function drawerDelete(id:string){
     const list=conversations[person]||[]
     const target=list.find(c=>c.id===id)
@@ -2277,6 +2294,7 @@ export default function App() {
     onPersonChange={prototypeSelectPerson}
     onConversationChange={drawerSwitch}
     onCreateConversation={drawerCreate}
+    onArchiveConversation={drawerArchive}
     onDeleteConversation={drawerDelete}
     onDraftChange={v=>setDraft(v)}
     onSend={prototypeSend}

@@ -134,3 +134,10 @@
 .qj-message-actions{display:flex;flex-wrap:wrap;gap:5px;margin-top:5px}
 .qj-message-actions button{border:1px solid var(--qj-line);border-radius:8px;background:var(--qj-soft);padding:5px 9px;font-size:12px}
 .qj-message-selected{outline:2px solid var(--qj-accent);outline-offset:4px;border-radius:12px}
+
+.qj-conversation-list { min-height: 0; overflow-y: auto; }
+.qj-conversation-row { display: flex; align-items: center; gap: 4px; }
+.qj-conversation-row > :first-child { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.qj-conversation-row > span { padding: 10px 12px; }
+.qj-conversation-action { border: 0; background: transparent; min-width: 44px; min-height: 44px; padding: 4px; }
+.qj-archived > summary { cursor: pointer; padding: 12px; }
