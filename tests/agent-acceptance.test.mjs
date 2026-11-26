@@ -19,7 +19,7 @@ import { decideApproval, pendingList } from '../src/server/agent/ApprovalGate.mj
 import { createTaskScheduler } from '../src/server/agent/TaskScheduler.mjs'
 import { createToolRegistry } from '../src/server/agent/ToolRegistry.mjs'
 import { createFakeMcpServer, fakeMcpConnection } from '../src/server/fakeMcp.mjs'
-import { initProactive, isQuietHour, configure as configureProactive, wake as wakeProactive } from '../src/proactive.mjs'
+import { initProactive, isQuietHour, configure as configureProactive, wake as wakeProactive, proactiveTokenUsage } from '../src/proactive.mjs'
 import { initProactiveHeat, dispatchProactiveRun, recoverInterruptedWakes } from '../src/server/agent/ProactiveHeat.mjs'
 import { initMemoryStore, SQLiteMemoryProvider } from '../src/server/agent/MemoryStore.mjs'
 import { migrateDatabase, migrateSnapshot } from '../src/server/identity.mjs'
@@ -676,5 +676,32 @@ test('助手已有运行中的请求时自主唤醒延后，另一个助手不�
   assert.equal(wakeProactive(db, 'assistant-yanshuo', { now }).queued, true)
   finishAgentRun(db, run.id, { status: 'succeeded', answer: '聊完了' })
   assert.equal(wakeProactive(db, PERSON, { now }).queued, true)
+  db.close()
+})
+
+
+test('自主生活关闭后人工测试唤醒也不消耗模型请求', () => {
+  const db = makeDb()
+  initProactive(db)
+  const result = wakeProactive(db, PERSON, { manual: true, now: new Date('2026-11-26T08:00:00Z') })
+  assert.equal(result.queued, false)
+  assert.equal(result.reason, 'disabled')
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM proactive_events').get().n, 0)
+  db.close()
+})
+
+
+test('自主生活 Token 警戒值按实际上报用量阻止后续唤醒，缺失用量不当作零', () => {
+  const db = makeDb()
+  initProactive(db)
+  const now = new Date()
+  configureProactive(db, PERSON, { enabled: true, mode: 'natural', quiet_start: 0, quiet_end: 0, interval_hours: 2, daily_wake_limit: 6, daily_token_limit: 1000 })
+  const run = createAgentRun(db, { assistantId: PERSON, source: 'proactive', prompt: '自主思考' })
+  finishAgentRun(db, run.id, { status: 'succeeded', answer: '已完成', usage: {promptTokens: 800,completionTokens: 220} })
+  assert.deepEqual(proactiveTokenUsage(db, PERSON, now), {tokens: 1020,unknown: 0})
+  assert.equal(wakeProactive(db, PERSON, {manual: true,now}).reason, 'token_limit')
+  const missing = createAgentRun(db, { assistantId: PERSON, source: 'proactive', prompt: '旧供应商' })
+  finishAgentRun(db, missing.id, { status: 'failed', errorMessage: '无用量回报' })
+  assert.equal(wakeProactive(db, PERSON, {manual: true,now}).reason, 'usage_unavailable')
   db.close()
 })

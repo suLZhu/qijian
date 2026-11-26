@@ -14,7 +14,7 @@ import { initAttachments, saveAttachment, getAttachment, deleteAttachment, ATTAC
 import { initInbox, addInboxMessage, addTaskResult, listInbox, markInboxRead } from './inbox.mjs'
 import { createRollingBackup } from './server/backup.mjs'
 import { initToolLogs, createToolLog, finishToolLog, listToolLogs } from './toolLog.mjs'
-import { initProactive, settings as proactiveSettings, events as proactiveEvents, configure as configureProactive, wake as wakeProactive, dismiss as dismissProactive } from './proactive.mjs'
+import { initProactive, settings as proactiveSettings, events as proactiveEvents, configure as configureProactive, proactiveTokenUsage, wake as wakeProactive, dismiss as dismissProactive } from './proactive.mjs'
 import { migrateDatabase, migrateSnapshot, isValidAssistantId } from './server/identity.mjs'
 import { embedTexts, encodeVector, decodeVector, rankByVector } from './server/agent/memoryVectors.mjs'
 function memoryVectorConfig(person) {
@@ -886,13 +886,20 @@ const apiServer = createServer(async (req, res) => {
   if (url.pathname === '/api/proactive' && req.method === 'GET') {
     const person=url.searchParams.get('person')
     if(!isValidAssistantId(person))return send(res,400,{error:'无效人物'})
-    return send(res,200,{settings:proactiveSettings(db,person),events:proactiveEvents(db,person),heat:readHeat(db,person)})
+    return send(res,200,{settings:proactiveSettings(db,person),events:proactiveEvents(db,person),heat:readHeat(db,person),tokenUsage:proactiveTokenUsage(db,person)})
   }
   if (url.pathname === '/api/proactive' && req.method === 'POST') {
     try {
       const body=await readBody(req)
       if(!isValidAssistantId(body.person))return send(res,400,{error:'无效人物'})
-      if(body.action==='configure')return send(res,200,{settings:configureProactive(db,body.person,body)})
+      if(body.action==='configure'){
+        const updated=configureProactive(db,body.person,body)
+        if(!updated.enabled){
+          const running=db.prepare("SELECT id FROM agent_runs WHERE assistant_id=? AND source='proactive' AND status='running'").all(body.person)
+          for(const row of running)agentRunner.cancel(row.id)
+        }
+        return send(res,200,{settings:updated})
+      }
       if(body.action==='wake'){
         const woken=wakeProactive(db,body.person,{manual:true})
         // Manual wake also runs for real through the shared Runner, so the

@@ -8,7 +8,7 @@ export function initProactive(db) {
  person TEXT PRIMARY KEY, enabled INTEGER NOT NULL DEFAULT 0,
  mode TEXT NOT NULL DEFAULT 'natural', quiet_start INTEGER NOT NULL DEFAULT 23,
  quiet_end INTEGER NOT NULL DEFAULT 8, interval_hours INTEGER NOT NULL DEFAULT 12,
- daily_wake_limit INTEGER NOT NULL DEFAULT 6,
+ daily_wake_limit INTEGER NOT NULL DEFAULT 6, daily_token_limit INTEGER NOT NULL DEFAULT 12000,
  updated_at TEXT NOT NULL
  );
  CREATE TABLE IF NOT EXISTS proactive_events (
@@ -19,6 +19,7 @@ export function initProactive(db) {
  CREATE INDEX IF NOT EXISTS proactive_events_person_idx ON proactive_events(person,created_at);`)
  const columns=db.prepare('PRAGMA table_info(proactive_settings)').all()
  if(!columns.some(row=>row.name==='daily_wake_limit'))db.exec('ALTER TABLE proactive_settings ADD COLUMN daily_wake_limit INTEGER NOT NULL DEFAULT 6')
+ if(!columns.some(row=>row.name==='daily_token_limit'))db.exec('ALTER TABLE proactive_settings ADD COLUMN daily_token_limit INTEGER NOT NULL DEFAULT 12000')
  for(const person of PEOPLE) db.prepare('INSERT OR IGNORE INTO proactive_settings(person,updated_at) VALUES (?,?)').run(person,new Date().toISOString())
 }
 export function settings(db,person) {return db.prepare('SELECT * FROM proactive_settings WHERE person=?').get(person)}
@@ -30,8 +31,9 @@ export function configure(db,person,input) {
  const start=Number(input.quiet_start),end=Number(input.quiet_end)
  const interval=Number(input.interval_hours)
  const limit=Number(input.daily_wake_limit ?? settings(db,person)?.daily_wake_limit ?? 6)
- if(!Number.isInteger(start)||start<0||start>23||!Number.isInteger(end)||end<0||end>23||!Number.isInteger(interval)||interval<2||interval>72||!Number.isInteger(limit)||limit<1||limit>48)throw new Error('时间或每日唤醒上限无效')
- db.prepare('UPDATE proactive_settings SET enabled=?,mode=?,quiet_start=?,quiet_end=?,interval_hours=?,daily_wake_limit=?,updated_at=? WHERE person=?').run(enabled,mode,start,end,interval,limit,new Date().toISOString(),person)
+ const tokenLimit=Number(input.daily_token_limit ?? settings(db,person)?.daily_token_limit ?? 12000)
+ if(!Number.isInteger(start)||start<0||start>23||!Number.isInteger(end)||end<0||end>23||!Number.isInteger(interval)||interval<2||interval>72||!Number.isInteger(limit)||limit<1||limit>48||!Number.isInteger(tokenLimit)||tokenLimit<1000||tokenLimit>500000)throw new Error('时间或每日唤醒上限无效')
+ db.prepare('UPDATE proactive_settings SET enabled=?,mode=?,quiet_start=?,quiet_end=?,interval_hours=?,daily_wake_limit=?,daily_token_limit=?,updated_at=? WHERE person=?').run(enabled,mode,start,end,interval,limit,tokenLimit,new Date().toISOString(),person)
  return settings(db,person)
 }
 export function proactiveTimeZone(db) {
@@ -41,16 +43,39 @@ export function isQuietHour(config,now=new Date(),timeZone) {
  const hour=buildTimeContext(now,timeZone).hour
  return config.quiet_start===config.quiet_end?false:config.quiet_start<config.quiet_end?hour>=config.quiet_start&&hour<config.quiet_end:hour>=config.quiet_start||hour<config.quiet_end
 }
+// Provider-reported usage only. A request may cross the threshold before its
+// usage arrives, so this is a stop-before-next-call threshold, not a guarantee
+// that the final day's total can never exceed the configured value.
+export function proactiveTokenUsage(db,person,now=new Date()) {
+ const timeZone=proactiveTimeZone(db)
+ const today=buildTimeContext(now,timeZone).date
+ const rows=db.prepare("SELECT created_at,usage FROM agent_runs WHERE assistant_id=? AND source='proactive' AND created_at>=? AND status!='running'")
+  .all(person,new Date(now.getTime()-48*3600000).toISOString())
+ let tokens=0,unknown=0
+ for(const row of rows) {
+  if(buildTimeContext(new Date(row.created_at),timeZone).date!==today)continue
+  let usage
+  try { usage=JSON.parse(row.usage) } catch { usage={} }
+  const prompt=Number(usage.promptTokens),completion=Number(usage.completionTokens)
+  if(!Number.isFinite(prompt)||!Number.isFinite(completion)||prompt+completion<=0)unknown++
+  else tokens+=Math.max(0,prompt)+Math.max(0,completion)
+ }
+ return {tokens,unknown}
+}
+
 export function wake(db,person,{manual=false,now=new Date()}={}) {
  if(!PEOPLE.includes(person))throw new Error('无效人物')
  const config=settings(db,person)
- if(!config.enabled&&!manual)return {queued:false,reason:'disabled'}
+ if(!config.enabled)return {queued:false,reason:'disabled'}
  if(isQuietHour(config,now,proactiveTimeZone(db)))return {queued:false,reason:'quiet_hours'}
  const timeZone=proactiveTimeZone(db)
  const today=buildTimeContext(now,timeZone).date
  const recent=db.prepare('SELECT created_at FROM proactive_events WHERE person=? AND created_at>=?').all(person,new Date(now.getTime()-48*3600000).toISOString())
  const used=recent.filter(row=>buildTimeContext(new Date(row.created_at),timeZone).date===today).length
  if(used>=config.daily_wake_limit)return {queued:false,reason:'daily_limit',used,limit:config.daily_wake_limit}
+ const reported=proactiveTokenUsage(db,person,now)
+ if(reported.unknown)return {queued:false,reason:'usage_unavailable'}
+ if(reported.tokens>=config.daily_token_limit)return {queued:false,reason:'token_limit',used:reported.tokens,limit:config.daily_token_limit}
  if(!manual) {
   // Other background and foreground model work already occupies this assistant.
   // Leave heat intact so the next tick can retry when the conversation is idle.
