@@ -2290,6 +2290,7 @@ export default function App() {
     messages={messages[person]||[]}
     draft={draft}
     sending={sending}
+    generationStage={generationStages[draftKey]}
     chatError={chatError}
     onPersonChange={prototypeSelectPerson}
     onConversationChange={drawerSwitch}

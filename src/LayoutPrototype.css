@@ -144,3 +144,8 @@
 
 .qj-chat { overflow-anchor: none; }
 .qj-history-more { align-self: center; min-height: 44px; border: 0; background: transparent; color: var(--qj-muted); }
+
+.qj-generation-status { align-self: flex-start; display: inline-flex; align-items: center; gap: 6px; padding: 4px 9px; border-radius: 12px; background: var(--qj-soft); color: var(--qj-ink); font-size: 11px; }
+.qj-generation-dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; animation: qj-generation-pulse 1.2s ease-in-out infinite alternate; }
+@keyframes qj-generation-pulse { from { opacity: .35; } to { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .qj-generation-dot { animation: none; } }

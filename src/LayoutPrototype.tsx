@@ -37,6 +37,7 @@ type LayoutPrototypeProps = {
   messages?: MessageView[]
   draft?: string
   sending?: boolean
+  generationStage?: string
   pending?: {text:string;status:string;attachments?:{name?:string}[]}
   onCancelPending?:()=>void
   onEditPending?:(text:string)=>boolean
@@ -142,6 +143,10 @@ export default function LayoutPrototype(props:LayoutPrototypeProps = {}) {
   const prependPosition = useRef<{ scope: string; height: number; top: number } | null>(null)
   const [historyWindow, setHistoryWindow] = useState({ scope: '', limit: 40 })
   const historyLimit = historyWindow.scope === scope ? historyWindow.limit : 40
+  const stage = props.generationStage
+  const showGeneration = props.sending && stage !== 'streaming'
+  const generationLabel = stage === 'tools' ? '调用工具' : stage === 'connecting' ? '连接中' : '准备中'
+
   const historyStart = Math.max(0, actualMessages.length - historyLimit)
 
   function loadOlderMessages() {
@@ -243,6 +248,9 @@ export default function LayoutPrototype(props:LayoutPrototypeProps = {}) {
         <div className="qj-chat-date">{activeConversation?.title || '暂无会话'}</div>
         {historyStart > 0 && <button type="button" className="qj-history-more" onClick={loadOlderMessages}>加载更早消息</button>}
         {actualMessages.slice(historyStart).map((m,i)=><div key={m.id||historyStart+i} className={'qj-message '+(m.role==='user'?'mine':'from')+(m.id&&selected.includes(m.id)?' qj-message-selected':'')} onPointerDown={e=>{if(!m.id||selection?.scope===scope|| (e.target as HTMLElement).closest('button,input,textarea,summary'))return;cancelPress();pressStart.current={x:e.clientX,y:e.clientY};pressTimer.current=setTimeout(()=>{setMessageAction({scope,id:m.id!});pressTimer.current=null},500)}} onPointerMove={e=>{if(Math.hypot(e.clientX-pressStart.current.x,e.clientY-pressStart.current.y)>10)cancelPress()}} onPointerUp={cancelPress} onPointerCancel={cancelPress} onContextMenu={e=>{if(m.id){e.preventDefault();setMessageAction({scope,id:m.id})}}} onClick={()=>{if(m.id&&selection?.scope===scope)toggleSelected(m.id)}}>{m.role!=='user'&&<span className="qj-avatar">{displayName(person).slice(0,1)}</span>}<div className="qj-message-content">{m.taskRunId&&<details className="reasoning"><summary>定时任务</summary><div className="reasoning-body">{m.taskDetails||m.contextNote||'定时任务'}</div></details>}{m.role==='assistant'&&m.reasoning&&<details className="reasoning"><summary>思考过程</summary><div className="reasoning-body">{cleanupMessageText(m.reasoning)}</div></details>}{m.role==='assistant'?<RichText text={cleanupMessageText(m.content||'')}/>:<p>{m.content}</p>}{m.attachments?.map((a,j)=><div key={j} className="qj-message-attachment">{a.type?.startsWith('image/')&&(a.preview||a.dataUrl)?<img src={assetUrl(a.preview||a.dataUrl||'')} alt={a.name}/>:<span>{a.name}</span>}</div>)}{m.id&&messageAction?.scope===scope&&messageAction.id===m.id&&selection?.scope!==scope&&<div className="qj-message-actions"><button onClick={()=>{setMessageEdit({scope,id:m.id!,text:m.content});setMessageAction(null)}}>编辑</button><button onClick={()=>{setSelection({scope,ids:[m.id!]});setMessageAction(null)}}>多选</button>{m.role==='assistant'&&historyStart+i===actualMessages.length-1&&<button disabled={props.sending} onClick={()=>{setMessageAction(null);void props.onRegenerateMessage?.(m.id!)}}>重新生成</button>}<button onClick={()=>setMessageAction(null)}>关闭</button></div>}{m.id&&messageEdit?.scope===scope&&messageEdit.id===m.id&&<div className="qj-pending-edit"><textarea value={messageEdit.text} onChange={e=>setMessageEdit({...messageEdit,text:e.target.value})}/><button disabled={!messageEdit.text.trim()} onClick={()=>{if(props.onEditMessage?.(m.id!,messageEdit.text))setMessageEdit(null)}}>保存</button><button onClick={()=>setMessageEdit(null)}>取消</button></div>}</div></div>)}
+        {showGeneration && <span className="qj-generation-status" role="status">
+          <span className="qj-generation-dot" aria-hidden="true"/>{generationLabel}
+        </span>}
         {selection?.scope===scope&&<div className="qj-message-actions"><button disabled={!selected.length} onClick={()=>{if(window.confirm('删除选中的 '+selected.length+' 条消息？')){props.onDeleteMessages?.(selected);setSelection(null)}}}>删除（{selected.length}）</button><button onClick={()=>setSelection(null)}>取消多选</button></div>}
       </div>}
       {view === 'room' && <div className="qj-page">
