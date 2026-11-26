@@ -1072,16 +1072,24 @@ export async function localHandle(path, init) {
       const ordinary = due.filter(task => !natural.includes(task))
       if (!ordinary.length) return json(200, { fired: [], alarmsChanged: natural.length > 0, tasks: readJSON(K.tasks, []) })
       const fired = [], notices = [], advanced = new Map()
+      const inboxAll = readJSON(K.inbox, [])
+      const existingNotices = new Set((Array.isArray(inboxAll) ? inboxAll : [])
+        .filter(item => item?.kind === 'task_notice').map(item => item.id))
       for (const t of ordinary) {
+        const runId = 'local-' + t.id + '-' + Date.parse(t.run_at)
+        const noticeId = 'task-' + runId
         const answer = '⏰ ' + t.title + (t.prompt ? '\n' + t.prompt : '')
         fired.push({
-          runId: 'local-' + t.id + '-' + Date.parse(t.run_at), taskId: t.id, person: t.person,
+          runId, taskId: t.id, person: t.person,
           title: t.title, prompt: t.prompt, answer, conversationId: t.conversation_id || '', runAt: t.run_at,
         })
-        notices.push({ id: uuid(), person: t.person, content: answer, kind: 'task_notice', created_at: new Date(nowMs).toISOString(), read_at: null })
+        // A killed WebView can leave the inbox persisted but the task not yet advanced.
+        // Replaying that run must reuse its notice rather than create a second one.
+        if (!existingNotices.has(noticeId)) {
+          notices.push({ id: noticeId, person: t.person, content: answer, kind: 'task_notice', created_at: new Date(nowMs).toISOString(), read_at: null })
+        }
         advanced.set(t.id, advanceLocalTask(t, nowMs))
       }
-      const inboxAll = readJSON(K.inbox, [])
       try {
         writeJSON(K.inbox, [...notices].reverse().concat(Array.isArray(inboxAll) ? inboxAll : []).slice(0, 200))
         writeJSON(K.tasks, readJSON(K.tasks, []).map(t => {

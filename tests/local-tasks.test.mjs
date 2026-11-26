@@ -104,6 +104,20 @@ test('LocalBackend：创建 → 列表 → 结算 → 会话提醒 → 重复任
   assert.equal(inbox[0].kind, 'task_notice')
 })
 
+test('普通任务写入提醒后中断，恢复结算不会再写一条', async () => {
+  localStorage.clear()
+  const created = await post('/api/tasks', { ...base, runAt: iso(T0 - 1000), recurrence: 'once' })
+  const task = created.data.task
+  const runId = 'local-' + task.id + '-' + Date.parse(task.run_at)
+  const existing = { id: 'task-' + runId, person: task.person, kind: 'task_notice', content: '原提醒', created_at: iso(T0), read_at: null }
+  localStorage.setItem('ai-home.local.inbox', JSON.stringify([existing]))
+  const run = await post('/api/tasks/run', { now: iso(T0) })
+  assert.equal(run.data.fired[0].runId, runId)
+  assert.equal(run.data.tasks[0].status, 'completed')
+  const inbox = (await call('/api/inbox')).data.messages
+  assert.deepEqual(inbox, [existing])
+})
+
 test('LocalBackend：暂停不触发，恢复后触发，一次性任务结算后完成', async () => {
   localStorage.clear()
   const c = await post('/api/tasks', { ...base, runAt: iso(T0 - 1000), recurrence: 'once' })
