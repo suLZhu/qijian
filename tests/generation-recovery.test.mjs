@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import {
-  ACTIVE_GENERATION_KEY, INTERRUPTED_NOTE, readActiveGeneration, startGeneration,
+  ACTIVE_GENERATION_KEY, INTERRUPTED_NOTE, readActiveGeneration, readActiveGenerations, startGeneration,
   finishGeneration, needsGenerationRecovery, recoverInterruptedMessages,
 } from '../src/generationRecovery.mjs'
 import { buildModelCatalog } from '../src/unifiedModels.mjs'
@@ -68,4 +68,17 @@ test('解析模型配置时缺少 model 回退旧配置，不拿 name 顶替', (
   const fallback = { model: 'gpt-4o-mini', endpoint: 'https://old/v1' }
   assert.deepEqual(resolveModelConfig('p1', profiles, fallback), fallback)
   assert.equal(normalizeProfiles(profiles)[0].model, '')
+})
+
+ test('多个会话独立恢复并兼容旧记录', () => {
+  const s = memStorage()
+  s.setItem(ACTIVE_GENERATION_KEY, JSON.stringify({person:'a',conversationId:'c1',messageId:'m1',at:1000}))
+  startGeneration(s,{person:'b',conversationId:'c2',messageId:'m2'},2000)
+  startGeneration(s,{person:'a',conversationId:'c3',messageId:'m3'},3000)
+  assert.deepEqual(readActiveGenerations(s).map(v=>v.messageId),['m1','m2','m3'])
+  assert.equal(finishGeneration(s,'m2'),true)
+  assert.deepEqual(readActiveGenerations(s).map(v=>v.messageId),['m1','m3'])
+  startGeneration(s,{person:'a',conversationId:'c1',messageId:'m4'},4000)
+  assert.equal(finishGeneration(s,'m1'),false)
+  assert.deepEqual(readActiveGenerations(s).map(v=>v.messageId),['m3','m4'])
 })
