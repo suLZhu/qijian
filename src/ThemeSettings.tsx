@@ -4,6 +4,7 @@ import { getActivePackId, loadThemePacks, packFromZip, parseThemePack, removeThe
 import './ThemeSettings.css'
 import { BUILTIN_THEME_PACKS } from './builtinThemePacks.mjs'
 import { IconTrash } from './icons'
+import { SoftSelect } from './SoftSelect'
 
 // 主题系统：像手机主题一样统一整 App 的背景、surface、控件、按钮、线性图标语义色、字体与聊天气泡。
 // 功能图标的形状固定为同一套线性 SVG，主题只负责颜色与状态，不再替换成 emoji。
@@ -56,13 +57,8 @@ export function ThemeSettings({ value, onChange }: { value: ThemePrefs; onChange
 
   return <section className="theme-settings" aria-label="全局外观设置">
     <div className="theme-tab-panel">
-      <label>界面字体
-        <select aria-label="界面字体" value={value.font || 'serif'} onChange={e => update({ font: e.target.value as ThemePrefs['font'] })}>
-          <option value="serif">书页宋体</option>
-          <option value="sans">简洁无衬线</option>
-        </select>
-      </label>
-      <label className="theme-radius-setting">
+      <div className="theme-font-choice"><span>界面字体</span><SoftSelect value={value.font || 'serif'} onChange={v=>update({font:v as ThemePrefs['font']})} options={[{value:'serif',label:'书页宋体'},{value:'sans',label:'简洁无衬线'},{value:'custom',label:'自定义字体'}]}/></div>
+      <div className="theme-radius-setting">
         <span className="theme-control-title">全局圆角 <strong>{value.radius}px</strong></span>
         <small className="theme-control-hint">调整主要控件的圆角：按钮、输入框、下拉框、聊天气泡和输入栏。头像与分隔线不受影响。</small>
         <div className="theme-radius-preview" aria-label="圆角效果预览">
@@ -71,7 +67,7 @@ export function ThemeSettings({ value, onChange }: { value: ThemePrefs; onChange
           <span className="theme-radius-preview-bubble" style={{ borderRadius: (value.radius + 4) + 'px' }}>消息气泡</span>
         </div>
         <input type="range" min="4" max="24" step="2" value={value.radius} aria-label="全局圆角" onChange={e => update({ radius: Number(e.target.value) })}/>
-      </label>
+      </div>
     </div>
 
     <div className="theme-pack-block">
@@ -93,7 +89,7 @@ export function ThemeSettings({ value, onChange }: { value: ThemePrefs; onChange
       </div>
       {error && <p className="theme-pack-error">{error}</p>}
       {notice && <p className="theme-pack-notice">{notice}</p>}
-      <p className="muted theme-pack-hint">格式见「设置 → 系统与权限 → 说明」；一个包可含全局 tokens、整 App background、bubble 与 font。系统功能图标使用统一的本地图片资源，当前极简白底模式下不随主题变色。</p>
+      <p className="muted theme-pack-hint">格式见「设置 → 关于栖间 → 使用说明」；一个包可含全局 tokens、整 App background、bubble 与 font。系统功能图标使用统一的本地图片资源，当前极简白底模式下不随主题变色。</p>
     </div>
 
     <div className="theme-fontctl">
