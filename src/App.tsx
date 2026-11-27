@@ -1276,10 +1276,6 @@ export default function App() {
     }
     try{localStorage.setItem(runtimeKey,JSON.stringify(runtime))}catch{}
     matched.sort((a,b)=>(b.priority||0)-(a.priority||0))
-    const legacyMemoryParts=memoryEntries[target]
-      .filter(e=>e.pinned || e.keywords.split(/[,，、\n]/).map(k=>k.trim()).filter(Boolean).some(k=>text.includes(k)))
-      .slice(0,10)
-      .map(e=>'['+clipContextText(e.category,60)+'] '+clipContextText(e.title,120)+'\n'+clipContextText(e.content,1000))
     const systemWorldTop=takeWithinBudget(
       matched.filter(e=>e.target==='system'&&e.position==='top').map(e=>'['+clipContextText(e.title,120)+']\n'+clipContextText(e.content,1800)),
       7000,2000
@@ -1299,8 +1295,6 @@ export default function App() {
       card.definition && '【角色设定】\n'+clipContextText(card.definition,12000),
       card.language && '【语言与表达要求】\n'+clipContextText(card.language,4000),
       prompt[target] && '【补充人物提示】\n'+clipContextText(prompt[target],6000),
-      memory[target] && '【长期记忆（旧版文本）】\n'+clipContextText(memory[target],8000),
-      legacyMemoryParts.length && '【长期记忆库召回】\n'+takeWithinBudget(legacyMemoryParts,6000,1200).join('\n\n'),
       worldbook[target] && '【世界书补充】\n'+clipContextText(worldbook[target],8000),
       enabledSkillsBlock(loadSkills(target),5000),
       GUIDE_BRIEF,
