@@ -3930,9 +3930,7 @@ body.has-pack .shell .ap-avatar-bar button{background:transparent!important;bord
   color:var(--muted,#8b8494);
 }
 
-/* 功能图标固定线性 SVG；主题只改语义色，不替换图形。 */
-
-.ui-icon-inline{display:inline-block;vertical-align:-.17em;flex:0 0 auto}
+/* Functional icons are sized by the shared bitmap component. */
 .shell .settings-row-icon,
 .shell .sidebar-logo,
 .shell .vendor-kelivo-provider-icon,

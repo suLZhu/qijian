@@ -349,9 +349,7 @@ body.has-pack .shell::before{display:none!important}
   flex:0 0 auto;
   opacity:.82;
 }
-.shell .ui-icon-inline{
-  vertical-align:-.16em;
-}
+
 .shell .settings-row-icon,
 .shell .fun-module-icon,
 .shell .vendor-kelivo-provider-icon,
@@ -714,14 +712,7 @@ html,body{
 
 
 /* 6.3 首页菜单与侧边栏紧凑化。 */
-.shell .ui-icon-image{
-  display:inline-block!important;
-  position:relative!important;
-  overflow:hidden!important;
-  flex:0 0 auto!important;
-  vertical-align:-.16em!important;
-  line-height:0!important;
-}
+
 
 
 /* 首页给菜单独立留出一整行，时钟绝不再钻到按钮下面。 */
@@ -1205,10 +1196,7 @@ html,body{
   place-items:center!important;
   background:#fff!important;
 }
-.shell .vendor-model-brand .ui-icon-image{
-  width:16px!important;
-  height:16px!important;
-}
+
 
 .shell .vendor-model-card{
   gap:7px!important;
