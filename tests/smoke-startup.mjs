@@ -35,6 +35,16 @@ try {
   console.log('Browser startup:',JSON.stringify(result))
   assert(!result.recovery,'Startup recovery overlay shown')
   assert(result.rootChildren>0,'React did not render any child')
+  const icons=await page.evaluate(()=>Array.from(document.querySelectorAll('.ui-icon-image')).map(el=>{
+    const r=el.getBoundingClientRect(), css=getComputedStyle(el)
+    return {width:r.width,height:r.height,background:css.backgroundImage,overflow:css.overflow,children:el.childElementCount}
+  }))
+  assert(icons.length>0,'No shared icons rendered on startup')
+  for(const icon of icons){
+    assert(icon.width>0 && icon.width<=48 && icon.height>0 && icon.height<=48,'Icon exceeds its layout cell: '+JSON.stringify(icon))
+    assert(icon.background.includes('ui-icons-sprite.svg') && icon.overflow==='hidden' && icon.children===0,'Unclipped icon sprite: '+JSON.stringify(icon))
+  }
+  console.log('Shared icon layout checks passed:',icons.length)
   console.log('Qijian browser startup smoke test PASSED')
 } finally {
   if(browser) await browser.close()
