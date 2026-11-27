@@ -1,0 +1,1280 @@
+/* 栖间极简白底基线
+   目标：先把所有页面结构统一，再谈主题。
+   规则：白底、黑灰文字、线分隔、无卡片、无玻璃、无阴影、统一顶部坐标。 */
+
+:root{
+  --minimal-bg:#ffffff;
+  --minimal-text:#202020;
+  --minimal-muted:#8a8a8a;
+  --minimal-line:#e8e8e8;
+  --minimal-line-strong:#d8d8d8;
+  --minimal-top:calc(var(--app-safe-top,0px) + 50px);
+  --minimal-header:48px;
+}
+
+html,body,#root{
+  background:var(--minimal-bg)!important;
+  color:var(--minimal-text)!important;
+}
+
+/* 暂时停用所有主题/壁纸视觉，只保留结构。 */
+.shell,
+body.has-pack .shell{
+  --page-bg:#fff!important;
+  --app-bg:#fff!important;
+  --surface:#fff!important;
+  --surface-elevated:#fff!important;
+  --card:#fff!important;
+  --field:#fff!important;
+  --ink:var(--minimal-text)!important;
+  --muted:var(--minimal-muted)!important;
+  --line:var(--minimal-line)!important;
+  --divider:var(--minimal-line)!important;
+  --border-subtle:var(--minimal-line)!important;
+  --accent:#222!important;
+  --accent-soft:#f5f5f5!important;
+  --control-bg:#fff!important;
+  --control-bg-hover:#f7f7f7!important;
+  --control-border:var(--minimal-line-strong)!important;
+  --button-primary-bg:#222!important;
+  --button-primary-fg:#fff!important;
+  --button-secondary-bg:#fff!important;
+  --button-secondary-fg:#222!important;
+  --button-secondary-border:var(--minimal-line-strong)!important;
+  background:#fff!important;
+  color:var(--minimal-text)!important;
+  box-shadow:none!important;
+  font-family:system-ui,-apple-system,"Segoe UI","Noto Sans SC","PingFang SC","Microsoft YaHei",sans-serif!important;
+}
+.shell::before,
+body.has-pack .shell::before{display:none!important}
+
+/* 所有页面同一坐标系。 */
+.shell>.screen{
+  margin-left:0!important;
+  width:100%!important;
+  padding:0 14px 28px!important;
+  background:#fff!important;
+}
+.shell .home-screen,
+.shell .room-screen,
+.shell .fun-screen,
+.shell .settings-screen{
+  box-sizing:border-box!important;
+  min-height:100dvh!important;
+  padding-top:var(--minimal-top)!important;
+  background:#fff!important;
+}
+.shell .settings-screen,
+.shell .fun-screen{
+  padding-left:0!important;
+  padding-right:0!important;
+}
+.shell .fullscreen-chat{
+  min-height:100dvh!important;
+  background:#fff!important;
+}
+
+/* 一级 / 二级 / 三级标题严格同高。 */
+.shell .settings-heading,
+.shell .settings-detail>.settings-back,
+.shell .vendor-account-back,
+.shell .vendor-center .vendor-kelivo-page-head,
+.shell #subscription-accounts .account-page-head,
+.shell .room-tool-header,
+.shell .fun-heading{
+  box-sizing:border-box!important;
+  min-height:var(--minimal-header)!important;
+  height:var(--minimal-header)!important;
+  margin:0!important;
+  padding:0 2px!important;
+  display:flex!important;
+  align-items:center!important;
+  border:0!important;
+  border-bottom:1px solid var(--minimal-line)!important;
+  border-radius:0!important;
+  background:#fff!important;
+  box-shadow:none!important;
+}
+.shell .settings-heading{
+  flex-direction:row!important;
+  gap:10px!important;
+  justify-content:flex-start!important;
+}
+.shell .settings-heading .settings-back-room{
+  margin:0!important;
+  height:32px!important;
+  min-height:32px!important;
+}
+.shell .settings-heading h2,
+.shell .fun-heading h2{
+  margin:0!important;
+  font-size:18px!important;
+  line-height:1.2!important;
+}
+.shell .room-tool-header{
+  margin-top:0!important;
+}
+
+/* 页面背景一律实白，禁止透明/毛玻璃/渐变。 */
+.shell .screen,
+.shell .home-screen,
+.shell .room-screen,
+.shell .fun-screen,
+.shell .settings-screen,
+.shell .settings-detail,
+.shell .fullscreen-chat,
+.shell .chat-header,
+.shell .compose,
+.shell .compose-box,
+.shell .compose-plus-panel,
+.shell .compose-tray,
+.shell .emoji-panel,
+.shell .app-sidebar,
+.shell .model-sheet,
+.shell .widget-sheet,
+.shell .tool-panel,
+.shell .memory-panel,
+.shell .web-browser{
+  background:#fff!important;
+  background-image:none!important;
+  backdrop-filter:none!important;
+  -webkit-backdrop-filter:none!important;
+  box-shadow:none!important;
+}
+
+/* 手机菜单：实白、不透底；打开时隐藏入口按钮，避免与菜单内容重叠。 */
+.shell .mobile-menu-toggle{
+  top:calc(var(--app-safe-top,0px) + 8px)!important;
+  left:12px!important;
+  min-width:36px!important;
+  height:36px!important;
+  padding:0 10px!important;
+  border:1px solid var(--minimal-line-strong)!important;
+  border-radius:8px!important;
+  background:#fff!important;
+  color:#222!important;
+  box-shadow:none!important;
+}
+.shell .mobile-menu-toggle.moved{
+  opacity:0!important;
+  pointer-events:none!important;
+}
+.shell .sidebar-scrim{
+  background:rgba(0,0,0,.12)!important;
+}
+.shell .app-sidebar{
+  width:min(320px,88vw)!important;
+  padding:calc(var(--app-safe-top,0px) + 16px) 16px 16px!important;
+  background:#fff!important;
+  border-right:1px solid var(--minimal-line-strong)!important;
+  color:#222!important;
+}
+.shell .sidebar-brand{
+  padding:0 0 14px!important;
+  border-bottom:1px solid var(--minimal-line)!important;
+}
+.shell .sidebar-logo{
+  width:34px!important;height:34px!important;
+  border:0!important;border-radius:0!important;background:#fff!important;
+}
+.shell .sidebar-section,
+.shell .sidebar-combined-card,
+.shell .sidebar-assistant-card{
+  background:#fff!important;
+  border:0!important;
+  border-radius:0!important;
+  box-shadow:none!important;
+  padding:0!important;
+}
+.shell .sidebar-nav-row,
+.shell .sidebar-conv-row,
+.shell .sidebar-assistant-tool{
+  min-height:46px!important;
+  padding:10px 2px!important;
+  border:0!important;
+  border-bottom:1px solid var(--minimal-line)!important;
+  border-radius:0!important;
+  background:#fff!important;
+  color:#222!important;
+}
+.shell .sidebar-nav-row.active,
+.shell .sidebar-conv-row.active{
+  background:#fff!important;
+  color:#000!important;
+  font-weight:600!important;
+}
+.shell .sidebar-settings{
+  border:0!important;
+  border-top:1px solid var(--minimal-line-strong)!important;
+  border-radius:0!important;
+  background:#fff!important;
+  box-shadow:none!important;
+}
+
+/* 全局去卡片：只保留行与分隔线。 */
+.shell .setting-card,
+.shell .settings-inner-card,
+.shell .settings-row,
+.shell .settings-flat-list,
+.shell .theme-tab-panel,
+.shell .theme-pack-block,
+.shell .theme-fontctl,
+.shell .vendor-card,
+.shell .vendor-detail-card,
+.shell .vendor-model-card,
+.shell .vendor-kelivo-provider-row,
+.shell .vendor-kelivo-key-card,
+.shell .account-row,
+.shell .fun-module-card,
+.shell .workspace-card,
+.shell .assistant-dock-row,
+.shell .workspace-applet,
+.shell .room-session-switch,
+.shell .home-status,
+.shell .home-today-card,
+.shell .home-today-list,
+.shell .assistant-profile,
+.shell .ap-body,
+.shell .ap-head,
+.shell .ap-avatar-bar,
+.shell .tool-panel,
+.shell .memory-panel,
+.shell .memory-card,
+.shell .widget-sheet,
+.shell .model-sheet{
+  background:#fff!important;
+  border:0!important;
+  border-radius:0!important;
+  box-shadow:none!important;
+}
+.shell .settings-row,
+.shell .setting-card,
+.shell .vendor-kelivo-provider-row,
+.shell .vendor-model-card,
+.shell .account-row,
+.shell .fun-module-card,
+.shell button.workspace-card,
+.shell button.assistant-dock-row,
+.shell button.workspace-applet,
+.shell .room-session-switch,
+.shell .home-status,
+.shell .home-today-card{
+  margin:0!important;
+  border-bottom:1px solid var(--minimal-line)!important;
+}
+.shell .settings-row,
+.shell .setting-card,
+.shell .vendor-kelivo-provider-row,
+.shell .vendor-model-card,
+.shell .account-row{
+  padding:14px 2px!important;
+}
+.shell .fun-module-grid,
+.shell .tool-grid{
+  display:block!important;
+}
+.shell .fun-module-card,
+.shell button.workspace-card,
+.shell button.workspace-applet{
+  width:100%!important;
+  min-height:58px!important;
+  padding:12px 2px!important;
+}
+
+/* 头像允许圆形；其余“装饰性圆角卡片”全部去掉。 */
+.shell .avatar,
+.shell .room-name-avatar,
+.shell .ap-avatar-button,
+.shell .chat-avatar{
+  border-radius:50%!important;
+}
+.shell .calendar-card,
+.shell .chat-entry,
+.shell .room-illustration{
+  border-radius:0!important;
+  box-shadow:none!important;
+}
+
+/* 表单：白底 + 一条边框，不做大块浅色卡。 */
+.shell input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]),
+.shell textarea,
+.shell select,
+.shell .soft-select-trigger{
+  background:#fff!important;
+  color:#222!important;
+  border:1px solid var(--minimal-line-strong)!important;
+  border-radius:7px!important;
+  box-shadow:none!important;
+}
+.shell input:focus,
+.shell textarea:focus,
+.shell select:focus,
+.shell .soft-select-trigger:focus{
+  border-color:#888!important;
+  outline:none!important;
+}
+
+/* 按钮默认文字化；主操作保留最小必要边框。 */
+.shell button{
+  box-shadow:none!important;
+}
+.shell .settings-back,
+.shell .worldbook-back,
+.shell .fun-back,
+.shell .vendor-kelivo-back,
+.shell .vendor-account-back>.settings-back,
+.shell .sidebar-back-room{
+  background:#fff!important;
+  border:0!important;
+  border-radius:0!important;
+  color:#222!important;
+}
+.shell .primary,
+.shell .vendor-submit,
+.shell .ledger-add,
+.shell .widget-save,
+.shell .mep-save{
+  min-height:38px!important;
+  border:1px solid #222!important;
+  border-radius:7px!important;
+  background:#222!important;
+  color:#fff!important;
+}
+
+/* 图片图标：固定中性黑灰，不参与主题染色。 */
+.shell img[aria-hidden="true"]{
+  display:inline-block;
+  object-fit:contain;
+  flex:0 0 auto;
+  opacity:.82;
+}
+.shell .ui-icon-inline{
+  vertical-align:-.16em;
+}
+.shell .settings-row-icon,
+.shell .fun-module-icon,
+.shell .vendor-kelivo-provider-icon,
+.shell .vendor-model-brand,
+.shell .cp-ico{
+  background:#fff!important;
+  color:#222!important;
+  border:0!important;
+  border-radius:0!important;
+}
+.shell .settings-row-icon img{width:18px!important;height:18px!important}
+.shell .vendor-model-brand img{width:15px!important;height:15px!important}
+.shell .message-action-icon{width:15px!important;height:15px!important}
+
+/* 聊天也先回到最朴素：白底，消息之间靠留白；输入区仅顶线分隔。 */
+.shell .chat-header{
+  min-height:var(--minimal-header)!important;
+  height:var(--minimal-header)!important;
+  padding:0 2px!important;
+  border:0!important;
+  border-bottom:1px solid var(--minimal-line)!important;
+}
+.shell .chat-body{
+  background:#fff!important;
+}
+.shell .bubble,
+.shell .bubble.user,
+.shell .bubble.assistant{
+  background:#fff!important;
+  border:0!important;
+  border-radius:0!important;
+  box-shadow:none!important;
+}
+.shell .message-row{
+  border-bottom:1px solid #f3f3f3!important;
+  padding:10px 0!important;
+}
+.shell .compose.compose-box,
+.shell .compose.compose-box.compose-wechat{
+  border:0!important;
+  border-top:1px solid var(--minimal-line-strong)!important;
+  border-radius:0!important;
+  margin:0!important;
+  background:#fff!important;
+}
+
+/* 供应商页：开关/Key/模型区不再套大卡。 */
+.shell .vendor-center,
+.shell .vendor-detail,
+.shell .vendor-add,
+.shell .vendor-kelivo-page,
+.shell .vendor-kelivo-detail{
+  background:#fff!important;
+}
+.shell .vendor-kelivo-key-card,
+.shell .vendor-detail-section,
+.shell .vendor-kelivo-section{
+  border:0!important;
+  border-bottom:1px solid var(--minimal-line)!important;
+  border-radius:0!important;
+  background:#fff!important;
+  box-shadow:none!important;
+  padding-left:2px!important;
+  padding-right:2px!important;
+}
+
+/* 弹层/半屏保留白色实体面，避免“透明看见后面”。 */
+.shell .model-sheet,
+.shell .widget-sheet,
+.shell .soft-select-menu,
+.shell .ui-dialog,
+.shell .web-browser{
+  background:#fff!important;
+  border:1px solid var(--minimal-line-strong)!important;
+  box-shadow:none!important;
+}
+
+
+/* 二三级页面禁止再叠加自己的顶部空白。 */
+.shell .settings-detail,
+.shell .vendor-center,
+.shell .vendor-detail,
+.shell .vendor-add,
+.shell #subscription-accounts,
+.shell .tool-dash,
+.shell .memory-panel,
+.shell .backup-center,
+.shell .workspace-settings{
+  padding-top:0!important;
+  margin-top:0!important;
+}
+
+/* 独立全屏模型页也用同一条顶部基线。 */
+.shell .mep-page{background:#fff!important}
+.shell .mep-head{
+  box-sizing:border-box!important;
+  min-height:calc(var(--minimal-top) + var(--minimal-header))!important;
+  padding:var(--minimal-top) 14px 0!important;
+  align-items:center!important;
+  background:#fff!important;
+  border-bottom:1px solid var(--minimal-line)!important;
+}
+.shell .mep-foot{
+  background:#fff!important;
+  border-top:1px solid var(--minimal-line)!important;
+}
+
+/* 极简模式下，历史遗留的 card/tile/panel/box 统一打平。 */
+.shell [class*="-card"],
+.shell [class*="-tile"],
+.shell [class*="-panel"],
+.shell [class*="-box"]{
+  box-shadow:none!important;
+}
+.shell .theme-tile,
+.shell .theme-setting-tabs,
+.shell .theme-tab-panel,
+.shell .theme-character-note,
+.shell .theme-fontctl,
+.shell .backup-files,
+.shell .memory-auto-card,
+.shell .memory-auto-option,
+.shell .ws-card,
+.shell .mcp-boundary,
+.shell .mcp-connection,
+.shell .world-editor,
+.shell .character-editor,
+.shell .usage-panel,
+.shell .request-stats-card,
+.shell .chat-summary-card{
+  background:#fff!important;
+  border:0!important;
+  border-radius:0!important;
+  box-shadow:none!important;
+}
+.shell .theme-tile,
+.shell .theme-character-note,
+.shell .backup-files,
+.shell .memory-auto-option,
+.shell .ws-card,
+.shell .mcp-connection,
+.shell .world-editor,
+.shell .character-editor,
+.shell .usage-panel,
+.shell .request-stats-card,
+.shell .chat-summary-card{
+  border-bottom:1px solid var(--minimal-line)!important;
+}
+.shell .theme-gallery,
+.shell .theme-setting-tabs{
+  display:block!important;
+  padding:0!important;
+  margin:0!important;
+}
+.shell .theme-setting-tabs button,
+.shell .theme-tile{
+  width:100%!important;
+  min-height:44px!important;
+  padding:10px 2px!important;
+  text-align:left!important;
+  border-bottom:1px solid var(--minimal-line)!important;
+  border-radius:0!important;
+}
+.shell .theme-setting-tabs button.active,
+.shell .theme-tile.selected{
+  background:#fff!important;
+  color:#000!important;
+  font-weight:600!important;
+}
+
+/* 列表型工具全部只靠横线分隔。 */
+.shell .memory-auto-option,
+.shell .backup-file,
+.shell .room-widget-card,
+.shell .world-entry,
+.shell .mcp-connection,
+.shell .scheduled-task,
+.shell .task-line{
+  background:#fff!important;
+  border:0!important;
+  border-bottom:1px solid var(--minimal-line)!important;
+  border-radius:0!important;
+  box-shadow:none!important;
+}
+
+/* 不再显示“主题色块式”图标底座。 */
+.shell .fun-module-icon,
+.shell .settings-row-icon,
+.shell .sidebar-link-icon,
+.shell .room-widget-icon,
+.shell .vendor-model-brand,
+.shell .account-mark{
+  width:auto!important;
+  height:auto!important;
+  min-width:22px!important;
+  padding:0!important;
+  background:#fff!important;
+  border:0!important;
+  border-radius:0!important;
+  box-shadow:none!important;
+}
+
+/* 开关只保留极简黑白，不使用主题色。 */
+.shell input[type="checkbox"],
+.shell input[type="radio"]{
+  accent-color:#222!important;
+}
+.shell .tray-switch,
+.shell .memory-auto-switch input+span,
+.shell .switch-track{
+  filter:grayscale(1)!important;
+}
+
+
+/* 6.2 页面层级结构统一：一级 / 二级 / 三级只允许一个页头。 */
+.shell .settings-screen{
+  padding-top:var(--minimal-top)!important;
+}
+.shell .settings-page-header{
+  display:grid!important;
+  grid-template-columns:92px minmax(0,1fr) 92px!important;
+  align-items:center!important;
+  width:100%!important;
+  height:var(--minimal-header)!important;
+  min-height:var(--minimal-header)!important;
+  margin:0!important;
+  padding:0 2px!important;
+  box-sizing:border-box!important;
+  background:#fff!important;
+  border:0!important;
+  border-bottom:1px solid var(--minimal-line)!important;
+  box-shadow:none!important;
+}
+.shell .settings-page-header h2{
+  margin:0!important;
+  padding:0!important;
+  font-size:17px!important;
+  line-height:1!important;
+  font-weight:600!important;
+  text-align:center!important;
+  white-space:nowrap!important;
+  overflow:hidden!important;
+  text-overflow:ellipsis!important;
+}
+.shell .settings-page-back{
+  display:inline-flex!important;
+  align-items:center!important;
+  justify-content:flex-start!important;
+  gap:5px!important;
+  width:auto!important;
+  min-width:0!important;
+  height:36px!important;
+  margin:0!important;
+  padding:0 4px!important;
+  border:0!important;
+  border-radius:0!important;
+  background:#fff!important;
+  color:#222!important;
+  font-size:12px!important;
+}
+.shell .settings-page-head-spacer{display:block!important}
+
+.shell .settings-detail,
+.shell .vendor-center,
+.shell .vendor-page,
+.shell .vendor-card,
+.shell .vendor-card-body{
+  margin-top:0!important;
+  padding-top:0!important;
+}
+.shell .settings-detail{
+  width:100%!important;
+  margin:0!important;
+  padding:0!important;
+}
+
+/* 供应商内部不再拥有第二套页面头，只能有紧凑工具行。 */
+.shell .vendor-center{
+  display:block!important;
+  gap:0!important;
+}
+.shell .vendor-kelivo-list-head,
+.shell .vendor-inline-toolbar,
+.shell .vendor-page-meta{
+  min-height:38px!important;
+  height:38px!important;
+  margin:0!important;
+  padding:0 2px!important;
+  display:flex!important;
+  align-items:center!important;
+  justify-content:space-between!important;
+  gap:8px!important;
+  background:#fff!important;
+  border:0!important;
+  border-bottom:1px solid var(--minimal-line)!important;
+  border-radius:0!important;
+  box-shadow:none!important;
+}
+.shell .vendor-page-meta{
+  justify-content:flex-end!important;
+  color:var(--minimal-muted)!important;
+  font-size:11px!important;
+}
+.shell .vendor-inline-meta{
+  color:var(--minimal-muted)!important;
+  font-size:11px!important;
+}
+.shell .vendor-kelivo-head-actions{
+  margin-left:auto!important;
+  display:flex!important;
+  align-items:center!important;
+  gap:2px!important;
+}
+.shell .vendor-kelivo-head-actions button{
+  width:32px!important;
+  min-width:32px!important;
+  height:32px!important;
+  padding:0!important;
+  border:0!important;
+  border-radius:0!important;
+  background:#fff!important;
+}
+.shell .vendor-head-tabs{
+  display:flex!important;
+  align-items:center!important;
+  gap:12px!important;
+}
+.shell .vendor-head-title{
+  height:38px!important;
+  padding:0!important;
+  border:0!important;
+  background:#fff!important;
+  font-size:12px!important;
+}
+.shell .vendor-kelivo-search{
+  margin:0!important;
+  border-radius:0!important;
+  border-left:0!important;
+  border-right:0!important;
+  border-top:0!important;
+  box-shadow:none!important;
+}
+.shell .vendor-kelivo-provider-list,
+.shell .vendor-key-manager-stats,
+.shell .vendor-key-manager-list{
+  margin-top:0!important;
+}
+
+/* 旧的页头规则即使还残留，也不能再占布局高度。 */
+.shell .vendor-kelivo-page-head,
+.shell .vendor-detail-head.vendor-kelivo-detail-head,
+.shell .vendor-account-back{
+  margin:0!important;
+}
+
+/* 新页面切换时禁止浏览器用锚点/滚动恢复改变视觉起点。 */
+html,body{
+  scroll-padding-top:0!important;
+}
+
+
+/* 6.3 首页菜单与侧边栏紧凑化。 */
+.shell .ui-icon-image{
+  display:inline-block!important;
+  position:relative!important;
+  overflow:hidden!important;
+  flex:0 0 auto!important;
+  vertical-align:-.16em!important;
+  line-height:0!important;
+}
+.shell .ui-icon-image>img{
+  display:block!important;
+  max-width:none!important;
+  max-height:none!important;
+  opacity:1!important;
+  visibility:visible!important;
+  filter:none!important;
+  pointer-events:none!important;
+}
+
+/* 首页给菜单独立留出一整行，时钟绝不再钻到按钮下面。 */
+.shell .mobile-menu-toggle:not(.sidebar-edge-handle){
+  position:absolute!important;
+  top:calc(var(--app-safe-top,0px) + 8px)!important;
+  left:16px!important;
+  z-index:18!important;
+  height:36px!important;
+  min-width:70px!important;
+  padding:0 10px!important;
+  border:1px solid var(--minimal-line-strong)!important;
+  border-radius:6px!important;
+  background:#fff!important;
+  box-shadow:none!important;
+  backdrop-filter:none!important;
+  -webkit-backdrop-filter:none!important;
+}
+.shell .home-screen.home-today{
+  padding-top:calc(var(--app-safe-top,0px) + 58px)!important;
+}
+.shell .home-today .home-hero{
+  padding-top:0!important;
+}
+
+/* 内页只留一条很窄的边缘把手。 */
+.shell .mobile-menu-toggle.sidebar-edge-handle{
+  width:10px!important;
+  min-width:10px!important;
+  height:54px!important;
+  padding:0!important;
+  opacity:.38!important;
+  border:0!important;
+  border-radius:0 5px 5px 0!important;
+  background:#ededed!important;
+  box-shadow:none!important;
+}
+.shell .mobile-menu-toggle.sidebar-edge-handle .ui-icon-image{
+  display:none!important;
+}
+
+/* 抽屉整体和前三个导航都收窄，不再横跨整块侧栏。 */
+@media(max-width:700px){
+  .shell .app-sidebar{
+    width:min(252px,72vw)!important;
+    padding:calc(var(--app-safe-top,0px) + 10px) 12px 12px!important;
+  }
+}
+.shell .sidebar-nav{
+  width:calc(100% - 20px)!important;
+  margin:0 10px 8px!important;
+  gap:0!important;
+}
+.shell .sidebar-nav-row{
+  display:grid!important;
+  grid-template-columns:18px minmax(0,1fr) auto!important;
+  align-items:center!important;
+  gap:7px!important;
+  width:100%!important;
+  height:40px!important;
+  min-height:40px!important;
+  padding:0 2px!important;
+  border:0!important;
+  border-bottom:1px solid var(--minimal-line)!important;
+  border-radius:0!important;
+  background:#fff!important;
+}
+.shell .sidebar-nav-row b{
+  margin:0!important;
+  font-size:12.5px!important;
+  line-height:1!important;
+}
+.shell .sidebar-nav-row small{
+  margin:0!important;
+  font-size:9px!important;
+  line-height:1!important;
+  color:var(--minimal-muted)!important;
+  white-space:nowrap!important;
+}
+.shell .sidebar-nav-row.active{
+  background:#fff!important;
+  color:#000!important;
+}
+
+
+/* 6.4 主题页验收修正：彻底打平旧主题卡片，修复手机横向溢出。 */
+.shell>.screen,
+.shell .settings-screen,
+.shell .settings-detail,
+.shell .theme-page,
+.shell .theme-settings{
+  box-sizing:border-box!important;
+  width:100%!important;
+  max-width:100%!important;
+  min-width:0!important;
+}
+.shell>.screen{
+  overflow-x:hidden!important;
+}
+.shell .settings-screen,
+.shell .settings-detail{
+  overflow-x:hidden!important;
+}
+.shell .settings-detail{
+  display:grid!important;
+  gap:8px!important;
+}
+
+/* 主题页的双层导航等宽、可收缩，不再把右侧按钮挤出屏幕。 */
+.shell .settings-detail>.settings-tabs{
+  width:100%!important;
+  max-width:100%!important;
+  min-width:0!important;
+  box-sizing:border-box!important;
+}
+.shell .settings-detail>.settings-tabs .settings-tabs-row{
+  display:grid!important;
+  grid-template-columns:repeat(auto-fit,minmax(0,1fr))!important;
+  width:100%!important;
+  min-width:0!important;
+  max-width:100%!important;
+  gap:6px!important;
+  overflow:hidden!important;
+  box-sizing:border-box!important;
+}
+.shell .settings-detail>.settings-tabs .settings-tab{
+  width:100%!important;
+  min-width:0!important;
+  max-width:100%!important;
+  flex:1 1 0!important;
+  padding:0 8px!important;
+  box-sizing:border-box!important;
+  overflow:hidden!important;
+  white-space:nowrap!important;
+  text-overflow:ellipsis!important;
+}
+.shell .settings-detail>.settings-subnav.settings-tabs{
+  display:grid!important;
+  grid-template-columns:repeat(2,minmax(0,1fr))!important;
+  width:100%!important;
+  min-width:0!important;
+  max-width:100%!important;
+  gap:8px!important;
+  margin:2px 0 8px!important;
+  box-sizing:border-box!important;
+}
+.shell .settings-detail>.settings-subnav button.subnav-row{
+  display:flex!important;
+  align-items:center!important;
+  justify-content:center!important;
+  width:100%!important;
+  min-width:0!important;
+  max-width:100%!important;
+  height:40px!important;
+  min-height:40px!important;
+  padding:0 6px!important;
+  box-sizing:border-box!important;
+  border:0!important;
+  border-bottom:1px solid var(--minimal-line)!important;
+  border-radius:0!important;
+  background:#fff!important;
+  color:#777!important;
+  overflow:hidden!important;
+  white-space:nowrap!important;
+  text-overflow:ellipsis!important;
+}
+.shell .settings-detail>.settings-subnav button.subnav-row.active{
+  border-bottom:2px solid #222!important;
+  background:#fff!important;
+  color:#111!important;
+}
+
+/* 主题内容外壳也必须是白底平铺，不再继承旧版设置卡片。 */
+.shell .settings-detail>.theme-page,
+.shell .settings-detail>.theme-page.assistant-theme{
+  display:block!important;
+  width:100%!important;
+  max-width:100%!important;
+  min-width:0!important;
+  margin:0!important;
+  padding:0!important;
+  border:0!important;
+  border-radius:0!important;
+  background:#fff!important;
+  box-shadow:none!important;
+  overflow-x:hidden!important;
+}
+.shell .theme-settings{
+  display:block!important;
+  width:100%!important;
+  max-width:100%!important;
+  min-width:0!important;
+  margin:0!important;
+  padding:0!important;
+  background:#fff!important;
+  overflow-x:hidden!important;
+}
+.shell .theme-settings h3{display:none!important}
+
+/* 字体、圆角、美化包、字号都变成普通白底分区，用横线分开。 */
+.shell .theme-settings .theme-tab-panel,
+.shell .theme-settings .theme-pack-block,
+.shell .theme-settings .theme-fontctl{
+  display:block!important;
+  width:100%!important;
+  max-width:100%!important;
+  min-width:0!important;
+  margin:0!important;
+  padding:12px 0!important;
+  border:0!important;
+  border-bottom:1px solid var(--minimal-line)!important;
+  border-radius:0!important;
+  background:#fff!important;
+  box-shadow:none!important;
+  box-sizing:border-box!important;
+}
+.shell .theme-settings .theme-tab-panel>label{
+  display:block!important;
+  width:100%!important;
+  min-width:0!important;
+  margin:0!important;
+  padding:12px 0!important;
+  border-bottom:1px solid #f0f0f0!important;
+  box-sizing:border-box!important;
+  font-size:14px!important;
+}
+.shell .theme-settings .theme-tab-panel>label:last-child{border-bottom:0!important}
+.shell .theme-settings .theme-tab-panel select{
+  display:block!important;
+  width:100%!important;
+  max-width:100%!important;
+  min-width:0!important;
+  box-sizing:border-box!important;
+  margin-top:8px!important;
+}
+.shell .theme-radius-setting .theme-control-title{
+  display:flex!important;
+  align-items:center!important;
+  justify-content:space-between!important;
+  gap:8px!important;
+  width:100%!important;
+}
+.shell .theme-radius-setting .theme-control-title strong{
+  float:none!important;
+  flex:0 0 auto!important;
+  font-variant-numeric:tabular-nums!important;
+}
+.shell .theme-radius-setting .theme-control-hint{
+  display:block!important;
+  margin:5px 0 8px!important;
+  color:var(--minimal-muted)!important;
+  font-size:11px!important;
+  line-height:1.5!important;
+}
+.shell .theme-radius-setting input[type="range"]{
+  display:block!important;
+  width:100%!important;
+  margin:8px 0 0!important;
+}
+
+/* 美化包列表不再是一个个小卡片。 */
+.shell .theme-settings .theme-pack-head{
+  display:flex!important;
+  align-items:center!important;
+  justify-content:space-between!important;
+  gap:8px!important;
+  padding:4px 0 10px!important;
+}
+.shell .theme-settings .theme-pack-list{
+  display:block!important;
+  width:100%!important;
+  margin:0!important;
+  padding:0!important;
+}
+.shell .theme-settings .theme-pack-row{
+  display:flex!important;
+  width:100%!important;
+  min-width:0!important;
+  margin:0!important;
+  padding:10px 0!important;
+  border:0!important;
+  border-bottom:1px solid #f0f0f0!important;
+  border-radius:0!important;
+  background:#fff!important;
+  box-shadow:none!important;
+  box-sizing:border-box!important;
+}
+.shell .theme-settings .theme-pack-main{
+  display:flex!important;
+  flex:1 1 auto!important;
+  min-width:0!important;
+  padding:0!important;
+  border:0!important;
+  border-radius:0!important;
+  background:#fff!important;
+  box-shadow:none!important;
+}
+.shell .theme-settings .theme-pack-text{
+  flex:1 1 auto!important;
+  min-width:0!important;
+}
+.shell .theme-settings .theme-pack-text small{
+  display:block!important;
+  max-width:100%!important;
+  white-space:normal!important;
+  overflow-wrap:anywhere!important;
+  line-height:1.4!important;
+}
+.shell .theme-settings .theme-pack-state{
+  flex:0 0 auto!important;
+  white-space:nowrap!important;
+}
+.shell .theme-settings .theme-pack-actions{
+  display:flex!important;
+  flex-wrap:wrap!important;
+  gap:8px!important;
+  margin:10px 0 0!important;
+}
+.shell .theme-settings .theme-pack-import,
+.shell .theme-settings .theme-pack-reset,
+.shell .theme-settings .theme-reset,
+.shell .theme-settings .theme-fontctl-foot button{
+  min-height:36px!important;
+  padding:7px 0!important;
+  border:0!important;
+  border-bottom:1px solid var(--minimal-line-strong)!important;
+  border-radius:0!important;
+  background:#fff!important;
+  color:#222!important;
+  box-shadow:none!important;
+  text-align:left!important;
+}
+.shell .theme-settings .theme-pack-hint,
+.shell .theme-settings .theme-fontctl-hint{
+  margin:8px 0 0!important;
+  font-size:11px!important;
+  line-height:1.55!important;
+  color:var(--minimal-muted)!important;
+}
+.shell .theme-settings .theme-fontctl-head{
+  display:flex!important;
+  justify-content:space-between!important;
+  align-items:center!important;
+  gap:8px!important;
+}
+.shell .theme-settings .theme-fontctl-range{
+  display:flex!important;
+  width:100%!important;
+  min-width:0!important;
+  box-sizing:border-box!important;
+}
+.shell .theme-settings .theme-fontctl-range input[type="range"]{
+  flex:1 1 auto!important;
+  min-width:0!important;
+}
+
+/* 圆角设置的作用范围明确且实际生效：常用表单控件与主要操作按钮。 */
+.shell input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]),
+.shell textarea,
+.shell select,
+.shell .soft-select-trigger{
+  border-radius:var(--radius,7px)!important;
+}
+.shell .primary,
+.shell .vendor-submit,
+.shell .ledger-add,
+.shell .widget-save,
+.shell .mep-save,
+.shell .theme-pack-import,
+.shell .theme-pack-reset,
+.shell .theme-reset,
+.shell .theme-fontctl-foot button{
+  border-radius:var(--radius,7px)!important;
+}
+
+
+/* 圆角滑杆也覆盖主题页动作按钮；列表导航和分隔线仍保持直边。 */
+.shell .theme-settings .theme-pack-import,
+.shell .theme-settings .theme-pack-reset,
+.shell .theme-settings .theme-reset,
+.shell .theme-settings .theme-fontctl-foot button{
+  border-radius:var(--radius,7px)!important;
+}
+
+
+/* 6.5 圆角控件增加实时样例，明确滑杆实际控制范围。 */
+.shell .theme-radius-preview{
+  display:flex!important;
+  align-items:center!important;
+  flex-wrap:wrap!important;
+  gap:8px!important;
+  width:100%!important;
+  min-width:0!important;
+  margin:8px 0 4px!important;
+  box-sizing:border-box!important;
+}
+.shell .theme-radius-preview-button,
+.shell .theme-radius-preview-field,
+.shell .theme-radius-preview-bubble{
+  display:inline-flex!important;
+  align-items:center!important;
+  justify-content:center!important;
+  min-height:34px!important;
+  padding:0 12px!important;
+  box-sizing:border-box!important;
+  font-size:11px!important;
+  line-height:1!important;
+  white-space:nowrap!important;
+}
+.shell .theme-radius-preview-button{
+  border:1px solid #222!important;
+  background:#222!important;
+  color:#fff!important;
+}
+.shell .theme-radius-preview-field{
+  border:1px solid var(--minimal-line-strong)!important;
+  background:#fff!important;
+  color:#555!important;
+}
+.shell .theme-radius-preview-bubble{
+  border:1px solid var(--minimal-line)!important;
+  background:#f5f5f5!important;
+  color:#555!important;
+}
+.shell .theme-radius-setting input[type="range"]{
+  display:block!important;
+  width:100%!important;
+  max-width:100%!important;
+  min-width:0!important;
+  box-sizing:border-box!important;
+}
+
+
+/* 6.6 模型页验收修正：独立编辑页不再重复吃全局顶部高度。 */
+.shell .model-edit-page{
+  top:0!important;
+  padding-top:0!important;
+}
+.shell .model-edit-page .mep-head{
+  box-sizing:border-box!important;
+  height:calc(var(--app-safe-top,0px) + 52px)!important;
+  min-height:calc(var(--app-safe-top,0px) + 52px)!important;
+  padding:var(--app-safe-top,0px) 18px 0!important;
+  margin:0!important;
+  align-items:center!important;
+  background:#fff!important;
+  border-bottom:1px solid var(--minimal-line)!important;
+}
+.shell .model-edit-page .mep-head .mep-save{
+  width:36px!important;
+  min-width:36px!important;
+  height:36px!important;
+  min-height:36px!important;
+  padding:0!important;
+  border:0!important;
+  border-radius:0!important;
+  background:#fff!important;
+  color:#222!important;
+  display:grid!important;
+  place-items:center!important;
+}
+.shell .model-edit-page .mep-head .mep-close{
+  width:36px!important;
+  min-width:36px!important;
+  height:36px!important;
+  min-height:36px!important;
+  padding:0!important;
+  border:0!important;
+  background:#fff!important;
+  display:grid!important;
+  place-items:center!important;
+}
+
+/* 供应商模型左侧图标：只约束裁剪窗口，不再强行压缩整张 sprite 图片。 */
+.shell .vendor-model-brand{
+  flex:0 0 24px!important;
+  width:24px!important;
+  height:24px!important;
+  min-width:24px!important;
+  display:grid!important;
+  place-items:center!important;
+  background:#fff!important;
+}
+.shell .vendor-model-brand .ui-icon-image{
+  width:16px!important;
+  height:16px!important;
+}
+.shell .vendor-model-brand .ui-icon-image>img{
+  max-width:none!important;
+  max-height:none!important;
+  width:auto!important;
+  height:16px!important;
+}
+.shell .vendor-model-card{
+  gap:7px!important;
+}
+.shell .vendor-model-card-main{
+  min-width:0!important;
+}
+
+/* 删除旧规则造成的额外左侧色块/底座感。 */
+.shell .vendor-model-brand.brand-gpt,
+.shell .vendor-model-brand.brand-claude,
+.shell .vendor-model-brand.brand-gemini,
+.shell .vendor-model-brand.brand-glm,
+.shell .vendor-model-brand.brand-ds,
+.shell .vendor-model-brand.brand-qwen,
+.shell .vendor-model-brand.brand-kimi,
+.shell .vendor-model-brand.brand-grok,
+.shell .vendor-model-brand.brand-other{
+  background:#fff!important;
+  border:0!important;
+  border-radius:0!important;
+}
+
+
+/* 6.7 供应商详情操作改成带文字，避免只看图标猜含义。 */
+.shell .vendor-inline-toolbar{
+  height:auto!important;
+  min-height:42px!important;
+  flex-wrap:wrap!important;
+}
+.shell .vendor-actions-text{
+  display:flex!important;
+  align-items:center!important;
+  gap:6px!important;
+  flex-wrap:wrap!important;
+}
+.shell .vendor-actions-text button{
+  display:inline-flex!important;
+  align-items:center!important;
+  justify-content:center!important;
+  gap:4px!important;
+  width:auto!important;
+  min-width:58px!important;
+  height:34px!important;
+  padding:0 9px!important;
+  border:1px solid var(--minimal-line-strong)!important;
+  border-radius:6px!important;
+  background:#fff!important;
+  color:#222!important;
+  font-size:11px!important;
+}
+.shell .vendor-actions-text button.danger{
+  color:#a33!important;
+  border-color:#e5c8c8!important;
+  background:#fff!important;
+}

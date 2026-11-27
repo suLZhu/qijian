@@ -1,0 +1,26 @@
+export type ChatDisplayPrefs = {
+  toolsEnabled: boolean
+  timeEnabled: boolean
+  weatherCity: string
+  fontSize: number
+  assistantAvatar: boolean
+  userAvatar: boolean
+  assistantName: boolean
+  userName: boolean
+  time: boolean
+  timePos: 'above' | 'below'
+  token: boolean
+  showReasoning: boolean
+  autoTranslateReasoning: boolean
+  showReasoningDuration: boolean
+  showToolCalls: boolean
+  toolRoundLimit: 5 | 10 | 15 | 20
+}
+
+export const CHAT_DISPLAY_KEY: string
+export const CHAT_DISPLAY_EVENT: string
+export const DEFAULT_CHAT_DISPLAY: ChatDisplayPrefs
+export function normalizeChatDisplay(raw: unknown): ChatDisplayPrefs
+export function loadChatDisplay(): ChatDisplayPrefs
+export function saveChatDisplay(next: Partial<ChatDisplayPrefs>): ChatDisplayPrefs
+export function formatMessageTime(msg: { at?: string; usage?: { at?: string } }): string
