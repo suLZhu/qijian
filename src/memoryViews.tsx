@@ -44,19 +44,14 @@ function formatWhen(iso: string): string {
 }
 
 function StarShape({ size }: { size: number }) {
-  return <svg viewBox="0 0 24 24" width={size} height={size} aria-hidden="true">
-    <path d="M12 1.6 14.7 9.3 22.4 12 14.7 14.7 12 22.4 9.3 14.7 1.6 12 9.3 9.3Z" fill="currentColor"/>
-  </svg>
+  return <span aria-hidden="true" style={{display:'inline-block',width:size,height:size,background:'currentColor',clipPath:'polygon(50% 0%,63% 37%,100% 50%,63% 63%,50% 100%,37% 63%,0% 50%,37% 37%)'}}/>
 }
-
 function FlowerShape({ color, petals, size }: { color: string; petals: number; size: number }) {
-  return <svg viewBox="0 0 100 100" width={size} height={size} aria-hidden="true">
-    {Array.from({ length: petals }, (_, index) => <ellipse key={index}
-      cx="50" cy="30" rx="12.5" ry="23" fill={color} opacity="0.9"
-      transform={`rotate(${index * (360 / petals)} 50 50)`}/>)}
-    <circle cx="50" cy="50" r="11" fill="#f6e7b4"/>
-    <circle cx="50" cy="50" r="5" fill="#e7c87a" opacity="0.8"/>
-  </svg>
+  return <span aria-hidden="true" style={{display:'inline-block',position:'relative',width:size,height:size}}>
+    {Array.from({length:petals},(_,index)=><span key={index} style={{position:'absolute',left:'37.5%',top:'7%',width:'25%',height:'46%',borderRadius:'50%',background:color,opacity:0.9,transformOrigin:'50% 93.5%',transform:'rotate('+index*360/petals+'deg)'}}/>)}
+    <span style={{position:'absolute',left:'39%',top:'39%',width:'22%',height:'22%',borderRadius:'50%',background:'#f6e7b4'}}/>
+    <span style={{position:'absolute',left:'45%',top:'45%',width:'10%',height:'10%',borderRadius:'50%',background:'#e7c87a'}}/>
+  </span>
 }
 
 function MemoryRecordSheet({ record, onClose, onTransition }: {
