@@ -2378,8 +2378,6 @@ export default function App() {
     renderResource={kind=> <ResourceLibrary key={kind} only={kind} worldEntries={worldEntries} setWorldEntries={setWorldEntries} modelProfiles={modelProfiles} setModelProfiles={setModelProfiles} bindings={bindings} setBindings={setBindings} displayName={displayName}/>}
     renderTasks={target=> <TaskManager key={target} person={target} personLabel={displayName} conversationId={activeConversationIds[target]||''}/>}
     renderUsage={()=> <UsageStats people={assistants.map(a=>a.id)} conversations={conversations} models={Object.fromEntries(assistants.map(a=>[a.id,resolveModelConfig(bindings[a.id]?.modelProfileId||defaultModelId||'',modelProfiles,modelConfig[a.id]).model]))} displayName={displayName}/>}
-    vendors={vendors}
-    onSaveVendors={next=>{setVendors(next);setModelProfiles(old=>syncVendorProfiles(next,old))}}
     pending={pendingSends[pendingScopeKey(person,activeConversationIds[person]||'')]}
     onCancelPending={cancelPending}
     onEditPending={editPendingText}
