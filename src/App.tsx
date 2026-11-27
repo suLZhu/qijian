@@ -1,3 +1,4 @@
+import { MediaSettings } from './MediaSettings'
 import { readWeatherContext } from './weatherContext.mjs'
 import type { LedgerRound } from './usageLedger.mjs'
 import { useCallback, useEffect, useMemo, useState, useRef, type FormEvent, type ChangeEvent } from 'react'
@@ -2353,7 +2354,7 @@ export default function App() {
         }}><option value="">默认外观</option>{[...BUILTIN_THEME_PACKS,...loadThemePacks()].map(pack=><option key={pack.id} value={pack.id}>{pack.name}</option>)}</select></label>
         <ThemeSettings value={themePrefs} onChange={setThemePrefs}/>
       </>
-      if(section==='模型功能') return <VendorCenter section={modelSettingsSection} onSection={setModelSettingsSection} vendors={vendors} setVendors={setVendors} setModelProfiles={setModelProfiles} modelProfiles={modelProfiles} defaultModelId={defaultModelId} setDefaultModelId={setDefaultModelId}/>
+      if(section==='模型功能') return <><MediaSettings vendors={vendors}/><VendorCenter section={modelSettingsSection} onSection={setModelSettingsSection} vendors={vendors} setVendors={setVendors} setModelProfiles={setModelProfiles} modelProfiles={modelProfiles} defaultModelId={defaultModelId} setDefaultModelId={setDefaultModelId}/></>
       if(section==='记忆与上下文') return <>
         <ContextSettings/>
         <MemoryPanel key={target} person={target} personLabel={displayName(target)} personMessages={messages[target]||[]}/>
