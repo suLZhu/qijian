@@ -15,7 +15,7 @@ import { SettingsSectionsPreview } from './SettingsSectionsPreview'
 import { ModelFunctionsPreview } from './FeaturePagesPreview'
 import { AdvancedSettingsPreview } from './AdvancedSettingsPreview'
 import { ContentSettingsPreview } from './ContentSettingsPreview'
-import { RoomAssistantPreview } from './RoomAssistantPreview'
+import { RoomWidgets } from './RoomWidgets'
 
 type View = 'home' | 'chat' | 'room' | 'settings' | 'theme' | 'profile'
 type Person = string
@@ -31,6 +31,7 @@ type LayoutPrototypeProps = {
   renderTasks?:(person:string)=>ReactNode
   renderWorkspace?: () => ReactNode
   renderSystem?: () => ReactNode
+  renderProfile?: (person: string) => ReactNode
   renderBackup?: () => ReactNode
   renderResource?:(kind:'world'|'mcp')=>ReactNode
   vendors?:Vendor[]
@@ -254,12 +255,8 @@ export default function LayoutPrototype(props:LayoutPrototypeProps = {}) {
       {view === 'room' && <div className="qj-page">
         <div className="qj-room-hero"><div className="qj-room-art"><div className="qj-window">☀</div><div className="qj-shelf">▤ ▤ ▤</div><div className="qj-sofa">▰</div><div className="qj-floor"/></div>
           <b>{displayName(person)}的小空间</b><span>自由布置 · 图片 · 视频 · 小组件</span></div>
-        <h3 className="qj-label">房间入口</h3>
-        <div className="qj-row-group">
-          <button className="qj-row" onClick={() => {setView('settings');setSection('房间与助手')}}><span>房间布置</span><small>进入房间与助手设置</small><i><IconChevronRight size={15}/></i></button>
-          <button className="qj-row" onClick={() => setSection('我的作品')}><span>我的作品</span><small>图片、视频、音乐</small><i><IconChevronRight size={15}/></i></button>
-        </div>
-        {section === '我的作品' && <div className="qj-inline-note">「我的作品」归入后续的栖间图库项目，本轮不制作假页面。</div>}
+        <button className="qj-row" onClick={() => go('profile')}><span>助手档案</span><i><IconChevronRight size={15}/></i></button>
+        <RoomWidgets key={person} person={person}/>
       </div>}
       {view === 'settings' && <div className="qj-page">
         {section ? <>
@@ -273,7 +270,7 @@ export default function LayoutPrototype(props:LayoutPrototypeProps = {}) {
             section === '记忆与上下文' ? <ContentSettingsPreview type="memory" renderWorldbook={()=>props.renderResource?.('world')} /> :
             section === '聊天与消息' ? <ChatDisplaySettings compact /> :
             section === '诊断与维护' ? <ContentSettingsPreview type="diagnostic" /> :
-            section === '房间与助手' ? <RoomAssistantPreview /> :
+            section === '房间与助手' ? <div className="qj-row-group">{people.map(id=><button key={id} className="qj-row" onClick={()=>{setPerson(id);go('profile')}}><span>{displayName(id)}</span><i><IconChevronRight size={15}/></i></button>)}</div> :
             <SettingsSectionsPreview section={section} onTheme={() => go('theme')} />}
         </> : <>
           <div className="qj-section-head"><h2>设置中心</h2><p>常用功能在前，其他功能集中管理。</p></div>
@@ -287,8 +284,8 @@ export default function LayoutPrototype(props:LayoutPrototypeProps = {}) {
         <p className="qj-inline-note">主题包应用功能留待页面验收后接入。</p>
       </div>}
       {view === 'profile' && <div className="qj-page">
-        <div className="qj-profile"><div className="qj-large-avatar">{displayName(person).slice(0, 1)}</div><h2>{displayName(person)}</h2><p>独立助手资料与专属设置</p></div>
-        <div className="qj-row-group"><button className="qj-row" onClick={() => go('room')}><span>进入房间</span><i><IconChevronRight size={15}/></i></button><button className="qj-row" onClick={() => {go('settings');setSection('房间与助手')}}><span>专属设置</span><i><IconChevronRight size={15}/></i></button></div>
+        {props.renderProfile?.(person)}
+        <button className="qj-row" onClick={() => go('room')}><span>进入房间</span><i><IconChevronRight size={15}/></i></button>
       </div>}
     </main>
     {view === 'chat' && props.renderBinding && <div className="qj-chat-resource-actions"><button className="qj-icon" aria-label="世界书" onClick={()=>{setToolsOpen(false);setBindingPanel(v=>v==='world'?null:'world')}}><IconBook size={16}/></button><button className="qj-icon" aria-label="MCP" onClick={()=>{setToolsOpen(false);setBindingPanel(v=>v==='mcp'?null:'mcp')}}><IconPlug size={16}/></button></div>}
