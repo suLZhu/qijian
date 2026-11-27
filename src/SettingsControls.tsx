@@ -10,5 +10,5 @@ export function SettingsInjection(){
 }
 export function SettingsTools(){
  const prefs=useChatDisplay()
- return <div className="setting-card"><label><input type="checkbox" checked={prefs.toolsEnabled} onChange={e=>saveChatDisplay({...prefs,toolsEnabled:e.target.checked})}/> 聊天工具</label><div>连续工具调用最大轮数<SoftSelect value={String(prefs.toolRoundLimit)} options={[5,10,15,20].map(n=>({value:String(n),label:n+' 轮'}))} onChange={v=>saveChatDisplay({...prefs,toolRoundLimit:Number(v)})}/></div><AppLockSettings/></div>
+ return <div className="setting-card"><label><input type="checkbox" checked={prefs.toolsEnabled} onChange={e=>saveChatDisplay({...prefs,toolsEnabled:e.target.checked})}/> 聊天工具</label><div>连续工具调用最大轮数<SoftSelect value={String(prefs.toolRoundLimit)} options={[5,10,15,20].map(n=>({value:String(n),label:n+' 轮'}))} onChange={v=>saveChatDisplay({...prefs,toolRoundLimit:v==='5'?5:v==='15'?15:v==='20'?20:10})}/></div><AppLockSettings/></div>
 }
