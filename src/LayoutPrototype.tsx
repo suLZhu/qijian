@@ -31,6 +31,7 @@ type LayoutPrototypeProps = {
   renderTasks?:(person:string)=>ReactNode
   renderWorkspace?: () => ReactNode
   renderSystem?: () => ReactNode
+  renderRoomScene?: (person: string, onAction: (action: string) => void) => ReactNode
   renderProfile?: (person: string) => ReactNode
   renderBackup?: () => ReactNode
   renderResource?:(kind:'world'|'mcp')=>ReactNode
@@ -253,8 +254,14 @@ export default function LayoutPrototype(props:LayoutPrototypeProps = {}) {
         {selection?.scope===scope&&<div className="qj-message-actions"><button disabled={!selected.length} onClick={()=>{if(window.confirm('删除选中的 '+selected.length+' 条消息？')){props.onDeleteMessages?.(selected);setSelection(null)}}}>删除（{selected.length}）</button><button onClick={()=>setSelection(null)}>取消多选</button></div>}
       </div>}
       {view === 'room' && <div className="qj-page">
-        <div className="qj-room-hero"><div className="qj-room-art"><div className="qj-window">☀</div><div className="qj-shelf">▤ ▤ ▤</div><div className="qj-sofa">▰</div><div className="qj-floor"/></div>
-          <b>{displayName(person)}的小空间</b><span>自由布置 · 图片 · 视频 · 小组件</span></div>
+        {props.renderRoomScene?.(person,action=>{
+          if(action==='chat') go('chat')
+          else if(action==='settings') go('settings')
+          else if(action==='world'||action==='mcp') {
+            go('settings')
+            setSection(action==='world'?'记忆与上下文':'工具与扩展')
+          }
+        })}
         <button className="qj-row" onClick={() => go('profile')}><span>助手档案</span><i><IconChevronRight size={15}/></i></button>
         <RoomWidgets key={person} person={person}/>
       </div>}

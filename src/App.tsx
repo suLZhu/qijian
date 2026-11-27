@@ -2319,6 +2319,7 @@ export default function App() {
     renderSubscription={()=> <SubscriptionAccounts vendors={vendors} setVendors={setVendors} setModelProfiles={setModelProfiles} subscriptions={subscriptions} setSubscriptions={setSubscriptions}/>}
     renderWorkspace={()=> <WorkspaceSettings people={assistants.map(a=>a.id)} displayName={displayName} onSaved={config=>setWorkspaceConfigs(old=>({...old,[config.person]:config}))}/>}
     renderSystem={()=> <AndroidSystemSettings people={assistants.map(a=>a.id)} displayName={displayName} avatarOf={()=>''}/>}
+    renderRoomScene={(target, onAction)=> <RoomDecoration key={target} person={target} onAction={onAction}/>}
     renderProfile={target=> <AssistantProfile key={target} person={target} displayName={displayName} setAssistants={setAssistants} characters={characters} setCharacters={setCharacters} userSettings={userSettings} setUserSettings={setUserSettings}/>}
     renderBackup={()=> <BackupCenter people={assistants.map(a=>a.id)} vendors={vendors} setVendors={setVendors} setModelProfiles={setModelProfiles}/>}
     renderResource={kind=> <ResourceLibrary key={kind} only={kind} worldEntries={worldEntries} setWorldEntries={setWorldEntries} modelProfiles={modelProfiles} setModelProfiles={setModelProfiles} bindings={bindings} setBindings={setBindings} displayName={displayName}/>}
@@ -2730,6 +2731,49 @@ function RoomScene({layout,counts,onAction,icons}:{layout:RoomLayout;counts:Reco
       }
       return <div key={item.id} className="free-item" style={pos} aria-hidden="true">{content}</div>
     })}
+  </div>
+}
+
+function RoomDecoration({person,onAction}:{person:Person;onAction:(action:string)=>void}) {
+  const [layout,setLayout]=useState(()=>loadRoomLayout(person))
+  const [error,setError]=useState('')
+  useEffect(()=>{
+    const refresh=()=>setLayout(loadRoomLayout(person))
+    window.addEventListener('aihome:room-layout',refresh)
+    return ()=>window.removeEventListener('aihome:room-layout',refresh)
+  },[person])
+
+  function changeBackground(background:RoomLayout['background']) {
+    const next=saveRoomLayout(person,{...loadRoomLayout(person),background})
+    const persisted=loadRoomLayout(person)
+    if(JSON.stringify(persisted)!==JSON.stringify(next)) {
+      setError('背景保存失败，请检查本机存储空间')
+      return
+    }
+    setError('')
+    window.dispatchEvent(new Event('aihome:room-layout'))
+  }
+
+  async function chooseImage(file:File) {
+    if(!/^image\/(png|jpeg|webp|gif)$/.test(file.type)||file.size>1024*1024) {
+      setError('请选择 1 MB 以内的 PNG、JPEG、WebP 或 GIF 图片')
+      return
+    }
+    const reader=new FileReader()
+    reader.onload=()=>{if(typeof reader.result==='string')changeBackground({image:reader.result})}
+    reader.onerror=()=>setError('无法读取图片')
+    reader.readAsDataURL(file)
+  }
+
+  return <div>
+    <div className="room-screen"><RoomScene layout={layout} counts={{}} onAction={onAction}/></div>
+    <label>选择房间背景<input type="file" accept="image/png,image/jpeg,image/webp,image/gif" onChange={event=>{
+      const file=event.currentTarget.files?.[0]
+      event.currentTarget.value=''
+      if(file)void chooseImage(file)
+    }}/></label>
+    {layout.background&&<button type="button" onClick={()=>changeBackground(undefined)}>恢复默认背景</button>}
+    {error&&<p role="alert">{error}</p>}
   </div>
 }
 
