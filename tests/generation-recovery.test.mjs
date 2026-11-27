@@ -82,3 +82,14 @@ test('解析模型配置时缺少 model 回退旧配置，不拿 name 顶替', (
   assert.equal(finishGeneration(s,'m1'),false)
   assert.deepEqual(readActiveGenerations(s).map(v=>v.messageId),['m3','m4'])
 })
+
+test('多会话生成记录独立保存并兼容旧记录', () => {
+  const s = memStorage()
+  s.setItem(ACTIVE_GENERATION_KEY, JSON.stringify({person:'a',conversationId:'c1',messageId:'m1',at:1000}))
+  startGeneration(s,{person:'b',conversationId:'c2',messageId:'m2'},2000)
+  assert.deepEqual(readActiveGenerations(s).map(x=>x.messageId),['m1','m2'])
+  assert.equal(finishGeneration(s,'m1'),true)
+  assert.deepEqual(readActiveGenerations(s).map(x=>x.messageId),['m2'])
+  assert.equal(finishGeneration(s,'m2'),true)
+  assert.equal(s.getItem(ACTIVE_GENERATION_KEY),null)
+})
