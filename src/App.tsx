@@ -74,7 +74,6 @@ import { parseKelivoModelConfigs, kelivoConfigsToVendors, kelivoImportSummary } 
 import { USER_SETTINGS_KEY, blankUserSettings, normalizeUserSettings, buildUserContext, type UserSettings } from './userSettings.mjs'
 // 头像：本机选图裁方压缩，两位助手各存一份，互不影响。
 import { fileToAvatar, isAvatarDataUrl } from './avatarImage.mjs'
-import { UsageStats } from './UsageStats'
 import { loadChatDisplay } from './chatDisplayPrefs.mjs'
 // 统一 API Base URL：Web 同源（空 base）与 Android/生产（构建期 VITE_API_BASE_URL + 开发者设置覆盖）走同一机制。
 import { API_BASE_STORAGE_KEY, resolveApiBase, normalizeApiBase, apiFetch, setApiBase, getApiBase, isLocalMode, setSessionToken, clearSessionToken } from './apiBase.mjs'
@@ -2193,7 +2192,7 @@ export default function App() {
     }
     setChatError('')
   }
-  function prototypeSelectPerson(id:string){
+  function selectChatAssistant(id:string){
     const target=id as Person
     if(target===person)return
     drawerWriteBack()
@@ -2203,7 +2202,7 @@ export default function App() {
     setMessages(old=>({...old,[target]:targetConv?.messages||[]}))
     setChatError('')
   }
-  function prototypeSend(text:string,attachments:MessageAttachment[]){
+  function sendChatMessage(text:string,attachments:MessageAttachment[]){
     if(sending) {
       const scope=pendingScopeKey(person,activeConversationIdsRef.current[person]||'')
       if(pendingSendsRef.current[scope]) { setChatError('已有待发送消息，请先编辑或撤回，当前输入已保留。'); return Promise.resolve('fail' as const) }
@@ -2264,13 +2263,13 @@ export default function App() {
     sending={sending}
     generationStage={generationStages[draftKey]}
     chatError={chatError}
-    onPersonChange={prototypeSelectPerson}
+    onPersonChange={selectChatAssistant}
     onConversationChange={drawerSwitch}
     onCreateConversation={drawerCreate}
     onArchiveConversation={drawerArchive}
     onDeleteConversation={drawerDelete}
     onDraftChange={v=>setDraft(v)}
-    onSend={prototypeSend}
+    onSend={sendChatMessage}
     renderSubscription={()=> <SubscriptionAccounts vendors={vendors} setVendors={setVendors} setModelProfiles={setModelProfiles} subscriptions={subscriptions} setSubscriptions={setSubscriptions}/>}
     renderSystem={()=> <AndroidSystemSettings people={assistants.map(a=>a.id)} displayName={displayName} avatarOf={id=>characters[id]?.avatar||''}/>}
     renderSettings={(section,target)=>{
@@ -2298,7 +2297,6 @@ export default function App() {
     renderBackup={()=> <BackupCenter people={assistants.map(a=>a.id)} vendors={vendors} setVendors={setVendors} setModelProfiles={setModelProfiles}/>}
     renderResource={kind=> <ResourceLibrary key={kind} only={kind} worldEntries={worldEntries} setWorldEntries={setWorldEntries} modelProfiles={modelProfiles} setModelProfiles={setModelProfiles} bindings={bindings} setBindings={setBindings} displayName={displayName}/>}
     renderTasks={target=> <TaskManager key={target} person={target} personLabel={displayName} conversationId={activeConversationIds[target]||''}/>}
-    renderUsage={()=> <UsageStats people={assistants.map(a=>a.id)} conversations={conversations} models={Object.fromEntries(assistants.map(a=>[a.id,resolveModelConfig(bindings[a.id]?.modelProfileId||defaultModelId||'',modelProfiles,modelConfig[a.id]).model]))} displayName={displayName}/>}
     pending={pendingSends[pendingScopeKey(person,activeConversationIds[person]||'')]}
     onCancelPending={cancelPending}
     onEditPending={editPendingText}
