@@ -12,6 +12,7 @@ import { LEGACY_ASSISTANTS, DEFAULT_DISPLAY_NAMES, migrateLocalStorage, toAssist
 import { CharacterSettings, blankCard, type CharacterCard } from './CharacterSettings'
 import { WorldbookEditor, type WorldEntry } from './WorldbookEditor'
 import { enabledSkillsBlock, loadSkills, parseSkillMarkdown } from './skills.mjs'
+import { loadDiagLogs, formatDiagSummary, appendDiagLog, saveDiagLogs, buildDiagSnapshot } from './requestDiag.mjs'
 import { ToolDashboard } from './ToolDashboard'
 import { MemoryPanel } from './MemoryPanel'
 import { runLocalOrganize, tidyMemoryLibrary, readLocalAuto } from './memoryLocalOrganize.mjs'
@@ -276,6 +277,7 @@ function useKeyboardViewport(){
 
 export default function App() {
   useKeyboardViewport()
+  const [modelSettingsSection,setModelSettingsSection]=useState("vendor:catalog")
   // 真机证据：切后台 / 回前台打点（对照 generation 链路日志，判断后台是否被系统暂停）。
   useEffect(() => {
     const onVis = () => genDebug(document.hidden ? 'app_backgrounded' : 'app_foregrounded', { hidden: document.hidden })
@@ -1631,6 +1633,13 @@ export default function App() {
       for(let round=0;round<toolBudget.roundLimit&&!finished;round++){
         const requestBody:any={model:activeModel.model.trim(),messages:requestMessages,stream:true,stream_options:{include_usage:true}}
         if(openAITools.length){requestBody.tools=openAITools;requestBody.tool_choice='auto'}
+        try {
+          const snapshot=buildDiagSnapshot({
+            requestBody:{model:requestBody.model,stream:true,messages:requestMessages.map(message=>({role:message.role}))},
+            assistantId:target, conversationId:sendConversationId, round, endpoint:activeModel.endpoint,
+          })
+          saveDiagLogs(localStorage,appendDiagLog(loadDiagLogs(localStorage),snapshot))
+        } catch { /* 诊断存储不可用时继续聊天 */ }
         const chatProxy=()=>apiFetch('/api/chat',{method:'POST',credentials:'include',headers:{'Content-Type':'application/json'},signal:abortController.signal,body:JSON.stringify({assistantId:target,endpoint:activeModel.endpoint.trim(),chatUrl:activeChatUrl,apiKey:activeApiKey.trim(),apiKeys:apiKeyCandidates,timeZone,timeEnabled:chatPrefs.timeEnabled,body:requestBody,...(subscriptionProtocol?{subscriptionProtocol,subscriptionAccountId}:{}),...(routeMode?{routes:routePlan}:{})})})
         if(!upstreamStartedAt){
           preflightFinishedAt=performance.now()
@@ -2319,6 +2328,25 @@ export default function App() {
     renderSubscription={()=> <SubscriptionAccounts vendors={vendors} setVendors={setVendors} setModelProfiles={setModelProfiles} subscriptions={subscriptions} setSubscriptions={setSubscriptions}/>}
     renderWorkspace={()=> <WorkspaceSettings people={assistants.map(a=>a.id)} displayName={displayName} onSaved={config=>setWorkspaceConfigs(old=>({...old,[config.person]:config}))}/>}
     renderSystem={()=> <AndroidSystemSettings people={assistants.map(a=>a.id)} displayName={displayName} avatarOf={()=>''}/>}
+    renderSettings={(section,target)=>{
+      if(section==='skills') return <SettingsSkillPage people={assistants.map(a=>a.id)} displayName={displayName}/>
+      if(section==='history') return <ToolDashboard key={target} person={target} personLabel={displayName(target)}/>
+      if(section==='web') return <WebToolSettings/>
+      if(section==='外观与主题') return <>
+        <label>主题包<select value={activePack?.id||''} onChange={event=>{
+          setStoredActivePack(event.target.value)
+          window.dispatchEvent(new Event('aihome:theme-pack'))
+        }}><option value="">默认外观</option>{[...BUILTIN_THEME_PACKS,...loadThemePacks()].map(pack=><option key={pack.id} value={pack.id}>{pack.name}</option>)}</select></label>
+        <ThemeSettings value={themePrefs} onChange={setThemePrefs}/>
+      </>
+      if(section==='模型功能') return <VendorCenter section={modelSettingsSection} onSection={setModelSettingsSection} vendors={vendors} setVendors={setVendors} setModelProfiles={setModelProfiles} modelProfiles={modelProfiles} defaultModelId={defaultModelId} setDefaultModelId={setDefaultModelId}/>
+      if(section==='记忆与上下文') return <>
+        <MemoryPanel key={target} person={target} personLabel={displayName(target)} personMessages={messages[target]||[]}/>
+        <ResourceLibrary only="world" worldEntries={worldEntries} setWorldEntries={setWorldEntries} modelProfiles={modelProfiles} setModelProfiles={setModelProfiles} bindings={bindings} setBindings={setBindings} displayName={displayName}/>
+      </>
+      if(section==='诊断与维护') return <><RequestDiagnostics/><AppUpdateCard/><AndroidSystemSettings people={assistants.map(a=>a.id)} displayName={displayName} avatarOf={id=>characters[id]?.avatar||''}/><ToolDashboard key={target} person={target} personLabel={displayName(target)}/></>
+      return null
+    }}
     renderRoomScene={(target, onAction)=> <RoomDecoration key={target} person={target} onAction={onAction}/>}
     renderProfile={target=> <AssistantProfile key={target} person={target} displayName={displayName} setAssistants={setAssistants} characters={characters} setCharacters={setCharacters} userSettings={userSettings} setUserSettings={setUserSettings}/>}
     renderBackup={()=> <BackupCenter people={assistants.map(a=>a.id)} vendors={vendors} setVendors={setVendors} setModelProfiles={setModelProfiles}/>}
@@ -4023,6 +4051,34 @@ function SettingsGuidePage() {
     blocks.push(<p key={i} className="guide-p">{inline(line)}</p>)
   })
   return <div className="setting-card settings-inner-card guide-page"><b>栖间使用说明</b><p className="muted">这份说明同时挂在 window.AiHomeGuide，助手可以读取。</p>{blocks}</div>
+}
+
+function WebToolSettings() {
+  const [url,setUrl]=useState('')
+  const [error,setError]=useState('')
+  return <form onSubmit={event=>{
+    event.preventDefault()
+    try {
+      const target=new URL(url)
+      if(!['https:','http:'].includes(target.protocol)) throw new Error('请输入 HTTP 或 HTTPS 网址')
+      if(!openNativeWebView(target.href,'网页工具')) window.open(target.href,'_blank','noopener,noreferrer')
+      setError('')
+    } catch { setError('请输入有效的 HTTP 或 HTTPS 网址') }
+  }}>
+    <label>网页地址<input type="url" value={url} onChange={event=>setUrl(event.target.value)} required/></label>
+    <button type="submit">打开网页</button>
+    {error&&<p role="alert">{error}</p>}
+  </form>
+}
+
+function RequestDiagnostics() {
+  const [logs,setLogs]=useState(()=>loadDiagLogs(localStorage))
+  return <section>
+    <h3>模型请求记录</h3>
+    <button type="button" onClick={()=>setLogs(loadDiagLogs(localStorage))}>刷新</button>
+    {!logs.length&&<p>暂无请求记录</p>}
+    {logs.map(log=><details key={log.id}><summary>{log.at} · {log.model}</summary><pre>{formatDiagSummary(log)}</pre></details>)}
+  </section>
 }
 
 function SettingsSkillPage({people,displayName}:{people:string[];displayName:(p:string)=>string}) {

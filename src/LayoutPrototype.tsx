@@ -11,10 +11,7 @@ import { IconBook, IconPlug, IconBack, IconChevronRight, IconClose, IconHome, Ic
 import { settingItems } from './layout/sections'
 import { RealProviderPreview } from './RealProviderPreview'
 import type { Vendor } from './vendors.mjs'
-import { SettingsSectionsPreview } from './SettingsSectionsPreview'
-import { ModelFunctionsPreview } from './FeaturePagesPreview'
 import { AdvancedSettingsPreview } from './AdvancedSettingsPreview'
-import { ContentSettingsPreview } from './ContentSettingsPreview'
 import { RoomWidgets } from './RoomWidgets'
 
 type View = 'home' | 'chat' | 'room' | 'settings' | 'theme' | 'profile'
@@ -32,6 +29,7 @@ type LayoutPrototypeProps = {
   renderWorkspace?: () => ReactNode
   renderSystem?: () => ReactNode
   renderRoomScene?: (person: string, onAction: (action: string) => void) => ReactNode
+  renderSettings?: (section: string, person: string) => ReactNode
   renderProfile?: (person: string) => ReactNode
   renderBackup?: () => ReactNode
   renderResource?:(kind:'world'|'mcp')=>ReactNode
@@ -133,7 +131,6 @@ export default function LayoutPrototype(props:LayoutPrototypeProps = {}) {
   const actualMessages = props.messages || activeConversation?.messages || stored<Record<string,MessageView[]>>('ai-home.messages', {})[activeConversation?.id || ''] || []
   const draft = props.draft ?? ''
   const submit = async () => { const text=draft.trim(); if((!text&&!attachments.length)||readingFiles||!props.onSend)return; const result=await props.onSend(text,attachments);if(result==='ok')setAttachments(old=>old.filter(attachment=>!attachments.includes(attachment))) }
-  const [theme, setTheme] = useState('银杏奶灰')
   const mainRef = useRef<HTMLElement>(null)
   const chatRef = useRef<HTMLDivElement>(null)
   const followLatest = useRef(true)
@@ -270,25 +267,20 @@ export default function LayoutPrototype(props:LayoutPrototypeProps = {}) {
           {section === '供应商' ? <RealProviderPreview vendors={props.vendors||[]} onSave={next=>props.onSaveVendors?.(next)}/> :
             section === '订阅' ? props.renderSubscription?.() :
             section === 'AI 用量账本' ? props.renderUsage?.() :
-            section === '模型功能' ? <ModelFunctionsPreview /> :
+            section === '模型功能' ? props.renderSettings?.(section,person) :
             section === '定时任务' ? <><div className="qj-feature-intro"><h2>定时任务</h2></div><div className="qj-row-group">{people.map(id=><button key={id} className="qj-row" onClick={()=>setPerson(id)}><span>{displayName(id)}</span><small>{id===person?'当前助手':'切换助手'}</small><i><IconChevronRight size={15}/></i></button>)}</div>{props.renderTasks?.(person)}</> :
-            section === '工具与扩展' ? <AdvancedSettingsPreview kind="tools" renderWorkspace={props.renderWorkspace} renderMcp={()=>props.renderResource?.('mcp')} /> :
+            section === '工具与扩展' ? <AdvancedSettingsPreview kind="tools" renderWorkspace={props.renderWorkspace} renderPanel={panel=>props.renderSettings?.(panel,person)} renderMcp={()=>props.renderResource?.('mcp')} /> :
             section === '应用与设备' ? <AdvancedSettingsPreview kind="device" renderBackup={props.renderBackup} renderSystem={props.renderSystem} /> :
-            section === '记忆与上下文' ? <ContentSettingsPreview type="memory" renderWorldbook={()=>props.renderResource?.('world')} /> :
+            section === '记忆与上下文' ? props.renderSettings?.(section,person) :
             section === '聊天与消息' ? <ChatDisplaySettings compact /> :
-            section === '诊断与维护' ? <ContentSettingsPreview type="diagnostic" /> :
+            section === '诊断与维护' ? props.renderSettings?.(section,person) :
             section === '房间与助手' ? <div className="qj-row-group">{people.map(id=><button key={id} className="qj-row" onClick={()=>{setPerson(id);go('profile')}}><span>{displayName(id)}</span><i><IconChevronRight size={15}/></i></button>)}</div> :
-            <SettingsSectionsPreview section={section} onTheme={() => go('theme')} />}
+            props.renderSettings?.(section,person)}
         </> : <>
           <div className="qj-section-head"><h2>设置中心</h2><p>常用功能在前，其他功能集中管理。</p></div>
           <div className="qj-row-group">{settingItems.map(([name, desc]) => <button key={name} className="qj-row" onClick={() => openSection(name)}>
             <span>{name}</span><small>{desc}</small><i><IconChevronRight size={15}/></i></button>)}</div>
         </>}
-      </div>}
-      {view === 'theme' && <div className="qj-page">
-        <h3 className="qj-label">一键主题包</h3>
-        <div className="qj-theme-list">{['银杏奶灰','月影浅紫','夜幕星雾'].map(name => <button key={name} className={'qj-theme-tile ' + (theme === name ? 'selected' : '')} onClick={() => setTheme(name)}><span className={'qj-swatch '+(name==='月影浅紫'?'lavender':name==='夜幕星雾'?'night':'')} /><b>{name}</b><small>{theme === name ? '已选择' : '预览样式'}</small></button>)}</div>
-        <p className="qj-inline-note">主题包应用功能留待页面验收后接入。</p>
       </div>}
       {view === 'profile' && <div className="qj-page">
         {props.renderProfile?.(person)}
