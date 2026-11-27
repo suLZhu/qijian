@@ -1,6 +1,6 @@
 import { ChatDisplaySettings, useChatDisplay } from './ChatDisplay'
 import { formatMessageTime } from './chatDisplayPrefs.mjs'
-import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode, type CSSProperties } from 'react'
 import { assetUrl } from './apiBase.mjs'
 import { RichText } from './RichText'
 import { cleanupMessageText } from './messageCleanup.mjs'
@@ -23,6 +23,11 @@ type Attachment = { name:string; type:string; size:number; preview?:string; data
 type AppLayoutProps = {
   modelLabel?:string
   renderModelPicker?:(close:()=>void)=>ReactNode
+  appearanceStyle?:CSSProperties
+  chatBackground?:string
+  bubbleStyle?:string
+  chatBackgroundUrl?:string
+  bubbleImageUrl?:string
   userAvatar?:string
   userName?:string
   onRenameConversation?:(id:string,title:string)=>void
@@ -239,7 +244,7 @@ export default function AppLayout(props:AppLayoutProps = {}) {
   const title = view === 'home' ? '栖间' : view === 'chat' ? displayName(person) : view === 'room' ? displayName(person) + '的房间' :
     view === 'settings' ? (section || '设置') :
     view === 'theme' ? '主题中心' : displayName(person) + '的资料'
-  return <div className="qj-preview">
+  return <div className="qj-preview" style={props.appearanceStyle}>
     <div className="qj-status" aria-hidden="true" />
     <header className="qj-topbar">
       {(view === 'chat' || view === 'home') ? <button className="qj-icon" aria-label="打开侧边栏" onClick={() => setDrawer(true)}><IconMenu size={18}/></button> :
@@ -276,7 +281,7 @@ export default function AppLayout(props:AppLayoutProps = {}) {
           <button className="qj-row" onClick={() => go('settings')}><span>记忆与记录</span><small>在设置中查看管理</small><i><IconChevronRight size={15}/></i></button>
         </div>
       </div>}
-      {view === 'chat' && <div className="qj-chat" ref={chatRef} style={{ fontSize: display.fontSize }}>
+      {view === 'chat' && <div className="qj-chat" ref={chatRef} data-background={props.chatBackground} data-bubble={props.bubbleStyle} style={{ fontSize: display.fontSize, backgroundImage:props.chatBackgroundUrl?`url(${assetUrl(props.chatBackgroundUrl)})`:undefined, ...(props.bubbleImageUrl?{"--qj-bubble-image":`url(${assetUrl(props.bubbleImageUrl)})`}:{}) } as CSSProperties}>
         <div className="qj-chat-date">{activeConversation?.title || '暂无会话'}</div>
         {historyStart > 0 && <button type="button" className="qj-history-more" onClick={loadOlderMessages}>加载更早消息</button>}
         {actualMessages.slice(historyStart).map((m,i)=><div key={m.id||historyStart+i} className={'qj-message '+(m.role==='user'?'mine':'from')+(m.id&&selected.includes(m.id)?' qj-message-selected':'')} onPointerDown={e=>{if(!m.id||selection?.scope===scope|| (e.target as HTMLElement).closest('button,input,textarea,summary'))return;cancelPress();pressStart.current={x:e.clientX,y:e.clientY};pressTimer.current=setTimeout(()=>{setMessageAction({scope,id:m.id!});pressTimer.current=null},500)}} onPointerMove={e=>{if(Math.hypot(e.clientX-pressStart.current.x,e.clientY-pressStart.current.y)>10)cancelPress()}} onPointerUp={cancelPress} onPointerCancel={cancelPress} onContextMenu={e=>{if(m.id){e.preventDefault();setMessageAction({scope,id:m.id})}}} onClick={()=>{if(m.id&&selection?.scope===scope)toggleSelected(m.id)}}>{m.role!=='user'&&display.assistantAvatar&&<span className="qj-avatar">{avatar(person)}</span>}<div className="qj-message-content">{(display.time || (m.role === 'user' ? display.userName : display.assistantName)) && <div className="qj-message-meta">
