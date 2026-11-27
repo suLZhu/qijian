@@ -28,7 +28,7 @@ import { GUIDE_BRIEF, GUIDE_MARKDOWN } from './guide.mjs'
 import { applyWebUpdate, compareVersions, currentBundle, liveUpdateSupported, notifyAppReady, resetToBuiltin } from './liveUpdate.mjs'
 import { applyPackVars, getActivePackId, loadThemePacks, normalizeThemePack, setActivePack as setStoredActivePack, upsertThemePack, type ThemePack } from './themePack.mjs'
 import { DEFAULT_ROOM_LAYOUT, loadRoomLayout, saveRoomLayout, resetRoomLayout, type RoomItem, type RoomLayout } from './roomLayout.mjs'
-import { WorkspaceSettings, type WorkspaceConfig } from './WorkspaceSettings'
+import { type WorkspaceConfig } from './WorkspaceSettings'
 import { confirmDialog } from './uiDialog'
 import { CONTEXT_LIMITS, planCompaction, conversationExcerpt, buildSummarySystemMessage, searchHistory, searchMessageList } from './contextCompression.mjs'
 import { IconHome, IconChat, IconSettings, IconClock, IconMemory, IconCalendar, IconSun, IconPalette, IconPlug, IconChart, IconSparkles, IconFolder, IconShield, IconInfo, IconFlower, IconPlus, IconBack, IconChevronRight, IconChevronDown, IconChevronUp, IconClose, IconEdit, IconTrash, IconEye, IconEyeOff, IconArrowUp, IconArrowDown, IconSwitch, IconShare, IconTest, IconSearch, IconMinus, IconFile, IconWarning, IconMail, IconBook, IconCheck, IconCopy, IconRefresh, IconEmoji, IconPhoto, IconCoffee, IconMusic, IconLedger, IconGrid, IconMore, IconStar, IconMenu, IconMic, IconStop, IconSend, type IconComponent } from './icons'
@@ -279,7 +279,7 @@ function useKeyboardViewport(){
 
 export default function App() {
   useKeyboardViewport()
-  const [modelSettingsSection,setModelSettingsSection]=useState("vendor:catalog")
+  const [modelSettingsSection,setModelSettingsSection]=useState("vendor")
   // 真机证据：切后台 / 回前台打点（对照 generation 链路日志，判断后台是否被系统暂停）。
   useEffect(() => {
     const onVis = () => genDebug(document.hidden ? 'app_backgrounded' : 'app_foregrounded', { hidden: document.hidden })
@@ -2349,18 +2349,17 @@ export default function App() {
     onDraftChange={v=>setDraft(v)}
     onSend={prototypeSend}
     renderSubscription={()=> <SubscriptionAccounts vendors={vendors} setVendors={setVendors} setModelProfiles={setModelProfiles} subscriptions={subscriptions} setSubscriptions={setSubscriptions}/>}
-    renderWorkspace={()=> <WorkspaceSettings people={assistants.map(a=>a.id)} displayName={displayName} onSaved={config=>setWorkspaceConfigs(old=>({...old,[config.person]:config}))}/>}
     renderSystem={()=> <AndroidSystemSettings people={assistants.map(a=>a.id)} displayName={displayName} avatarOf={id=>characters[id]?.avatar||''}/>}
     renderSettings={(section,target)=>{
       if(section==='自主生活') return <ProactivePanel key={target} person={target} personLabel={displayName}/>
       if(section==='SKILL') return <SettingsSkillPage people={assistants.map(a=>a.id)} displayName={displayName}/>
       if(section==='工具看板') return <ToolDashboard key={target} person={target} personLabel={displayName(target)}/>
-      if(section==='web') return <WebToolSettings/>
       if(section==='外观与主题') return <>
         <ThemeSettings value={themePrefs} onChange={setThemePrefs}/>
         <AssistantThemeSettings personAppearance={personAppearance} setPersonAppearance={setPersonAppearance} assets={customAssets} displayName={displayName}/>
       </>
-      if(section==='聊天模型') return <VendorCenter section={modelSettingsSection} onSection={setModelSettingsSection} vendors={vendors} setVendors={setVendors} setModelProfiles={setModelProfiles} modelProfiles={modelProfiles} defaultModelId={defaultModelId} setDefaultModelId={setDefaultModelId}/>
+      if(section==='中转') return <ProviderManagement section={modelSettingsSection} onSection={setModelSettingsSection} vendors={vendors} setVendors={setVendors} setModelProfiles={setModelProfiles} modelProfiles={modelProfiles} defaultModelId={defaultModelId} setDefaultModelId={setDefaultModelId}/>
+      if(section==='聊天模型') return <DefaultModelPage profiles={modelProfiles} vendors={vendors} defaultModelId={defaultModelId} setDefaultModelId={setDefaultModelId} onBack={()=>{}}/>
       if(section==='生图'||section==='视频'||section==='语音') return <MediaSettings vendors={vendors} fixedMode={section==='生图'?'image':section==='视频'?'video':'audio'}/>
       if(section==='听觉') return <p>待开发</p>
       if(section==='上下文') return <ContextSettings/>
@@ -2804,24 +2803,6 @@ function SettingsGuidePage() {
   return <div className="setting-card settings-inner-card guide-page"><b>栖间使用说明</b><p className="muted">这份说明同时挂在 window.AiHomeGuide，助手可以读取。</p>{blocks}</div>
 }
 
-function WebToolSettings() {
-  const [url,setUrl]=useState('')
-  const [error,setError]=useState('')
-  return <form onSubmit={event=>{
-    event.preventDefault()
-    try {
-      const target=new URL(url)
-      if(!['https:','http:'].includes(target.protocol)) throw new Error('请输入 HTTP 或 HTTPS 网址')
-      if(!openNativeWebView(target.href,'网页工具')) window.open(target.href,'_blank','noopener,noreferrer')
-      setError('')
-    } catch { setError('请输入有效的 HTTP 或 HTTPS 网址') }
-  }}>
-    <label>网页地址<input type="url" value={url} onChange={event=>setUrl(event.target.value)} required/></label>
-    <button type="submit">打开网页</button>
-    {error&&<p role="alert">{error}</p>}
-  </form>
-}
-
 const CONTEXT_SETTINGS_KEY='ai-home.contextLimits'
 
 function readContextLimits() {
@@ -3081,7 +3062,7 @@ const CAP_ROWS: [CapKey, string][] = [['text', '文本'], ['image', '图片'], [
 // 1×1 透明 PNG，用来验证模型是否接受图片输入。
 const CAP_TINY_PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=='
 
-function VendorCenter({vendors,setVendors,setModelProfiles,section,onSection,modelProfiles,defaultModelId,setDefaultModelId}:{
+function ProviderManagement({vendors,setVendors,setModelProfiles,section,onSection,modelProfiles,defaultModelId,setDefaultModelId}:{
   vendors:Vendor[]; setVendors:React.Dispatch<React.SetStateAction<Vendor[]>>
   setModelProfiles:React.Dispatch<React.SetStateAction<ModelProfile[]>>
   section:string; onSection:(s:string)=>void
@@ -3124,7 +3105,7 @@ function VendorCenter({vendors,setVendors,setModelProfiles,section,onSection,mod
   const [keyDraftRole,setKeyDraftRole]=useState<'primary'|'backup'>('backup')
   const [showKey,setShowKey]=useState(false)
   const [showBackupKeys,setShowBackupKeys]=useState(false)
-  const [addTab,setAddTab]=useState<'openai'|'google'|'claude'|'account'>('openai')
+  const [addTab,setAddTab]=useState<'openai'|'google'|'claude'>('openai')
   const [newEnabled,setNewEnabled]=useState(true)
   const [newResponseApi,setNewResponseApi]=useState(false)
   const [newName,setNewName]=useState('')
@@ -3206,7 +3187,7 @@ function VendorCenter({vendors,setVendors,setModelProfiles,section,onSection,mod
     if(!name)return
     const id='custom-'+Math.random().toString(36).slice(2,10)
     const keys=[...(newKey.trim()?[{id:crypto.randomUUID(),label:'主号',value:newKey.trim(),role:'primary' as const}]:[]),...(newMultiKey?newExtraKeys.filter(k=>k.value.trim()).map((k,i)=>({id:k.id,label:k.label.trim()||('备用 '+(i+1)),value:k.value.trim(),role:'backup' as const})):[])]
-    commit([...vendors,{id,name,endpoint,apiPath:newApiPath.trim(),modelsPath:'',builtin:false,enabled:newEnabled,group:'',avatar:'',providerType:addTab==='account'?'openai':addTab,responseApi:newResponseApi,promptCacheKey:false,keys,models:[],modelOverrides:{}}] as Vendor[])
+    commit([...vendors,{id,name,endpoint,apiPath:newApiPath.trim(),modelsPath:'',builtin:false,enabled:newEnabled,group:'',avatar:'',providerType:addTab,responseApi:newResponseApi,promptCacheKey:false,keys,models:[],modelOverrides:{}}] as Vendor[])
     setTab('config');resetEditUI();setShowBackupKeys(true)
     setNewName('');setNewKey('');setNewMultiKey(false);setNewExtraKeys([]);setNewEndpoint('');setNewApiPath('');setNewEnabled(true);setNewResponseApi(false)
     onSection('vendor:'+id)
@@ -3344,7 +3325,6 @@ function VendorCenter({vendors,setVendors,setModelProfiles,section,onSection,mod
       <div className="vendor-kelivo-list-head">
         <div className="vendor-head-tabs">
           
-          <button type="button" className="vendor-head-title" onClick={()=>onSection('vendor:account')}>订阅账号</button>
         </div>
         <div className="vendor-kelivo-head-actions">
           <button type="button" className="vendor-head-add" onClick={()=>{resetEditUI();setNewName('OpenAI');setNewEndpoint('https://api.openai.com/v1');onSection('vendor:add')}}><IconPlus className="ui-icon-inline" size={14}/> 添加</button>
@@ -3497,7 +3477,7 @@ function VendorCenter({vendors,setVendors,setModelProfiles,section,onSection,mod
         <div className="vendor-kelivo-sheet-grip"/>
         <header className="vendor-add-head"><button type="button" aria-label="关闭" onClick={backToList}><IconClose size={15}/></button><b>添加供应商</b><span aria-hidden="true"/></header>
         <div className="vendor-add-tabs" role="tablist" aria-label="供应商类型">
-          {([['openai','OpenAI'],['google','Google'],['claude','Claude'],['account','账号登录']] as const).map(([id,label])=>(
+          {([['openai','OpenAI'],['google','Google'],['claude','Claude']] as const).map(([id,label])=>(
             <button type="button" key={id} role="tab" aria-selected={addTab===id} className={addTab===id?'active':''} onClick={()=>{
               setAddTab(id)
               if(id==='openai'){setNewName('OpenAI');setNewEndpoint('https://api.openai.com/v1')}
@@ -3505,10 +3485,7 @@ function VendorCenter({vendors,setVendors,setModelProfiles,section,onSection,mod
               if(id==='claude'){setNewName('Claude');setNewEndpoint('https://api.anthropic.com/v1')}
             }}>{label}</button>))}
         </div>
-        {addTab==='account'?<div className="vendor-add-account">
-          <p>订阅账号用网页登录，不需要填 API Key。</p>
-          <button type="button" className="vendor-submit" onClick={()=>onSection('vendor:account')}>去登录订阅账号</button>
-        </div>:<form className="vendor-add-form" onSubmit={addVendor}>
+        {<form className="vendor-add-form" onSubmit={addVendor}>
           <label className="vendor-config-info vendor-config-switch"><span>启用</span><input type="checkbox" checked={newEnabled} onChange={e=>setNewEnabled(e.target.checked)}/></label>
           {addTab==='openai'&&<label className="vendor-config-info vendor-config-switch"><span>Response API <small>使用 /responses 端点</small></span><input type="checkbox" checked={newResponseApi} onChange={e=>setNewResponseApi(e.target.checked)}/></label>}
           <label className="vendor-field">名称<input aria-label="供应商名称" value={newName} onChange={e=>setNewName(e.target.value)} placeholder="例如 OpenAI"/></label>
@@ -3572,8 +3549,6 @@ function VendorCenter({vendors,setVendors,setModelProfiles,section,onSection,mod
             <label className="vendor-config-info vendor-config-switch"><span>Response API <small>使用 /responses 端点</small></span><input type="checkbox" checked={!!active.responseApi} onChange={e=>patch(active.id,x=>({...x,responseApi:e.target.checked}))}/></label>
             <label className="vendor-config-info vendor-config-switch"><span>发送会话缓存键 <small>OpenAI prompt_cache_key</small></span><input type="checkbox" checked={!!active.promptCacheKey} onChange={e=>patch(active.id,x=>({...x,promptCacheKey:e.target.checked}))}/></label>
             <div className="vendor-config-info"><span>图片与请求预算</span><span className="vendor-soon">继承默认</span></div>
-            <div className="vendor-config-info"><span>网络代理</span><span className="vendor-soon">未接入</span></div>
-            <div className="vendor-config-info"><span>自定义请求</span><span className="vendor-soon">未接入</span></div>
           </>}
         </div>
         <div className="vendor-config-section-title">连接设置</div>
