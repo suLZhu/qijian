@@ -286,7 +286,6 @@ export default function App() {
     } catch { /* ignore */ }
     return 'home'
   })
-  const pageBeforeSettings = useRef<Page>('home')
   // 鉴权状态提前声明：通知点击路由 / 闹钟同步的 effect 依赖数组会立即求值。
   const [authStatus, setAuthStatus] = useState<'checking'|'signedOut'|'signedIn'>('checking')
   // 冷启动点击通知时会话还没装载：先暂存，等鉴权 / 快照就绪再路由。
@@ -623,15 +622,9 @@ export default function App() {
   const toolReturnRef = useRef(false)
   useEffect(() => { activeToolRef.current = activeTool }, [activeTool])
   useEffect(() => { toolReturnRef.current = toolReturnToSettings }, [toolReturnToSettings])
-  // 聊天里点头像 → 关聊天打开助手档案；档案左上按钮据此变成「← 返回聊天」。
-  const [profileFromChat,setProfileFromChat]=useState(false)
-  const openAssistantProfile=(fromChat=false)=>{setProfileFromChat(fromChat);setChatOpen(false);setActiveTool('助手档案');setPage('room')}
   // 左侧抽屉默认完全收起：屏幕边缘只留一条细把手，点一下才滑出，再点遮罩 / × / 系统返回手势收起。
   // 不再定时自动收回——用户要在里面翻历史会话、重命名，自动收回会打断操作。
   const [sidebarOpen,setSidebarOpen]=useState(false)
-  // 抽屉里的会话重命名：输入框与草稿只属于抽屉，不占用聊天顶栏。
-  const [drawerRenameId,setDrawerRenameId]=useState<string|null>(null)
-  const [drawerRenameDraft,setDrawerRenameDraft]=useState('')
   useEffect(()=>{ (window as any).AiHomeGuide=GUIDE_MARKDOWN; return ()=>{ delete (window as any).AiHomeGuide } },[])
   useEffect(()=>{ void notifyAppReady() },[])
   useEffect(()=>{
@@ -669,14 +662,11 @@ export default function App() {
   // 注意：这两个 effect 必须留在 App 顶层，不能写进上面的抽屉 effect 里（会触发 Invalid hook call）。
   useEffect(() => { if (!activeTool && toolReturnToSettings) { setPage('settings'); setToolReturnToSettings(false) } }, [activeTool, toolReturnToSettings])
   useEffect(() => { if (!activeTool) return; const un = pushBackHandler(() => { const fromSettings = toolReturnToSettings; setActiveTool(''); if (fromSettings) { setPage('settings'); setToolReturnToSettings(false) } return true }); return un }, [activeTool, toolReturnToSettings])
-  const [funShortcut,setFunShortcut]=useState('')
   // 云端凭证失效后自动切回本地模式的一次性横幅文案（非空即显示，可手动关闭）。
   const [fallbackNotice, setFallbackNotice] = useState('')
   // 首启动不再弹「连接服务器」向导：没有配置地址时默认进入本地模式
   // （LocalBackend 应答全部 /api/*，开箱即用）。云同步地址是设置页里的可选项。
   const [apiSetupActive, setApiSetupActive] = useState(false)
-  const [time, setTime] = useState('')
-  const [todayLabel, setTodayLabel] = useState('')
   const [inbox,setInbox] = useState<InboxMessage[]>([])
   const [toast,setToast] = useState<InboxMessage|null>(null)
   const seenInbox = useRef<Set<string>>(new Set())
@@ -1128,14 +1118,6 @@ export default function App() {
   useEffect(() => localStorage.setItem('ai-home.tasks', JSON.stringify(tasks)), [tasks])
   useEffect(() => { try{localStorage.setItem('ai-home.projects',JSON.stringify(projects))}catch{} },[projects])
 
-  function openPerson(p: Person) { setPerson(p); setPage('room'); setChatOpen(true); setActiveTool('') }
-  // 首页「今天的事」与底部「记忆」都走这里：直接打开某位助手的工具页。
-  function openToolFor(target: Person, tool: Tool) {
-    setPerson(target)
-    setChatOpen(false)
-    setActiveTool(tool)
-    setPage('room')
-  }
   // 把一次 send() 的回写锁在「发送时所在的会话」上：conversationId 由 send() 捕获。
   // 用户中途切走时只写 conversations（数据不丢、不污染别的会话），不再动当前视图；
   // 切回该会话时会从 conversations 重新装载，内容完整可见。
@@ -2102,11 +2084,6 @@ export default function App() {
     markConversationDirty()
     return true
   }
-  // 删除：视图与持久化同时过滤。若删的是正在生成的回复——先中止请求；
-  // 流式回写按 id 匹配，消息删除后无处可写，绝不会删除后又重新出现。
-  function deleteMessage(messageId: string) {
-    deleteMessages([messageId])
-  }
   // 多选批量删除：一次性中止在途请求，同时过滤当前会话的视图与持久化——
   // 刷新不恢复，也不碰其他助手/会话。待发送（pending）不入聊天记录，无需在此剥离。
   function deleteMessages(ids: string[]) {
@@ -2158,31 +2135,6 @@ export default function App() {
     } finally { regenLockRef.current = false }
   }
 
-  // 用户消息「保存并重发」：改文字 → 丢掉这条之后的旧回复 → 以这条为历史末尾重新请求一次回答。
-  async function resendUserMessage(messageId: string, newText: string): Promise<'ok'|'fail'|'noop'> {
-    const text = newText.trim()
-    if (!messageId || !text) return 'fail'
-    if (sending || regenLockRef.current) return 'noop'
-    const target = person
-    const convId = activeConversationIds[target] || ''
-    const list = (conversations[target]||[]).find(c=>c.id===convId)?.messages || (convId===activeConversationIds[target]?messages[target]:[])
-    const idx = list.findIndex(m => m && m.id === messageId)
-    if (idx < 0 || list[idx].role !== 'user') return 'fail'
-    editMessage(messageId, text)
-    const after = list.slice(idx + 1).map(m => m.id).filter((id): id is string => !!id)
-    if (after.length) deleteMessages(after)
-    regenLockRef.current = true
-    try {
-      return await send(text, [], { conversationId: convId, historyEndIndex: idx, insertUser: false })
-    } finally { regenLockRef.current = false }
-  }
-
-  function addTask() {
-    const text = draft.trim()
-    if (!text) return
-    setTasks(prev => ({ ...prev, [person]: [...prev[person], text] }))
-    setDraft('')
-  }
 
   if (apiSetupActive) return <ApiSetupScreen onSubmit={applyApiAddress}/>
   // 启动探测期（checking）用中性加载页：不再渲染 LoginScreen，避免真机上
@@ -2190,11 +2142,8 @@ export default function App() {
   if (authStatus === 'checking') return <main className="login-shell"><div className="login-card boot-card"><div className="login-mark">居</div><p className="login-eyebrow">A SMALL PRIVATE SPACE</p><h1>正在进入小家</h1><div className="boot-spinner" aria-hidden="true"/><p className="login-copy">正在准备房间……</p></div></main>
   if (authStatus !== 'signedIn') return <LoginScreen status={authStatus} password={loginPassword} setPassword={setLoginPassword} error={authError} onSubmit={login} onUseLocal={() => { try { localStorage.removeItem(API_BASE_STORAGE_KEY) } catch { /* 忽略 */ } setApiBase(''); void recheckAfterApiChange() }}/>
 
-  const navigate=(next:Page)=>{setPage(next);setActiveTool('');setSidebarOpen(false)}
-  const openFunShortcut=(key:string)=>{if(key==='主动任务'||key==='自主行动'){setActiveTool(key==='主动任务'?'工作流':'自主生活');setPage('room');setSidebarOpen(false);return}setFunShortcut(key);setPage('fun');setSidebarOpen(false);setActiveTool('')}
   // 左侧抽屉里的会话操作：和房间页共用 conversations / messages / activeConversationIds，
   // 切换前先把当前聊天视图写回持久化会话，避免刚发出去的消息丢在旧会话里。
-  const drawerConvs:Conversation[]=conversations[person]||[]
   const drawerActiveId:string=activeConversationIds[person]||''
   function drawerWriteBack(){
     if(!drawerActiveId)return
@@ -2208,7 +2157,7 @@ export default function App() {
       setMessages((old:Record<Person,ChatMessage[]>)=>({...old,[person]:target?.messages||[]}))
       setChatError('')
     }
-    setPage('room');setActiveTool('');setChatOpen(true);setSidebarOpen(false);setDrawerRenameId(null)
+    setPage('room');setActiveTool('');setChatOpen(true);setSidebarOpen(false)
   }
   function drawerCreate(){
     drawerWriteBack()
@@ -2218,13 +2167,7 @@ export default function App() {
     setActiveConversationIds((old:Record<Person,string>)=>({...old,[person]:id}))
     setMessages((old:Record<Person,ChatMessage[]>)=>({...old,[person]:[]}))
     setChatError('')
-    setPage('room');setActiveTool('');setChatOpen(true);setSidebarOpen(false);setDrawerRenameId(null)
-  }
-  function drawerRename(id:string){
-    const title=drawerRenameDraft.trim()
-    setDrawerRenameId(null)
-    if(!title)return
-    setConversations((old:Record<Person,Conversation[]>)=>({...old,[person]:(old[person]||[]).map(c=>c.id===id?{...c,title}:c)}))
+    setPage('room');setActiveTool('');setChatOpen(true);setSidebarOpen(false)
   }
   function drawerArchive(id: string, archived: boolean) {
     const list = conversationsRef.current[person] || []
@@ -2287,9 +2230,6 @@ export default function App() {
       return result
     })
   }
-  // 聊天页没有「← 房间」按钮：从抽屉底部或系统返回手势回房间。
-  const drawerBackToRoom=()=>{setSidebarOpen(false);setChatOpen(false);setActiveTool('')}
-  const beautifyClass=BEAUTIFY_PACKS.find(p=>p.id===beautifyPack)?.cssClass||''
   // 聊天页优先用当前助手的独立外观（角色外观），否则跟随全局
   const effAppearance=chatOpen?personAppearance[person]:undefined
   const bgId=(effAppearance&&effAppearance.chatBackground)||themePrefs.chatBackground||'theme'
@@ -2671,39 +2611,9 @@ function ProactivePanel({person,personLabel}:{person:Person;personLabel?:(p:Pers
  return <div className="tool-panel"><h3>{who} · 自主生活</h3><p className="muted">按设置检查唤醒条件；服务端执行后会记录结果，本地模式会提示需要后台执行器。</p>{config&&<section className="memory-create"><label>自主唤醒 <input type="checkbox" checked={!!config.enabled} onChange={e=>setConfig({...config,enabled:e.target.checked?1:0})}/></label><label>允许主动聊天<input type="checkbox" checked={!!(config.allow_chat??1)} onChange={e=>setConfig({...config,allow_chat:e.target.checked?1:0})}/></label><label>允许读取长期记忆<input type="checkbox" checked={!!(config.allow_memory_search??1)} onChange={e=>setConfig({...config,allow_memory_search:e.target.checked?1:0})}/></label><label>主动程度<SoftSelect value={config.mode} onChange={v=>setConfig({...config,mode:v})} options={[{value:'quiet',label:'安静陪伴'},{value:'natural',label:'自然主动'},{value:'lively',label:'活泼黏人'}]}/></label><label>心跳间隔（小时）<input type="number" min={2} max={72} value={config.interval_hours} onChange={e=>setConfig({...config,interval_hours:Number(e.target.value)})}/></label><label>每天最多唤醒次数<input type="number" min={1} max={48} value={config.daily_wake_limit??6} onChange={e=>setConfig({...config,daily_wake_limit:Number(e.target.value)})}/></label><label>每天 Token 警戒值<input type="number" min={1000} max={500000} step={1000} value={config.daily_token_limit??12000} onChange={e=>setConfig({...config,daily_token_limit:Number(e.target.value)})}/></label><label>免打扰开始（0–23时）<input type="number" min={0} max={23} value={config.quiet_start} onChange={e=>setConfig({...config,quiet_start:Number(e.target.value)})}/></label><label>免打扰结束（0–23时）<input type="number" min={0} max={23} value={config.quiet_end} onChange={e=>setConfig({...config,quiet_end:Number(e.target.value)})}/></label><div className="memory-form-actions"><button disabled={busy} onClick={()=>act({action:'configure',...config,enabled:!!config.enabled})}>保存设置</button><button disabled={busy} onClick={()=>act({action:'wake'})}>测试唤醒</button><button disabled={busy} onClick={()=>refresh().catch(e=>setNotice(e.message))}>刷新记录</button><button disabled={busy} onClick={async()=>{try{const r=await apiFetch('/api/inbox/test',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({person})});if(!r.ok)throw Error('发送失败');setNotice('测试消息已进入小家收件箱，前台横幅会在下一次轮询时出现。')}catch(e){setNotice(String(e))}}}>测试消息弹窗</button></div></section>}{notice&&<p className="muted" role="status">{notice}</p>}{tokenUsage&&<p className="muted">今日已上报 {tokenUsage.tokens} Token / {config?.daily_token_limit??12000}；{tokenUsage.unknown?'部分调用未返回用量，已暂停自主唤醒。':'达到警戒值后停止下一次唤醒；单次调用可能超过警戒值。'}</p>}{config?.plan_note&&<p className="muted">助手计划：{config.plan_note}</p>}<h4>最近唤醒事件</h4>{events.length===0?<p className="muted">还没有唤醒记录。</p>:events.map(e=><article className="memory-item" key={e.id}><b>{e.mood==='curious'?'✨ 好奇 / 想分享':'自主唤醒'}</b><p>{e.reason}</p><small>{new Date(e.created_at).toLocaleString()} · {e.status==='pending'?'正在处理':e.status==='sent'?'已发送':e.status==='silent'?'选择不打扰':e.status==='failed'?'运行失败':'已忽略'}</small>{e.status==='pending'&&<button disabled={busy} onClick={()=>act({action:'dismiss',id:e.id})}>忽略</button>}</article>)}</div>
 }
 
-function PasteButton({ onPaste, label = '粘贴' }: { onPaste: (value: string) => void; label?: string }) {
-  const [state, setState] = useState('')
-  async function go() {
-    const text = (await readClipboardText()).trim()
-    if (!text) {
-      setState('剪贴板空')
-      window.setTimeout(() => setState(''), 1400)
-      return
-    }
-    onPaste(text)
-    setState('已粘贴')
-    window.setTimeout(() => setState(''), 1200)
-  }
-  return <button type="button" className="paste-key-btn" title="从系统剪贴板粘贴" onClick={() => void go()}>{state || label}</button>
-}
 
 const DEFAULT_AVATAR="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Ccircle cx='32' cy='32' r='32' fill='%23ded7ee'/%3E%3Ccircle cx='32' cy='25' r='11' fill='%238b7fb8'/%3E%3Cpath d='M10 57c4-12.5 13-19 22-19s18 6.5 22 19z' fill='%238b7fb8'/%3E%3C/svg%3E"
 
-// 消息操作栏的线性图标（低对比度轻量风格，颜色跟随 currentColor / 主题变量）。
-
-// 微信式表情面板：内置表情集（分类顺序≈微信：面孔→手势→动物→食物→活动→符号）与搜索关键词表。
-const STICKERS=['😀','😃','😄','😁','😆','😅','🤣','😂','🙂','🙃','😉','😊','😇','🥰','😍','🤩','😘','😗','☺️','😚','😋','😛','😜','🤪','😝','🤗','🤭','🫢','🤫','🤔','🫡','🤐','😶','😐','😑','😬','🙄','😯','😪','😮','😴','🤤','😌','😔','😏','🥲','😢','😭','😮‍💨','😲','😵','😵‍💫','🤠','😎','🤓','🧐','😕','🫤','😟','🙁','☹️','😰','😨','🥶','🥵','😱','😣','😫','😩','😖','😞','😤','😠','😡','🤬','🤯','😳','🥴','🤢','🤮','😷','🤒','🤕','👋','🤚','👌','🤌','✌️','🤞','🫰','🤟','🤙','👍','👎','🫱','🫲','🙏','💪','🙌','👏','🫶','🤝','🖖','☝️','👇','👈','👉','🧑','👨','👩','🧔','👦','👧','🕺','💃','🧎','🧘','🙇','🐶','🐱','🐭','🐹','🐰','🦊','🐻','🐼','🐨','🐯','🦁','🐮','🐷','🐸','🐵','🙈','🙉','🙊','🦄','🐝','🦋','🐢','🐍','🐙','🐧','🐦','🦅','🦉','🐞','🐟','🐠','🐬','🐳','🦈','🐊','🐉','🐲','🌵','🌴','🌳','🍀','🍁','🍂','🌿','🌷','🌹','🌺','🌻','🌼','🌸','🍉','🍓','🍒','🍑','🍊','🍋','🍌','🍇','🥝','🍅','🥑','🍞','🍔','🍟','🍕','🌭','🌮','🌯','🥪','🍜','🍛','🍚','🍣','🍤','🍳','🥞','🧀','🍰','🎂','🍪','☕','🍵','🍺','🍻','🥂','🍷','🥤','⚽','🏀','🎾','🏈','⚾','🎮','🎯','🎤','🎧','🎵','🎶','📷','📺','🎬','🎭','🎨','🎪','🎠','🎡','🎢','🎉','🎊','🎁','🎈','🏆','🥇','🎿','🛷','❤️','🧡','💛','💚','💙','💜','🖤','🤍','💔','❣️','💕','💞','💓','💗','💖','💘','💝','⭐','🌟','✨','💫','🔥','💧','🌈','❄️','☀️','🌙','⚡','🌊','💯','❗','❓','✅','❌','⭕','🚫','💤','💌','📜','📌','📍','🔔']
-const EMOJI_KW:Record<string,string>={'😀':'笑 开心 微笑 高兴','😃':'笑 开心','😄':'笑 开心','😁':'笑 开心','😆':'笑 搞笑','😅':'尴尬 汗 微笑','🤣':'笑 哭 搞笑','😂':'笑 哭 搞笑 滑稽','🙂':'微笑','🙃':'无奈 反转','😉':'眨眼 调皮','😊':'笑 温暖 微笑','😇':'天使 乖','🥰':'爱 甜 可爱 喜欢','😍':'爱 喜欢 心动','🤩':'惊喜 棒 厉害','😘':'亲亲 爱 么么哒','😗':'亲','☺️':'微笑 笑','😚':'亲亲','😋':'好吃 馋 美食','😛':'吐舌 调皮','😜':'吐舌 调皮 眨眼','🤪':'搞怪 疯','😝':'吐舌 调皮','🤗':'抱抱 欢迎','🤭':'偷笑 捂嘴','🫢':'惊讶 捂嘴','🤫':'嘘 保密','🤔':'思考 疑问 想','🫡':'敬礼 致敬','🤐':'闭嘴 拉链','😶':'无语 沉默','😐':'平静','😑':'无语','😬':'尴尬','🙄':'白眼 无语','😯':'惊讶','😪':'困 累','😮':'惊讶 张嘴','😴':'困 睡 晚安','🤤':'馋 垂涎','😌':'平静 放松','😔':'难过 失落','😏':'得意 坏笑','🥲':'苦笑 难过','😢':'哭 难过 伤心','😭':'哭 大哭 难过','😮‍💨':'叹气 无奈','😲':'惊讶','😵':'晕 头晕','😵‍💫':'晕 眼花','🤠':'牛仔 得意','😎':'酷 墨镜 得意','🤓':'书呆子 眼镜','🧐':'审视 打量','😕':'疑惑 为难','🫤':'疑惑 无奈','😟':'担心','🙁':'不高兴 难过','☹️':'难过 不开心','😰':'紧张 冒汗','😨':'害怕','🥶':'冷 冻','🥵':'热 热死了','😱':'惊叫 恐怖 吓','😣':'难受 痛苦','😫':'累 烦','😩':'累 崩溃','😖':'难受','😞':'失望 难过','😤':'生气 傲 哼','😠':'生气','😡':'生气 发火 怒','🤬':'骂 生气','🤯':'震惊 绝了 爆炸','😳':'害羞 尴尬','🥴':'晕 醉','🤢':'恶心','🤮':'吐 恶心','😷':'口罩 病','🤒':'生病 发烧','🤕':'受伤 包扎','👋':'打招呼 你好 拜拜 再见','🤚':'停 手','👌':'好的 OK','🤌':'拿捏','✌️':'胜利 剪刀手','🤞':'祈祷 好运','🫰':'比心 钱','🤟':'爱你','🤙':'酷 拨打','👍':'赞 好 棒 点赞','👎':'踩 不好','🫱':'握手','🫲':'握手','🙏':'拜托 谢谢 感谢 祈祷 加油','💪':'加油 强壮 力量','🙌':'欢呼 棒','👏':'鼓掌 棒 厉害','🫶':'比心 爱','🤝':'握手 合作 成交','🖖':' Vulcan 祝愿','☝️':'上 一','👇':'下','👈':'左','👉':'右','🧑':'人','👨':'男 他','👩':'女 她','🧔':'胡子','👦':'男孩','👧':'女孩','🕺':'跳舞','💃':'跳舞','🧎':'跪','🧘':'瑜伽 冥想','🙇':'鞠躬 抱歉','🐶':'狗 汪 宠物','🐱':'猫 喵 宠物','🐭':'老鼠','🐹':'仓鼠','🐰':'兔子 可爱','🦊':'狐狸','🐻':'熊','🐼':'熊猫','🐨':'考拉','🐯':'老虎','🦁':'狮子','🐮':'牛','🐷':'猪','🐸':'青蛙','🐵':'猴子','🙈':'害羞 不看','🙉':'不听','🙊':'不说 保密','🦄':'独角兽','🐝':'蜜蜂','🦋':'蝴蝶','🐢':'乌龟','🐍':'蛇','🐙':'章鱼','🐧':'企鹅','🐦':'鸟','🦅':'老鹰','🦉':'猫头鹰','🐞':'瓢虫','🐟':'鱼','🐠':'热带鱼','🐬':'海豚','🐳':'鲸','🦈':'鲨鱼','🐊':'鳄鱼','🐉':'龙','🐲':'龙','🌵':'仙人掌','🌴':'椰树','🌳':'树','🍀':'幸运 四叶草','🍁':'枫叶','🍂':'落叶','🌿':'草 叶子','🌷':'花 郁金香','🌹':'玫瑰 花 爱','🌺':'花','🌻':'向日葵 花','🌼':'花','🌸':'花 樱花 春天','🍉':'西瓜 水果','🍓':'草莓 水果','🍒':'樱桃 水果','🍑':'桃 水果','🍊':'橘子 水果','🍋':'柠檬 水果','🍌':'香蕉 水果','🍇':'葡萄 水果','🥝':'猕猴桃 水果','🍅':'西红柿 水果','🥑':'牛油果','🍞':'面包 吃','🍔':'汉堡 吃 饿','🍟':'薯条 吃','🍕':'披萨 吃 饿','🌭':'热狗 吃','🌮':'卷饼 吃','🌯':'卷饼','🥪':'三明治 吃','🍜':'面 吃 饿','🍛':'咖喱 吃','🍚':'米饭 吃','🍣':'寿司 吃','🍤':'虾 吃','🍳':'煎蛋 吃','🥞':'松饼 早餐','🧀':'奶酪','🍰':'蛋糕 甜','🎂':'生日 蛋糕 庆祝','🍪':'饼干 甜','☕':'咖啡 喝 提神','🍵':'茶 喝','🍺':'啤酒 喝','🍻':'干杯 喝','🥂':'干杯 庆祝','🍷':'红酒 喝','🥤':'奶茶 喝 饮料','⚽':'足球 运动','🏀':'篮球 运动','🎾':'网球 运动','🏈':'橄榄球 运动','⚾':'棒球 运动','🎮':'游戏 玩','🎯':'靶子 目标','🎤':'唱歌 麦克风','🎧':'听歌 音乐','🎵':'音乐 歌','🎶':'音乐 歌','📷':'拍照 图片','📺':'电视 看剧','🎬':'电影 拍戏','🎭':'戏剧 面具','🎨':'画画 艺术','🎪':'马戏','🎠':'旋转木马','🎡':'摩天轮','🎢':'过山车','🎉':'庆祝 派对 生日 开心','🎊':'庆祝 派对','🎁':'礼物 生日','🎈':'气球 生日','🏆':'冠军 奖杯','🥇':'第一 冠军','🎿':'滑雪 运动','🛷':'雪橇','❤️':'心 爱 红心 喜欢','🧡':'心 爱','💛':'心 爱','💚':'心 爱','💙':'心 爱','💜':'心 爱','🖤':'心 黑','🤍':'心 白','💔':'伤心 分手 难过','❣️':'心 爱','💕':'爱 心','💞':'爱 心','💓':'爱 心','💗':'爱 心','💖':'爱 心','💘':'爱 心 桃心','💝':'爱 心 礼物','⭐':'星 星星','🌟':'星 星星 闪亮','✨':'闪亮 棒','💫':'星 晕','🔥':'火 热 厉害','💧':'水 滴','🌈':'彩虹','❄️':'雪 冷','☀️':'太阳 晴 热','🌙':'月亮 晚上 晚安','⚡':'闪电 快','🌊':'海浪','💯':'满分 优秀 加油','❗':'重要 注意','❓':'疑问 问题','✅':'对 完成 可以','❌':'错 不行 禁止','⭕':'圈','🚫':'禁止 不行','💤':'困 睡 晚安','💌':'信 情书 爱','📜':'文书','📌':'定位 图钉','📍':'定位 地点','🔔':'铃 提醒'}
-function matchEmoji(e:string,q:string){if(!q)return true;if(e===q)return true;const kw=EMOJI_KW[e];return !!kw&&kw.includes(q)}
-
-// 「工具」图标里的小程序：附件统一走输入框右下角的 ＋，这里暂时只放主动任务。
-// 后续做了小程序 / 单独可视化网页，往这个数组加一项即可（其余位置留空）。
-type ChatQuickTool = { id:string; label:string; desc:string; icon:string }
-const CHAT_QUICK_TOOLS: ChatQuickTool[] = [
-  { id:'task', label:'主动任务', desc:'定时任务与工作流', icon:'◷' },
-]
-
-function formatSize(size:number){return size<1024?size+' B':size<1024*1024?(size/1024).toFixed(1)+' KB':(size/1024/1024).toFixed(1)+' MB'}
 
 function TimeZoneSettings({timeZone,setTimeZone}:{timeZone:string;setTimeZone:(value:string)=>void}) {
   const [tzDraft,setTzDraft]=useState<string|null>(null)
