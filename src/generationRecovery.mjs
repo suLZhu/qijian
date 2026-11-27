@@ -12,24 +12,26 @@ function safeParse(raw) {
 }
 
 export function readActiveGenerations(storage) {
+  if (!storage) return []
   try {
-    const raw = safeParse(storage?.getItem(ACTIVE_GENERATION_KEY))
-    return (Array.isArray(raw) ? raw : raw ? [raw] : []).filter(v=>v?.messageId).map(v=>({
-      person:String(v.person||''), conversationId:String(v.conversationId||''), messageId:String(v.messageId), at:Number(v.at)||0
+    const v = safeParse(storage.getItem(ACTIVE_GENERATION_KEY))
+    return (Array.isArray(v) ? v : v ? [v] : []).filter(x => x && String(x.messageId || '')).map(x => ({
+      person: String(x.person || ''), conversationId: String(x.conversationId || ''),
+      messageId: String(x.messageId), at: Number(x.at) || 0,
     }))
   } catch { return [] }
 }
 
 export function readActiveGeneration(storage) {
-  return readActiveGenerations(storage).at(-1) || null
+  return readActiveGenerations(storage)[0] || null
 }
 
 export function startGeneration(storage, info = {}, now = Date.now()) {
   if (!storage || !String(info.messageId || '')) return false
   try {
-    const entry = {person:String(info.person||''),conversationId:String(info.conversationId||''),messageId:String(info.messageId),at:Number(now)||Date.now()}
-    const entries = readActiveGenerations(storage).filter(v=>v.person!==entry.person || v.conversationId!==entry.conversationId)
-    storage.setItem(ACTIVE_GENERATION_KEY, JSON.stringify([...entries,entry]))
+    const entry = {person:String(info.person || ''), conversationId:String(info.conversationId || ''), messageId:String(info.messageId), at:Number(now)||Date.now()}
+    const rows = readActiveGenerations(storage).filter(x => x.messageId !== entry.messageId)
+    storage.setItem(ACTIVE_GENERATION_KEY, JSON.stringify([...rows, entry]))
     return true
   } catch { return false }
 }
@@ -37,10 +39,10 @@ export function startGeneration(storage, info = {}, now = Date.now()) {
 export function finishGeneration(storage, messageId) {
   if (!storage || !messageId) return false
   try {
-    const entries = readActiveGenerations(storage)
-    const remaining = entries.filter(v=>v.messageId!==String(messageId))
-    if (entries.length===remaining.length) return false
-    if (remaining.length) storage.setItem(ACTIVE_GENERATION_KEY,JSON.stringify(remaining))
+    const rows = readActiveGenerations(storage)
+    const next = rows.filter(x => x.messageId !== String(messageId))
+    if (rows.length === next.length) return false
+    if (next.length) storage.setItem(ACTIVE_GENERATION_KEY, JSON.stringify(next))
     else storage.removeItem(ACTIVE_GENERATION_KEY)
     return true
   } catch { return false }
