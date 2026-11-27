@@ -352,21 +352,16 @@ async function handleModels(init) {
 // ── 本地 MCP 客户端：JSON-RPC over Streamable HTTP ─────────────────────────
 // WebView 里直接 fetch 会被远端 CORS 拦，所以优先走 Android 原生桥 AiHomeSystem.httpPost；
 // 浏览器里退回 fetch（能否连通取决于对方是否允许跨域）。
-function mcpHttp(url, headers, body) {
-  const sys = typeof window !== 'undefined' ? window.AiHomeSystem : null
-  if (sys && typeof sys.httpPost === 'function') {
-    const raw = sys.httpPost(url, JSON.stringify(headers || {}), body)
-    let parsed
-    try { parsed = JSON.parse(raw) } catch { throw new Error('原生网络桥返回异常') }
-    if (parsed.error) throw new Error(parsed.error)
-    return parsed
+async function mcpHttp(url, headers, body) {
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), 30000)
+  try {
+    const res = await directModelFetch(url, {method:'POST', headers, body, signal:controller.signal})
+    const hs = Object.fromEntries(res.headers.entries())
+    return {status:res.status, headers:hs, body:await res.text()}
+  } finally {
+    clearTimeout(timer)
   }
-  return fetch(url, { method: 'POST', headers, body }).then(async (res) => {
-    const text = await res.text()
-    const hs = {}
-    res.headers.forEach((v, k) => { hs[k.toLowerCase()] = v })
-    return { status: res.status, headers: hs, body: text }
-  })
 }
 
 function mcpParse(text) {
