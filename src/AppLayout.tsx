@@ -9,8 +9,6 @@ import { LEGACY_ASSISTANTS, migrateLocalStorage } from './assistantIdentity'
 import './AppLayout.css'
 import { IconBook, IconPlug, IconBack, IconChevronRight, IconClose, IconHome, IconChat, IconMenu, IconPlus, IconSend, IconStop, IconSettings } from './icons'
 import { settingItems } from './layout/sections'
-import { ProviderSettings } from './ProviderSettings'
-import type { Vendor } from './vendors.mjs'
 import { SoftSelect } from './SoftSelect'
 import { confirmDialog } from './uiDialog'
 import { pushBackHandler } from './backStack.mjs'
@@ -34,15 +32,12 @@ type AppLayoutProps = {
   renderSubscription?:()=>ReactNode
   renderUsage?:()=>ReactNode
   renderTasks?:(person:string)=>ReactNode
-  renderWorkspace?: () => ReactNode
   renderSystem?: () => ReactNode
   renderRoomScene?: (person: string, onAction: (action: string) => void) => ReactNode
   renderSettings?: (section: string, person: string) => ReactNode
   renderProfile?: (person: string) => ReactNode
   renderBackup?: () => ReactNode
   renderResource?:(kind:'world'|'mcp')=>ReactNode
-  vendors?:Vendor[]
-  onSaveVendors?:(next:Vendor[])=>void
   renderBinding?: (kind:'world'|'mcp')=>ReactNode
   assistants?: AssistantView[]
   conversations?: Record<string,ConversationView[]>
@@ -308,7 +303,7 @@ export default function AppLayout(props:AppLayoutProps = {}) {
           {section === 'AI 用量账本' ? props.renderUsage?.() :
             section === '安卓原生设置' ? props.renderSystem?.() :
             <SettingsContent key={section} section={section} selected={subsection} onSelect={setSubsection} render={tab=>{
-              if(tab==='中转') return <ProviderSettings vendors={props.vendors||[]} onSave={next=>props.onSaveVendors?.(next)}/>
+              if(tab==='中转') return props.renderSettings?.('中转',person)
               if(tab==='订阅账号') return props.renderSubscription?.()
               if(tab==='世界书'||tab==='MCP') return props.renderResource?.(tab==='世界书'?'world':'mcp')
               if(tab==='备份与恢复') return props.renderBackup?.()
