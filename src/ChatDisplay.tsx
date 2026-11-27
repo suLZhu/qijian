@@ -50,15 +50,13 @@ export function ChatDisplaySettings({ compact = false }: { compact?: boolean } =
       <Option checked={prefs.token} label="Token 用量" onChange={(v) => patch('token', v)}/>
     </div>
 
-    <section className="chat-thinking-settings" aria-label="思考模式与工具调用">
+    <section className="chat-thinking-settings" aria-label="思考模式">
       <h3>思考模式</h3>
       <p className="muted">只展示模型接口实际返回的思考内容；默认折叠，不会生成或猜测隐藏推理。</p>
       <Option checked={prefs.showReasoning} label="显示思考过程（折叠卡片）" onChange={v=>patch('showReasoning',v)}/>
       {!compact && <>
       <Option checked={prefs.autoTranslateReasoning} label="自动翻译英文思考内容（需额外请求）" onChange={v=>patch('autoTranslateReasoning',v)}/>
       <Option checked={prefs.showReasoningDuration} label="显示思考耗时" onChange={v=>patch('showReasoningDuration',v)}/>
-      <h3>工具调用</h3>
-      <Option checked={prefs.showToolCalls} label="显示工具调用记录（折叠卡片）" onChange={v=>patch('showToolCalls',v)}/>
       </>}
       {!compact&&<><label className="chat-tool-limit">连续工具调用最大轮数
         <select value={prefs.toolRoundLimit} onChange={e=>patch('toolRoundLimit',Number(e.target.value))}>
