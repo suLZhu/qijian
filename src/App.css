@@ -388,9 +388,9 @@ html{-webkit-text-size-adjust:none;text-size-adjust:none}
    （会画成一条横线 / 要等重绘才出现），文字永远可靠。 */
 .message-action{position:relative;display:inline-flex;align-items:center;justify-content:center;width:30px;height:22px;padding:0;border:none;background:transparent;color:var(--muted);border-radius:7px;cursor:pointer;line-height:1}
 /* 图标用位图而不是内联 SVG：部分 Android WebView 画不出 SVG，位图一定渲染 */
-.message-action-icon{display:block;width:16px;height:16px;pointer-events:none}
+
 .message-action::before{content:"";position:absolute;inset:-9px -4px}
-.message-action svg{width:15px;height:15px;display:block}
+
 .message-action:disabled{opacity:.35;cursor:default}
 .message-action:not(:disabled):hover{background:var(--accent-soft,#f1ecfb);color:var(--accent,#7a5cd0)}
 .message-action-done{font-size:12px;line-height:1;color:var(--accent,#7a5cd0)}
@@ -1292,11 +1292,11 @@ html:has(.model-sheet-backdrop) .shell .mobile-menu-toggle.sidebar-edge-handle{o
 .shell .model-sheet-grabber{flex:0 0 auto;display:grid;place-items:center;width:100%;height:26px;padding:0!important;border:0!important;border-radius:0!important;background:transparent!important;box-shadow:none!important}
 .shell .model-sheet-grabber i{display:block;width:38px;height:4px;border-radius:999px;background:var(--line,#dcd3c7)}
 .shell .model-sheet-search{flex:0 0 auto;display:flex;align-items:center;gap:9px;height:46px;margin:2px 16px 8px;padding:0 12px!important;border:1px solid var(--line,#e6ded2)!important;border-radius:16px!important;background:var(--card,#fffdf9)!important;box-shadow:none!important;color:var(--muted,#8a8378)}
-.shell .model-sheet-search>svg{flex:0 0 auto}
+
 #model-sheet-search-input{flex:1;min-width:0;height:100%;padding:0!important;border:0!important;border-radius:0!important;background:transparent!important;box-shadow:none!important;outline:none!important;font-size:14px;color:var(--ink,#403b35)!important}
 #model-sheet-search-input::placeholder{color:var(--muted,#a39a8c)}
 .shell .model-sheet-search button{flex:0 0 auto;display:grid;place-items:center;padding:4px 5px!important;border:0!important;border-radius:8px!important;background:transparent!important;box-shadow:none!important;color:var(--muted,#8a8378);font-size:15px;line-height:1}
-.shell .model-sheet-search button svg{display:block}
+
 .shell .model-sheet-key{flex:0 0 auto;display:flex;align-items:center;justify-content:flex-end;gap:5px;margin:0 18px 2px;font-size:10px;color:var(--muted,#8a7d6d)}
 .shell .model-sheet-key>span{flex:0 0 auto;opacity:.75}
 .shell .model-sheet-key select{flex:0 1 auto;min-width:0;max-width:72%;padding:2px 4px!important;border:0!important;border-radius:6px!important;background:transparent!important;box-shadow:none!important;font-size:10px;color:var(--muted,#8a7d6d)!important}
@@ -1574,7 +1574,7 @@ html[data-keyboard-native="open"] .shell.shell-chat-lock{padding-bottom:var(--ap
 .shell #subscription-accounts .account-row-menu button{border:1px solid #eeeae4!important;border-radius:999px!important;background:#fff!important;font-size:10.5px;color:#8e867b}
 
 /* 其余组件里残留的原生 select：控件外观统一，去掉老式粗框 */
-.shell select{appearance:none!important;-webkit-appearance:none!important;padding:6px 28px 6px 10px!important;border:1px solid #e8e2da!important;border-radius:10px!important;background-color:#fffdfa!important;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24'%3E%3Cpath d='m6 9 6 6 6-6' fill='none' stroke='%23a0988c' stroke-width='2' stroke-linecap='round'/%3E%3C/svg%3E")!important;background-repeat:no-repeat!important;background-position:right 9px center!important;box-shadow:none!important;font-size:11.5px;color:#4b443c}
+.shell select{appearance:none!important;-webkit-appearance:none!important;padding:6px 28px 6px 10px!important;border:1px solid #e8e2da!important;border-radius:10px!important;background-color:#fffdfa!important;background-image:url("/ui-icons/chevron-down.png")!important;background-repeat:no-repeat!important;background-position:right 9px center!important;background-size:12px 12px!important;box-shadow:none!important;font-size:11.5px;color:#4b443c}
 .shell select:disabled{opacity:.5}
 
 /* 换成 SoftSelect 后，旧规则里针对 select 元素的外框不要再加到外层容器上，避免双框 */
@@ -1670,7 +1670,7 @@ html[data-keyboard-native="open"] .shell.shell-chat-lock{padding-bottom:var(--ap
 .shell .fullscreen-chat .compose-box button.compose-attach{
   width:42px!important;height:42px!important;min-width:42px!important;border-radius:12px!important;
 }
-.shell .fullscreen-chat .compose-box button.compose-tool-icon svg{width:17px!important;height:17px!important}
+
 .shell .fullscreen-chat .compose-box button.compose-attach{font-size:20px!important;line-height:1!important}
 .shell .fullscreen-chat .compose-box .send-button{min-height:40px!important;padding:0 14px!important}
 .shell .fullscreen-chat .compose-box .compose-icons{gap:2px;flex:0 0 auto}
@@ -1684,7 +1684,7 @@ html[data-keyboard-native="open"] .shell.shell-chat-lock{padding-bottom:var(--ap
 .compose-sheet-grid>button{display:flex;align-items:center;gap:10px;text-align:left;padding:10px;border:1px solid var(--line,#e5dfe5);border-radius:12px;background:var(--field,#f8f5fa);color:var(--ink,#39342e);min-height:56px;cursor:pointer}
 .compose-sheet-grid>button:hover{background:var(--accent-soft,#f1ecfb)}
 .compose-sheet-icon{display:inline-grid;place-items:center;flex:0 0 34px;width:34px;height:34px;border-radius:10px;background:var(--surface,#fff);color:var(--accent,#7a5cd0);font-size:17px}
-.compose-sheet-icon svg{width:19px;height:19px}
+
 .compose-sheet-label{display:flex;flex-direction:column;gap:2px;min-width:0}
 .compose-sheet-label b{font-size:12.5px;font-weight:600}
 .compose-sheet-label small{font-size:10px;color:var(--muted,#8b858b);line-height:1.35}
@@ -2184,13 +2184,13 @@ html[data-keyboard-native="open"] .shell.shell-chat-lock{padding-bottom:var(--ap
 .home-empty{margin:0;padding:15px 14px;border:1px dashed var(--line,#e6ded2);border-radius:14px;color:var(--muted,#8c8176);font-size:11.5px;line-height:1.6}
 .home-quick{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}
 .home-quick button{display:flex;flex-direction:column;align-items:center;gap:6px;padding:12px 4px;border:1px solid var(--line,#e6ded2);border-radius:14px;background:var(--card,#fffdf9);color:var(--ink,#403b35);font-size:11px;transition:transform .12s ease}
-.home-quick button svg{color:var(--accent,#8871a5)}
+
 .home-quick button:active{transform:scale(.97)}
 
 /* 底部导航：图标 + 文字，四格等分（主页 / 房间 / 我的 / 设置） */
 .shell .bottom-nav{gap:2px;padding:6px 8px max(8px,var(--app-safe-bottom));justify-content:space-between}
 .shell .bottom-nav button{display:flex;flex:1;flex-direction:column;align-items:center;justify-content:center;gap:3px;min-height:48px;padding:5px 4px;border:0;border-radius:12px;background:transparent;color:var(--muted,#8c8176);font-size:10.5px;font-weight:500;text-decoration:none}
-.shell .bottom-nav button svg{width:21px;height:21px}
+
 .shell .bottom-nav .active{color:var(--accent,#8871a5);background:var(--accent-soft,#efe9f3);font-weight:600;text-decoration:none}
 
 /* 「我的」页脚注：不用 home-note 的绝对定位，避免压住底部导航 */
@@ -2233,7 +2233,6 @@ html[data-keyboard-native="open"] .shell.shell-chat-lock{padding-bottom:var(--ap
 .dock-nav button b{font-weight:500}
 .dock-nav button.on{background:var(--user-bubble,#e7dfd1);color:var(--ink,#403b35)}
 .dock-nav button.on b{font-weight:600}
-.dock-nav button svg{width:17px;height:17px}
 
 /* 左上「百宝箱」按钮：从贴边细把手换成带文字的胶囊 */
 .shell .mobile-menu-toggle{border-radius:12px;background:color-mix(in srgb,var(--surface,#f5f0e6) 88%,transparent);color:var(--ink,#403b35);border:1px solid var(--line,#ddd5c7);box-shadow:0 4px 14px #38273b0f;backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);padding:8px 12px;gap:6px;font-size:12px}
@@ -2522,7 +2521,7 @@ html[data-keyboard-native="open"] .shell.shell-chat-lock{padding-bottom:var(--ap
 
 /* 助手切换按钮显示文字，不再空圆 */
 .shell .room-person-toggle{width:auto!important;min-width:44px;height:34px!important;padding:0 12px!important;border-radius:999px!important;display:inline-flex!important;align-items:center;gap:4px}
-.shell .room-person-toggle svg{display:none!important}
+
 .shell .room-person-toggle small{display:inline!important;font-size:11px!important;color:inherit!important}
 
 /* 侧边栏占 2/3 屏；设置固定在底部 */
@@ -3932,7 +3931,7 @@ body.has-pack .shell .ap-avatar-bar button{background:transparent!important;bord
 }
 
 /* 功能图标固定线性 SVG；主题只改语义色，不替换图形。 */
-.shell svg{color:currentColor}
+
 .ui-icon-inline{display:inline-block;vertical-align:-.17em;flex:0 0 auto}
 .shell .settings-row-icon,
 .shell .sidebar-logo,
@@ -3967,20 +3966,13 @@ body.has-pack .shell .ap-avatar-bar button{background:transparent!important;bord
 .shell .danger:not(.armed) svg,
 .shell button.danger svg,
 .shell .widget-delete svg,
-.shell .theme-pack-del:hover svg{
-  color:var(--icon-danger,var(--danger,#ac5f68));
-}
+
 .shell .ok svg,
 .shell .success svg,
 .shell .done svg,
-.shell .account-login-btn.done svg{
-  color:var(--icon-ok,var(--ok,#4f7d62));
-}
+
 .shell .warning svg,
 .shell .warn svg,
-.shell .pending-card-warn svg{
-  color:var(--icon-warning,var(--warning,#a87935));
-}
 
 /* 控件底板统一：图标按钮仍可保持透明，普通按钮按 secondary token。 */
 .shell .settings-back,
@@ -4066,15 +4058,12 @@ body.has-pack .settings-screen{
 
 /* 模型能力胶囊里的新线性图标保持小尺寸且与文字同色。 */
 .model-chip-modalities{display:inline-flex;align-items:center;gap:3px}
-.model-chip-modalities svg,.model-chip svg{flex:0 0 auto}
+
 .model-chip-textmod{font-size:10px;line-height:1;font-weight:600}
 
 /* 图标按钮统一点击区域，不靠字体 glyph 撑尺寸。 */
-.cp-ico svg{width:20px;height:20px}
-.emoji-tabs svg{width:16px;height:16px}
-.settings-row-icon svg{width:19px;height:19px}
-.vendor-model-brand svg{width:16px;height:16px}
-.message-action-icon{width:15px!important;height:15px!important;display:block;pointer-events:none}
+
+
 
 
 /* ── 5.1 旧组件主题收口 ──────────────────────────────────────────────

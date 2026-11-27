@@ -52,6 +52,8 @@ jobs:
           mkdir -p /tmp/qijian-lucide
           tar -xzf /tmp/lucide-static-0.468.0.tgz -C /tmp/qijian-lucide
           /tmp/qijian-icons/bin/python scripts/generate-ui-icons.py /tmp/qijian-lucide/package
+      - name: Reject legacy icon renderers
+        run: node tests/icon-system-guard.mjs
       - name: Type-check and build web assets
         run: npm run build
       - name: Run vision, backup and time regression tests

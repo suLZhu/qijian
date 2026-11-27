@@ -364,7 +364,7 @@ body.has-pack .shell::before{display:none!important}
 }
 .shell .settings-row-icon img{width:18px!important;height:18px!important}
 .shell .vendor-model-brand img{width:15px!important;height:15px!important}
-.shell .message-action-icon{width:15px!important;height:15px!important}
+
 
 /* 聊天也先回到最朴素：白底，消息之间靠留白；输入区仅顶线分隔。 */
 .shell .chat-header{
@@ -722,15 +722,7 @@ html,body{
   vertical-align:-.16em!important;
   line-height:0!important;
 }
-.shell .ui-icon-image>img{
-  display:block!important;
-  max-width:none!important;
-  max-height:none!important;
-  opacity:1!important;
-  visibility:visible!important;
-  filter:none!important;
-  pointer-events:none!important;
-}
+
 
 /* 首页给菜单独立留出一整行，时钟绝不再钻到按钮下面。 */
 .shell .mobile-menu-toggle:not(.sidebar-edge-handle){
@@ -1217,12 +1209,7 @@ html,body{
   width:16px!important;
   height:16px!important;
 }
-.shell .vendor-model-brand .ui-icon-image>img{
-  max-width:none!important;
-  max-height:none!important;
-  width:auto!important;
-  height:16px!important;
-}
+
 .shell .vendor-model-card{
   gap:7px!important;
 }
