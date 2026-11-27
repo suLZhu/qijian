@@ -89,7 +89,7 @@ import { buildAlarmPlan } from './taskAlarms.mjs'
 import { readNotificationPrefs } from './notificationPreferences.mjs'
 import { requestWebCacheClear, registerSystemHandlers, clearConversationNotifications, systemBridgeAvailable, syncSystemChannels, syncSystemAlarms, showSystemNotification, consumePendingOpen, readNativeDelivered, setGenerationForeground, nativeTextZoomAvailable, setAppTextZoom, nativeHttpStreamAvailable, openNativeWebView} from './nativeSystem.mjs'
 import { friendlyHttpError, routeInfoFromError } from './chatHttpError.mjs'
-import { readActiveGeneration, startGeneration, finishGeneration, needsGenerationRecovery, recoverInterruptedMessages } from './generationRecovery.mjs'
+import { readActiveGenerations, startGeneration, finishGeneration, needsGenerationRecovery, recoverInterruptedMessages } from './generationRecovery.mjs'
 // 像素黑白选框/图标层必须最后导入，才能覆盖各组件自带的彩色样式。
 import './pixel.css'
 // 薄雾 Mist 收尾层：Tokens → Components → Pages 的组件层，最后加载统一视觉。
@@ -462,16 +462,19 @@ export default function App() {
   // 切后台/锁屏期间 WebView 若被系统回收，快照里会残留一条空内容的助手占位气泡。
   // 回前台或冷启动状态就绪后，只把它标成「上次回复未完成」，不覆盖已写出的内容。
   const recoverStaleGeneration = useCallback(() => {
-    const active = readActiveGeneration(localStorage)
-    if (!active || !needsGenerationRecovery(active, Object.values(sendingRef.current).some(Boolean))) return false
-    const personId = String(active.person || '')
-    const convId = String(active.conversationId || '')
-    const messageId = String(active.messageId || '')
-    finishGeneration(localStorage, messageId)
-    const patch = (list: any[]) => recoverInterruptedMessages(list, messageId).messages
-    if (convId) setConversations(old => ({ ...old, [personId]: (old[personId] || []).map(c => c.id === convId ? { ...c, messages: patch(c.messages || []) } : c) }))
-    if (!convId || activeConversationIdsRef.current[personId] === convId) setMessages(old => ({ ...old, [personId]: patch(old[personId] || []) }))
-    return true
+    let recovered = false
+    for (const active of readActiveGenerations(localStorage)) {
+      const personId = active.person
+      const convId = active.conversationId
+      const messageId = active.messageId
+      if (!needsGenerationRecovery(active, !!sendingRef.current[pendingScopeKey(personId,convId)])) continue
+      const patch = (list: any[]) => recoverInterruptedMessages(list, messageId).messages
+      if (convId) setConversations(old => ({ ...old, [personId]: (old[personId] || []).map(c => c.id === convId ? { ...c, messages: patch(c.messages || []) } : c) }))
+      if (!convId || activeConversationIdsRef.current[personId] === convId) setMessages(old => ({ ...old, [personId]: patch(old[personId] || []) }))
+      finishGeneration(localStorage, messageId)
+      recovered = true
+    }
+    return recovered
   }, [])
   // 每次渲染后把最新状态灌进处理器引用，避免原生回调拿到过期的会话状态。
   useEffect(() => {
