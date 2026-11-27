@@ -36,7 +36,6 @@ type AppLayoutProps = {
   openSettingsSignal?:number
   onViewChange?:(view:View)=>void
   renderSubscription?:()=>ReactNode
-  renderUsage?:()=>ReactNode
   renderTasks?:(person:string)=>ReactNode
   renderSystem?: () => ReactNode
   renderRoomScene?: (person: string, onAction: (action: string) => void) => ReactNode
@@ -308,7 +307,7 @@ export default function AppLayout(props:AppLayoutProps = {}) {
       </div>}
       {view === 'settings' && <div className="qj-page">
         {section ? <>
-          {section === 'AI 用量账本' ? props.renderUsage?.() :
+          {
             section === '安卓原生设置' ? props.renderSystem?.() :
             <SettingsContent key={section} section={section} selected={subsection} onSelect={setSubsection} render={tab=>{
               if(tab==='中转') return props.renderSettings?.('中转',person)
