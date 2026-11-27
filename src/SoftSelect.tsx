@@ -41,7 +41,7 @@ export function SoftSelect({ value, options, onChange, ariaLabel, className = ''
       {options.length === 0 && <p className="soft-select-empty">暂无选项</p>}
       {options.map(o => <button type="button" role="option" aria-selected={o.value === value} key={o.value}
         disabled={o.disabled} className={'soft-select-option' + (o.value === value ? ' active' : '')}
-        onClick={() => { onChange(o.value); setOpen(false) }}>
+        onClick={e => { e.preventDefault(); e.stopPropagation(); setOpen(false); onChange(o.value) }}>
         <span>{o.label}</span>{o.value === value && <b aria-hidden="true"><IconCheck size={13}/></b>}
       </button>)}
     </div>}

@@ -43,9 +43,9 @@ export function ChatDisplaySettings({ compact = false }: { compact?: boolean } =
     </label>}
     <div className="chat-display-grid">
       <Option checked={prefs.assistantAvatar} label="助手头像" onChange={(v) => patch('assistantAvatar', v)}/>
-      {!compact && <Option checked={prefs.userAvatar} label="用户头像" onChange={(v) => patch('userAvatar', v)}/>}
+      {<Option checked={prefs.userAvatar} label="用户头像" onChange={(v) => patch('userAvatar', v)}/>}
       <Option checked={prefs.assistantName} label="助手名称" onChange={(v) => patch('assistantName', v)}/>
-      {!compact && <Option checked={prefs.userName} label="用户名称" onChange={(v) => patch('userName', v)}/>}
+      {<Option checked={prefs.userName} label="用户名称" onChange={(v) => patch('userName', v)}/>}
       <Option checked={prefs.time} label="发送消息时间" onChange={(v) => patch('time', v)}/>
       <Option checked={prefs.token} label="Token 用量" onChange={(v) => patch('token', v)}/>
     </div>
@@ -60,12 +60,12 @@ export function ChatDisplaySettings({ compact = false }: { compact?: boolean } =
       <h3>工具调用</h3>
       <Option checked={prefs.showToolCalls} label="显示工具调用记录（折叠卡片）" onChange={v=>patch('showToolCalls',v)}/>
       </>}
-      <label className="chat-tool-limit">连续工具调用最大轮数
+      {!compact&&<><label className="chat-tool-limit">连续工具调用最大轮数
         <select value={prefs.toolRoundLimit} onChange={e=>patch('toolRoundLimit',Number(e.target.value))}>
           {[5,10,15,20].map(n=><option key={n} value={n}>{n} 轮</option>)}
         </select>
       </label>
-      <p className="muted">轮数是连续请求上限；单轮可能调用多个工具。提高上限可能增加用量。</p>
+      <p className="muted">轮数是连续请求上限；单轮可能调用多个工具。提高上限可能增加用量。</p></>}
     </section>
     <div className="chat-display-preview" aria-label="聊天展示实时预览">
       <span className="chat-display-preview-label">实时预览</span>

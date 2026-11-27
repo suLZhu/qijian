@@ -1,3 +1,4 @@
+import { SettingsInjection, SettingsTools } from './SettingsControls'
 import { MediaSettings } from './MediaSettings'
 import { readWeatherContext } from './weatherContext.mjs'
 import type { LedgerRound } from './usageLedger.mjs'
@@ -2353,8 +2354,8 @@ export default function App() {
     renderSystem={()=> <AndroidSystemSettings people={assistants.map(a=>a.id)} displayName={displayName} avatarOf={id=>characters[id]?.avatar||''}/>}
     renderSettings={(section,target)=>{
       if(section==='自主生活') return <ProactivePanel key={target} person={target} personLabel={displayName}/>
-      if(section==='skills') return <SettingsSkillPage people={assistants.map(a=>a.id)} displayName={displayName}/>
-      if(section==='history') return <ToolDashboard key={target} person={target} personLabel={displayName(target)}/>
+      if(section==='SKILL') return <SettingsSkillPage people={assistants.map(a=>a.id)} displayName={displayName}/>
+      if(section==='工具看板') return <ToolDashboard key={target} person={target} personLabel={displayName(target)}/>
       if(section==='web') return <WebToolSettings/>
       if(section==='外观与主题') return <>
         <label>主题包<select value={activePack?.id||''} onChange={event=>{
@@ -2364,15 +2365,17 @@ export default function App() {
         <ThemeSettings value={themePrefs} onChange={setThemePrefs}/>
         <AssistantThemeSettings personAppearance={personAppearance} setPersonAppearance={setPersonAppearance} assets={customAssets} displayName={displayName}/>
       </>
-      if(section==='模型功能') return <><MediaSettings vendors={vendors}/><VendorCenter section={modelSettingsSection} onSection={setModelSettingsSection} vendors={vendors} setVendors={setVendors} setModelProfiles={setModelProfiles} modelProfiles={modelProfiles} defaultModelId={defaultModelId} setDefaultModelId={setDefaultModelId}/></>
-      if(section==='记忆与上下文') return <>
-        <ContextSettings/>
-        <MemoryPanel key={target} person={target} personLabel={displayName(target)} personMessages={messages[target]||[]}/>
-        <ResourceLibrary only="world" worldEntries={worldEntries} setWorldEntries={setWorldEntries} modelProfiles={modelProfiles} setModelProfiles={setModelProfiles} bindings={bindings} setBindings={setBindings} displayName={displayName}/>
-      </>
-      if(section==='数据与连接') return <><TimeZoneSettings timeZone={timeZone} setTimeZone={setTimeZone}/><ApiBaseSettings onApplied={recheckAfterApiChange}/>{!isLocalMode()&&<button className="settings-logout" onClick={logout}>退出登录</button>}</>
-      if(section==='关于栖间') return <><BrandAbout/><SettingsGuidePage/></>
-      if(section==='诊断与维护') return <><RequestDiagnostics/><WebCacheSettings/><AppUpdateCard/><AndroidSystemSettings people={assistants.map(a=>a.id)} displayName={displayName} avatarOf={id=>characters[id]?.avatar||''}/><ToolDashboard key={target} person={target} personLabel={displayName(target)}/></>
+      if(section==='聊天模型') return <VendorCenter section={modelSettingsSection} onSection={setModelSettingsSection} vendors={vendors} setVendors={setVendors} setModelProfiles={setModelProfiles} modelProfiles={modelProfiles} defaultModelId={defaultModelId} setDefaultModelId={setDefaultModelId}/>
+      if(section==='生图'||section==='视频'||section==='语音') return <MediaSettings vendors={vendors} fixedMode={section==='生图'?'image':section==='视频'?'video':'audio'}/>
+      if(section==='听觉') return <p>待开发</p>
+      if(section==='上下文') return <ContextSettings/>
+      if(section==='记忆管理') return <MemoryPanel key={target} person={target} personLabel={displayName(target)} personMessages={messages[target]||[]}/>
+      if(section==='信息注入') return <><TimeZoneSettings timeZone={timeZone} setTimeZone={setTimeZone}/><SettingsInjection/></>
+      if(section==='工具与扩展') return <SettingsTools/>
+      if(section==='可选云同步') return <><ApiBaseSettings onApplied={recheckAfterApiChange}/>{!isLocalMode()&&<button className="settings-logout" onClick={logout}>退出登录</button>}</>
+      if(section==='关于栖间') return <><AppUpdateCard/><SettingsGuidePage/></>
+      if(section==='请求诊断') return <RequestDiagnostics/>
+      if(section==='缓存') return <WebCacheSettings/>
       return null
     }}
     renderRoomScene={(target, onAction)=> <RoomDecoration key={target} person={target} onAction={onAction}/>}

@@ -11,7 +11,7 @@ import { IconBook, IconPlug, IconBack, IconChevronRight, IconClose, IconHome, Ic
 import { settingItems } from './layout/sections'
 import { ProviderSettings } from './ProviderSettings'
 import type { Vendor } from './vendors.mjs'
-import { AdvancedSettings } from './AdvancedSettings'
+import { SoftSelect } from './SoftSelect'
 import { confirmDialog } from './uiDialog'
 import { pushBackHandler } from './backStack.mjs'
 import { RoomWidgets } from './RoomWidgets'
@@ -112,7 +112,8 @@ export default function AppLayout(props:AppLayoutProps = {}) {
   const [clock,setClock]=useState(()=>new Date())
   useEffect(()=>{const timer=window.setInterval(()=>setClock(new Date()),15000);return()=>window.clearInterval(timer)},[])
   const [drawer, setDrawer] = useState(false)
-  const [section, setSection] = useState<string | null>(()=>{try{if(sessionStorage.getItem('ai-home.afterRestoreSection')==='data'){sessionStorage.removeItem('ai-home.afterRestoreSection');return '应用与设备'}}catch{}return null})
+  const [section, setSection] = useState<string | null>(()=>{try{if(sessionStorage.getItem('ai-home.afterRestoreSection')==='data'){sessionStorage.removeItem('ai-home.afterRestoreSection');return '数据与连接'}}catch{}return null})
+  const [subsection,setSubsection]=useState('')
   const [toolsOpen, setToolsOpen] = useState(false)
   const [pendingEdit,setPendingEdit]=useState<{scope:string;text:string}|null>(null)
   const [bindingPanel,setBindingPanel]=useState<'world'|'mcp'|null>(null)
@@ -211,6 +212,7 @@ export default function AppLayout(props:AppLayoutProps = {}) {
 
   function openSection(name: string) {
     if (view === 'settings' && !section) settingsScrollRef.current = mainRef.current?.scrollTop || 0
+    setSubsection('')
     setSection(name)
   }
 
@@ -295,7 +297,7 @@ export default function AppLayout(props:AppLayoutProps = {}) {
           else if(action==='settings') go('settings')
           else if(action==='world'||action==='mcp') {
             go('settings')
-            setSection(action==='world'?'记忆与上下文':'工具与扩展')
+            setSection('世界书与 MCP'); setSubsection(action==='world'?'世界书':'MCP')
           }
         })}
         <button className="qj-row" onClick={() => go('profile')}><span>助手档案</span><i><IconChevronRight size={15}/></i></button>
@@ -303,21 +305,20 @@ export default function AppLayout(props:AppLayoutProps = {}) {
       </div>}
       {view === 'settings' && <div className="qj-page">
         {section ? <>
-          {section === '供应商' ? <ProviderSettings vendors={props.vendors||[]} onSave={next=>props.onSaveVendors?.(next)}/> :
-            section === '订阅' ? props.renderSubscription?.() :
-            section === 'AI 用量账本' ? props.renderUsage?.() :
-            section === '模型功能' ? props.renderSettings?.(section,person) :
-            section === '定时任务' ? <><div className="qj-feature-intro"><h2>定时任务</h2></div><div className="qj-row-group">{people.map(id=><button key={id} className="qj-row" onClick={()=>setPerson(id)}><span>{displayName(id)}</span><small>{id===person?'当前助手':'切换助手'}</small><i><IconChevronRight size={15}/></i></button>)}</div>{props.renderTasks?.(person)}</> :
-            section === '自主生活' ? <><div className="qj-row-group">{people.map(id=><button key={id} className="qj-row" onClick={()=>setPerson(id)}><span>{displayName(id)}</span><small>{id===person?'当前助手':'切换助手'}</small><i><IconChevronRight size={15}/></i></button>)}</div>{props.renderSettings?.(section,person)}</> :
-            section === '工具与扩展' ? <AdvancedSettings kind="tools" renderWorkspace={props.renderWorkspace} renderPanel={panel=>props.renderSettings?.(panel,person)} renderMcp={()=>props.renderResource?.('mcp')} /> :
-            section === '应用与设备' ? <AdvancedSettings kind="device" renderBackup={props.renderBackup} renderSystem={props.renderSystem} /> :
-            section === '记忆与上下文' ? props.renderSettings?.(section,person) :
-            section === '聊天与消息' ? <ChatDisplaySettings compact /> :
-            section === '诊断与维护' ? props.renderSettings?.(section,person) :
-            section === '房间与助手' ? <div className="qj-row-group">{people.map(id=><button key={id} className="qj-row" onClick={()=>{setPerson(id);go('profile')}}><span>{displayName(id)}</span><i><IconChevronRight size={15}/></i></button>)}</div> :
-            props.renderSettings?.(section,person)}
+          {section === 'AI 用量账本' ? props.renderUsage?.() :
+            section === '安卓原生设置' ? props.renderSystem?.() :
+            <SettingsContent key={section} section={section} selected={subsection} onSelect={setSubsection} render={tab=>{
+              if(tab==='中转') return <ProviderSettings vendors={props.vendors||[]} onSave={next=>props.onSaveVendors?.(next)}/>
+              if(tab==='订阅账号') return props.renderSubscription?.()
+              if(tab==='世界书'||tab==='MCP') return props.renderResource?.(tab==='世界书'?'world':'mcp')
+              if(tab==='备份与恢复') return props.renderBackup?.()
+              if(['定时任务','自主生活','记忆管理','工具看板'].includes(tab)) return <><SoftSelect ariaLabel="助手" value={person} options={people.map(id=>({value:id,label:displayName(id)}))} onChange={setPerson}/>{tab==='定时任务'?props.renderTasks?.(person):props.renderSettings?.(tab,person)}</>
+              if(tab==='聊天展示') return <ChatDisplaySettings compact/>
+              return props.renderSettings?.(tab,person)
+            }}/>}
+
         </> : <>
-          <div className="qj-section-head"><h2>设置中心</h2><p>常用功能在前，其他功能集中管理。</p></div>
+          
           <div className="qj-row-group">{settingItems.map(([name, desc]) => <button key={name} className="qj-row" onClick={() => openSection(name)}>
             <span>{name}</span><small>{desc}</small><i><IconChevronRight size={15}/></i></button>)}</div>
         </>}
@@ -374,4 +375,19 @@ export default function AppLayout(props:AppLayoutProps = {}) {
     </aside></div>}
     
   </div>
+}
+
+const settingTabs: Record<string,string[]> = {
+  '供应商与订阅':['中转','订阅账号'],
+  '模型功能':['聊天模型','生图','视频','语音','听觉'],
+  '聊天与消息':['聊天展示','上下文','信息注入'],
+  '世界书与 MCP':['MCP','世界书','SKILL'],
+  '主动任务':['定时任务','自主生活'],
+  '数据与连接':['备份与恢复','可选云同步'],
+  '诊断与维护':['请求诊断','工具看板','缓存'],
+}
+function SettingsContent({section,selected,onSelect,render}:{section:string;selected:string;onSelect:(v:string)=>void;render:(v:string)=>ReactNode}){
+  const tabs=settingTabs[section]||[section]
+  const current=tabs.includes(selected)?selected:tabs[0]
+  return <>{tabs.length>1&&<SoftSelect ariaLabel={section} value={current} options={tabs.map(value=>({value,label:value}))} onChange={onSelect}/>}<div key={current}>{render(current)}</div></>
 }

@@ -9,9 +9,9 @@ function load(mode:Mode):Config {
   const defaults:Config={videoFormat:'multipart',vendor:'',model:'',voice:'alloy',path:modes[mode][1]}
   try{return {...defaults,...JSON.parse(localStorage.getItem('ai-home.media.'+mode)||'{}')}}catch{return defaults}
 }
-export function MediaSettings({vendors}:{vendors:Vendor[]}) {
-  const [mode,setMode]=useState<Mode>('image')
-  return <section><h3>媒体生成</h3>{(Object.keys(modes) as Mode[]).map(k=><button key={k} aria-pressed={mode===k} onClick={()=>setMode(k)}>{modes[k][0]}</button>)}<MediaForm key={mode} mode={mode} vendors={vendors.filter(v=>v.enabled!==false&&!v.subscription&&!v.subscriptionAccountId&&!v.subscriptionChannel)}/></section>
+export function MediaSettings({vendors,fixedMode}:{vendors:Vendor[];fixedMode?:Mode}) {
+  const [mode,setMode]=useState<Mode>(fixedMode||'image')
+  return <section>{!fixedMode&&(Object.keys(modes) as Mode[]).map(k=><button key={k} aria-pressed={mode===k} onClick={()=>setMode(k)}>{modes[k][0]}</button>)}<MediaForm key={mode} mode={mode} vendors={vendors.filter(v=>v.enabled!==false&&!v.subscription&&!v.subscriptionAccountId&&!v.subscriptionChannel)}/></section>
 }
 function MediaForm({mode,vendors}:{mode:Mode;vendors:Vendor[]}) {
   const [cfg,setCfg]=useState(()=>load(mode)),[prompt,setPrompt]=useState(''),[notice,setNotice]=useState(''),[result,setResult]=useState(''),[busy,setBusy]=useState(false)
