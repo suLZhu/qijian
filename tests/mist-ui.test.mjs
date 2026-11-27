@@ -64,7 +64,7 @@ test('App 内字体大小写进 --font-scale，形状/间距 tokens 与颜色解
 
 test('聊天技术信息与正式输入栏保留功能', () => {
   const app = read('src/App.tsx')
-  const layout = read('src/LayoutPrototype.tsx')
+  const layout = read('src/AppLayout.tsx')
   assert.match(app, /summarizeTokenUsage\(m\.usage\)/)
   assert.match(app, /message-tech-body/)
   assert.match(layout, /className="qj-compose-input"/)
@@ -164,7 +164,7 @@ test('主题美化底部有微信式字体大小拉条，跟随系统字号并�
 })
 
 test('世界书与 MCP 在正式聊天入口独立绑定', () => {
-  const layout = read('src/LayoutPrototype.tsx')
+  const layout = read('src/AppLayout.tsx')
   assert.match(layout, /aria-label="世界书"/)
   assert.match(layout, /aria-label="MCP"/)
   assert.match(layout, /props\.renderBinding\?\.\(bindingPanel\)/)
@@ -173,7 +173,7 @@ test('世界书与 MCP 在正式聊天入口独立绑定', () => {
 })
 
 test('正式输入栏附件入口可选择图片文件与拍照', () => {
-  const layout = read('src/LayoutPrototype.tsx')
+  const layout = read('src/AppLayout.tsx')
   assert.match(layout, /aria-label="添加附件"/)
   assert.match(layout, /imagePicker\.current\?\.click\(\)/)
   assert.match(layout, /filePicker\.current\?\.click\(\)/)
@@ -267,4 +267,14 @@ test('本地模式真连远程 MCP：原生 HTTP 桥 + JSON-RPC 客户端', () =
   assert.doesNotMatch(local, /本地模式暂不支持连接\/执行 MCP/)
   assert.match(java, /public String httpPost\(String url, String headersJson, String body\)/)
   assert.match(java, /setRequestProperty\("Accept", "application\/json, text\/event-stream"\)/)
+})
+
+test('新版自主生活与定时任务独立接入真实组件', () => {
+  const app = read('src/App.tsx')
+  const layout = read('src/AppLayout.tsx')
+  const sections = read('src/layout/sections.ts')
+  assert.match(sections, /\['自主生活',/)
+  assert.match(layout, /section === '自主生活'/)
+  assert.match(app, /if\(section==='自主生活'\) return <ProactivePanel/)
+  assert.match(app, /renderTasks=\{target=> <TaskManager/)
 })

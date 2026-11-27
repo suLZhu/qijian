@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
 import { apiFetch } from './apiBase.mjs'
 import { blankVendor, groupModels, modelListUrl, type Vendor, type VendorModel } from './vendors.mjs'
-import './ProviderUsagePreview.css'
+import './ProviderSettings.css'
 
 function keyOf(v:Vendor){return v.keys?.[0]?.value||''}
 function withKey(v:Vendor,value:string):Vendor{
@@ -11,7 +11,7 @@ function withKey(v:Vendor,value:string):Vendor{
   return {...v,keys}
 }
 
-export function RealProviderPreview({vendors:initialVendors,onSave}:{vendors:Vendor[];onSave:(next:Vendor[])=>void}){
+export function ProviderSettings({vendors:initialVendors,onSave}:{vendors:Vendor[];onSave:(next:Vendor[])=>void}){
   const [vendors,setVendors]=useState<Vendor[]>(initialVendors)
   const [active,setActive]=useState(()=>vendors.find(v=>!v.hidden)?.id||vendors[0]?.id||'')
   const [message,setMessage]=useState('')

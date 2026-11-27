@@ -3,7 +3,7 @@ import { readWeatherContext } from './weatherContext.mjs'
 import type { LedgerRound } from './usageLedger.mjs'
 import { useCallback, useEffect, useMemo, useState, useRef, type FormEvent, type ChangeEvent } from 'react'
 import './App.css'
-import LayoutPrototype from './LayoutPrototype'
+import AppLayout from './AppLayout'
 import { Ledger } from './Ledger'
 import { Diary } from './Diary'
 import { ThemeSettings } from './ThemeSettings'
@@ -343,6 +343,7 @@ export default function App() {
   const [person, setPerson] = useState<Person>(YWX)
   const [chatOpen, setChatOpen] = useState(false)
   const [openChatSignal, setOpenChatSignal] = useState(0)
+  const [openSettingsSignal, setOpenSettingsSignal] = useState(0)
   const [drafts, setDrafts] = useState<Record<string,string>>(() => read<Record<string,string>>('ai-home.chatDrafts', {}))
   const [conversations,setConversations] = useState<Record<Person,Conversation[]>>(initialConversations)
   const [activeConversationIds,setActiveConversationIds] = useState(() => pickActiveConversationIds(conversations, read('ai-home.activeConversationIds', {})))
@@ -2321,10 +2322,17 @@ export default function App() {
   ])
   const shellVars = activePack ? Object.fromEntries(Object.entries(themeVars).filter(([k]) => !packColorKeys.has(k))) : themeVars
   const useApprovedLayout = true
-  if(useApprovedLayout) return <LayoutPrototype
+  if(useApprovedLayout) return <>
+  <AppLayout
+    modelLabel={resolveModelConfig(bindings[person]?.modelProfileId||defaultModelId||'',modelProfiles,modelConfig[person]).model||'选择模型'}
+    renderModelPicker={close=> <ModelPickerSheet profiles={modelProfiles} activeId={bindings[person]?.modelProfileId||defaultModelId||''} vendorKeys={allVendorKeys(vendors)} binding={bindings[person]||emptyBinding()} onPatchBinding={next=>setBindings(old=>({...old,[person]:next}))} onPick={id=>{setBindings(old=>({...old,[person]:{...(old[person]||emptyBinding()),modelProfileId:id}}));close()}} onClose={close} subscriptionVendorIds={vendors.filter(v=>v.subscription).map(v=>v.id)} vendors={vendors} routeState={routeState} setRouteState={setRouteState} lastRouteInfo={lastRouteInfo} person={person}/>}
+    openSettingsSignal={openSettingsSignal}
     openChatSignal={openChatSignal}
     onViewChange={view=>{setChatOpen(view==='chat');setPage(view==='home'?'home':view==='settings'||view==='theme'?'settings':'room')}}
-    assistants={assistants.map(a=>({id:a.id,name:a.name}))}
+    assistants={assistants.map(a=>({id:a.id,name:a.name,avatar:characters[a.id]?.avatar||''}))}
+    userAvatar={userSettings[person]?.avatar||''}
+    onRenameConversation={(id,title)=>setConversations(old=>({...old,[person]:(old[person]||[]).map(c=>c.id===id?{...c,title}:c)}))}
+    onTranslateReasoning={translateReasoningText}
     conversations={conversations}
     activeIds={activeConversationIds}
     person={person}
@@ -2342,8 +2350,9 @@ export default function App() {
     onSend={prototypeSend}
     renderSubscription={()=> <SubscriptionAccounts vendors={vendors} setVendors={setVendors} setModelProfiles={setModelProfiles} subscriptions={subscriptions} setSubscriptions={setSubscriptions}/>}
     renderWorkspace={()=> <WorkspaceSettings people={assistants.map(a=>a.id)} displayName={displayName} onSaved={config=>setWorkspaceConfigs(old=>({...old,[config.person]:config}))}/>}
-    renderSystem={()=> <AndroidSystemSettings people={assistants.map(a=>a.id)} displayName={displayName} avatarOf={()=>''}/>}
+    renderSystem={()=> <AndroidSystemSettings people={assistants.map(a=>a.id)} displayName={displayName} avatarOf={id=>characters[id]?.avatar||''}/>}
     renderSettings={(section,target)=>{
+      if(section==='自主生活') return <ProactivePanel key={target} person={target} personLabel={displayName}/>
       if(section==='skills') return <SettingsSkillPage people={assistants.map(a=>a.id)} displayName={displayName}/>
       if(section==='history') return <ToolDashboard key={target} person={target} personLabel={displayName(target)}/>
       if(section==='web') return <WebToolSettings/>
@@ -2353,6 +2362,7 @@ export default function App() {
           window.dispatchEvent(new Event('aihome:theme-pack'))
         }}><option value="">默认外观</option>{[...BUILTIN_THEME_PACKS,...loadThemePacks()].map(pack=><option key={pack.id} value={pack.id}>{pack.name}</option>)}</select></label>
         <ThemeSettings value={themePrefs} onChange={setThemePrefs}/>
+        <AssistantThemeSettings personAppearance={personAppearance} setPersonAppearance={setPersonAppearance} assets={customAssets} displayName={displayName}/>
       </>
       if(section==='模型功能') return <><MediaSettings vendors={vendors}/><VendorCenter section={modelSettingsSection} onSection={setModelSettingsSection} vendors={vendors} setVendors={setVendors} setModelProfiles={setModelProfiles} modelProfiles={modelProfiles} defaultModelId={defaultModelId} setDefaultModelId={setDefaultModelId}/></>
       if(section==='记忆与上下文') return <>
@@ -2360,6 +2370,8 @@ export default function App() {
         <MemoryPanel key={target} person={target} personLabel={displayName(target)} personMessages={messages[target]||[]}/>
         <ResourceLibrary only="world" worldEntries={worldEntries} setWorldEntries={setWorldEntries} modelProfiles={modelProfiles} setModelProfiles={setModelProfiles} bindings={bindings} setBindings={setBindings} displayName={displayName}/>
       </>
+      if(section==='数据与连接') return <><TimeZoneSettings timeZone={timeZone} setTimeZone={setTimeZone}/><ApiBaseSettings onApplied={recheckAfterApiChange}/>{!isLocalMode()&&<button className="settings-logout" onClick={logout}>退出登录</button>}</>
+      if(section==='关于栖间') return <><BrandAbout/><SettingsGuidePage/></>
       if(section==='诊断与维护') return <><RequestDiagnostics/><WebCacheSettings/><AppUpdateCard/><AndroidSystemSettings people={assistants.map(a=>a.id)} displayName={displayName} avatarOf={id=>characters[id]?.avatar||''}/><ToolDashboard key={target} person={target} personLabel={displayName(target)}/></>
       return null
     }}
@@ -2381,6 +2393,12 @@ export default function App() {
     onConfirmPending={()=>void flushPending(person,activeConversationIds[person]||'',true)}
     renderBinding={kind=><WorldMcpMatrix key={person+kind} mode="bind" only={kind} person={person} worldEntries={worldEntries} setWorldEntries={setWorldEntries}/>}
   />
+    {toast&&(()=>{const env=toast.kind==='task_result'?parseTaskEnvelope(toast.content):null;return <div className="inbox-toast" role="status"><button type="button" className="inbox-toast-main" onClick={()=>openInboxMessage(toast)}><b><IconMail className="ui-icon-inline" size={14}/> {displayName(toast.person)} · {env?'定时任务结果':toast.kind==='test'?'通知测试':'新消息'}</b><span>{env?env.answer||'（任务已完成，无文字总结）':toast.content}</span><small>{env?'点击查看结果会话':'点击打开聊天'}</small></button><button type="button" aria-label="收起消息" className="inbox-toast-dismiss" onClick={()=>setToast(null)}><IconClose size={15}/></button></div>})()}
+    {fallbackNotice ? <div className="cloud-status error fallback-notice" role="status"><span><IconWarning className="ui-icon-inline" size={14}/> {fallbackNotice}</span><button onClick={()=>{setFallbackNotice('');setOpenSettingsSignal(value=>value+1)}}>去设置重新连接</button><button onClick={()=>setFallbackNotice('')}>知道了</button></div> : ((!isLocalMode()||cloudStatus==='error')&&cloudStatus!=='saved' && <div className={'cloud-status '+cloudStatus} role="status"><span>{cloudStatus==='saving'?(isLocalMode()?'本地保存中…':'云端保存中…'):cloudStatus==='error'?(isLocalMode()?'本地保存失败，请检查浏览器存储空间':'云端暂不可用，本地数据已保留'):'连接云端…'}</span>{cloudStatus==='error'&&<button onClick={retryCloudConnection}>{isLocalMode()?'重试保存':'重连云端'}</button>}</div>)}
+    <UiDialogHost/>
+    <WebBrowser page={webPage} onClose={() => setWebPage(null)}/>
+    <SystemSetupSheet active={authStatus === 'signedIn'}/>
+  </>
 
   return <main className={"shell theme-"+themePrefs.theme+" bubble-"+bubbleClass+" chatbg-"+bgClass+chatViewportLock+(beautifyClass?' '+beautifyClass:'')} style={{...shellVars,...(nativeTextZoomAvailable()?{'--font-scale':'1'}:{}),...(bgUrl?{'--chat-bg-image':'url("'+bgUrl+')'}:{}),...(bgClass==='image'?{'--chat-bg-opacity':String((themePrefs.chatBgOpacity??100)/100)}:{}),...(bubbleUrl?{'--bubble-image':'url("'+bubbleUrl+')'}:{})} as any}>
     {/* 全面屏：百宝箱与历史聊天都收进左侧抽屉，默认只露一条贴边细把手，点一下才滑出。 */}
@@ -3990,6 +4008,18 @@ const resourceTab=(section.startsWith('resources:')?section.slice('resources:'.l
 }
 
 // 二级设置：两个分组名横排成小标签，点一个只显示那一个内容，不再铺两行大卡片。
+function TimeZoneSettings({timeZone,setTimeZone}:{timeZone:string;setTimeZone:(value:string)=>void}) {
+  const [tzDraft,setTzDraft]=useState<string|null>(null)
+  const tzInput=tzDraft??timeZone
+  // 时区预览用的秒级时钟：只用于刷新展示，不发网络请求。
+  const [timeTick,setTimeTick]=useState(()=>Date.now())
+  useEffect(()=>{const t=window.setInterval(()=>setTimeTick(Date.now()),30000);return()=>window.clearInterval(t)},[])
+  // 时区预览：只读展示当前时区此刻的日期/星期/时间/时段。
+  const tzPreview=buildTimeContext(new Date(timeTick),timeZone)
+  const tzError=(()=>{const raw=tzInput.trim();if(!raw)return '';try{new Intl.DateTimeFormat('en-US',{timeZone:raw});return ''}catch{return '无法识别的时区名称，请输入 IANA 时区（如 Asia/Shanghai）'}})()
+  return <div className="setting-card settings-inner-card"><b>时区（动态时间上下文）</b><p className="muted">助手感知到的日期、星期、时间与时段按此时区在服务端实时生成；默认 Asia/Shanghai（UTC+8）。只保存配置，不会获取你的位置或天气。</p><input className="memory-search" list="time-zone-options" value={tzInput} placeholder="如 Asia/Shanghai" aria-label="IANA 时区" onChange={e=>setTzDraft(e.target.value)} onBlur={()=>{if(!tzError&&tzInput.trim()){const tz=normalizeTimeZone(tzInput.trim());setTimeZone(tz);setTzDraft(null)}}}/><datalist id="time-zone-options">{['Asia/Shanghai','Asia/Hong_Kong','Asia/Taipei','Asia/Tokyo','Asia/Seoul','Asia/Singapore','Europe/London','Europe/Paris','America/New_York','America/Los_Angeles','UTC'].map(z=><option key={z} value={z}/>)}</datalist>{tzError?<p className="chat-error" style={{marginTop:8}}>{tzError}</p>:<p className="muted" style={{marginTop:8}}>当前生效：{timeZone} · 预览 {tzPreview.date} {tzPreview.weekday} {tzPreview.time}（{tzPreview.partOfDay}，{tzPreview.utcOffset}）</p>}</div>
+}
+
 function SettingsTabBar({title,items,value,onChange}:{title:string;items:Array<[string,string]>;value:string;onChange:(id:string)=>void}) {
   return <div className="settings-tabs"><b className="settings-tabs-title">{title}</b><div className="settings-tabs-row" role="tablist">{items.map(([id,label])=><button type="button" role="tab" key={id} aria-selected={value===id} className={'settings-tab'+(value===id?' active':'')} onClick={()=>onChange(id)}>{label}</button>)}</div></div>
 }

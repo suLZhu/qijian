@@ -2,7 +2,7 @@ import { useChatDisplay } from './ChatDisplay'
 import { saveChatDisplay } from './chatDisplayPrefs.mjs'
 import { useEffect, useState, type ReactNode } from 'react'
 import { AppLockSettings } from './AppLockSettings'
-import './AdvancedSettingsPreview.css'
+import './AdvancedSettings.css'
 
 type Panel = { id: string; title: string; note: string }
 
@@ -19,7 +19,7 @@ const devicePanels: Panel[] = [
   { id: 'lock', title: '应用锁', note: 'PIN、锁定名单与排除名单' },
   { id: 'backup', title: '备份与恢复', note: '导出、恢复及同步状态' },
 ]
-export function AdvancedSettingsPreview({ kind, renderMcp, renderWorkspace, renderBackup, renderSystem, renderPanel }: { kind: 'tools' | 'device'; renderMcp?: () => ReactNode; renderWorkspace?: () => ReactNode; renderBackup?: () => ReactNode; renderSystem?: () => ReactNode; renderPanel?: (panel: string) => ReactNode }) {
+export function AdvancedSettings({ kind, renderMcp, renderWorkspace, renderBackup, renderSystem, renderPanel }: { kind: 'tools' | 'device'; renderMcp?: () => ReactNode; renderWorkspace?: () => ReactNode; renderBackup?: () => ReactNode; renderSystem?: () => ReactNode; renderPanel?: (panel: string) => ReactNode }) {
   const prefs = useChatDisplay()
   const [weatherCity, setWeatherCity] = useState(prefs.weatherCity)
   const [panel, setPanel] = useState('')

@@ -3,9 +3,7 @@ name: Build Qijian Android debug APK
 on:
   push:
     branches:
-      - fix/subscription-model-selection-theme-docs
-      - fix/kelivo-provider-model-management
-      - feature/ui-clean-slate-preview
+      - develop
     paths:
       - '.github/workflows/build-qijian-debug.yml'
       - 'src/**'
@@ -70,16 +68,16 @@ jobs:
           retention-days: 14
 
       - name: Publish direct APK download for UI preview
-        if: github.ref == 'refs/heads/feature/ui-clean-slate-preview'
+        if: github.ref == 'refs/heads/develop'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           APK="$(find android/app/build/outputs/apk/debug -name '*.apk' -type f | head -1)"
           test -n "$APK"
-          TAG="ui-preview-${GITHUB_SHA:0:7}"
-          gh release create "$TAG" "$APK#qijian-layout-preview.apk" \
+          TAG="develop-test-${GITHUB_SHA:0:7}"
+          gh release create "$TAG" "$APK#qijian-develop-test.apk" \
             --repo "$GITHUB_REPOSITORY" \
             --target "$GITHUB_SHA" \
-            --title "栖间纯页面原型 ${GITHUB_SHA:0:7}" \
-            --notes "仅供安卓手机验收页面布局；模拟数据，不含真实聊天功能。" \
+            --title "栖间新版测试包 ${GITHUB_SHA:0:7}" \
+            --notes "新版真实功能接入测试包，尚未完成真机验收。" \
             --prerelease
