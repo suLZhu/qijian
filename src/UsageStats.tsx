@@ -82,7 +82,7 @@ export function UsageStats({ people, conversations, models, displayName }: {
   return <div className="usage-stats">
 
     <div className="usage-people" role="tablist" aria-label="选择助手">
-      {people.map((p) => <button type="button" role="tab" key={p} aria-selected={p === active} className={'usage-person' + (p === active ? ' active' : '')} onClick={() => setActive(p)}>{displayName(p)}</button>)}
+      <SoftSelect ariaLabel="选择助手" value={active} options={people.map(p=>({value:p,label:displayName(p)}))} onChange={setActive}/>
     </div>
     <div className="usage-summary usage-summary-rows">
       <div><small>合计花费（估算）</small><b>≈ ¥{totals.cost.toFixed(2)}</b></div>
