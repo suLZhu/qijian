@@ -25,7 +25,15 @@ import { GUIDE_BRIEF, GUIDE_MARKDOWN } from './guide.mjs'
 import { applyWebUpdate, compareVersions, currentBundle, liveUpdateSupported, notifyAppReady, resetToBuiltin } from './liveUpdate.mjs'
 import { applyPackVars, getActivePackId, loadThemePacks, normalizeThemePack, setActivePack as setStoredActivePack, upsertThemePack, type ThemePack } from './themePack.mjs'
 import { loadRoomLayout, saveRoomLayout, type RoomItem, type RoomLayout } from './roomLayout.mjs'
-import { type WorkspaceConfig } from './WorkspaceSettings'
+type WorkspaceConfig = {
+  person: string
+  root: string
+  enabled: boolean
+  allowWrite: boolean
+  allowCommand: boolean
+  updatedAt?: string | null
+  defaultRoot?: string
+}
 import { confirmDialog } from './uiDialog'
 import { CONTEXT_LIMITS, planCompaction, conversationExcerpt, buildSummarySystemMessage, searchHistory, searchMessageList } from './contextCompression.mjs'
 import { IconChat, IconClock, IconMemory, IconSparkles, IconPlus, IconBack, IconChevronRight, IconChevronDown, IconChevronUp, IconClose, IconEdit, IconTrash, IconEye, IconEyeOff, IconArrowUp, IconArrowDown, IconTest, IconSearch, IconMinus, IconWarning, IconMail, IconCheck, IconRefresh, IconGrid, IconMore, IconStar, type IconComponent } from './icons'
