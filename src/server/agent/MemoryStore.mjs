@@ -131,7 +131,7 @@ export function importMemoryRecords(db, person, records) {
     return Number.isFinite(Date.parse(text)) ? new Date(text).toISOString() : fallback
   }
   let imported = 0
-  db.exec('BEGIN')
+  db.exec('SAVEPOINT memory_import')
   try {
     for (const raw of list) {
       if (!raw || typeof raw !== 'object') continue
@@ -155,9 +155,9 @@ export function importMemoryRecords(db, person, records) {
       reindex(db, { id, person, lifecycle, title, content, keywords })
       imported++
     }
-    db.exec('COMMIT')
+    db.exec('RELEASE memory_import')
   } catch (error) {
-    db.exec('ROLLBACK')
+    db.exec('ROLLBACK TO memory_import; RELEASE memory_import')
     throw error
   }
   return { imported }

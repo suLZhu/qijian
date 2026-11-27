@@ -142,25 +142,14 @@ export function BackupCenter({ people, vendors, setVendors, setModelProfiles }: 
     if (!ok) return
     if (!isLocalMode() && payload.data?.server) {
       const server = payload.data.server
-      if ((kind.serverKeys || kindId === 'models') && server.keys && typeof server.keys === 'object') {
-        for (const [person, apiKey] of Object.entries(server.keys)) {
-          if (typeof apiKey !== 'string') continue
-          const response = await apiFetch('/api/keys', {
-            method: 'PUT', credentials: 'include', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ person, apiKey }),
-          })
-          if (!response.ok) throw new Error('服务器 Key 恢复失败，本地数据尚未覆盖；服务器可能已恢复部分内容，请核查后重试')
-        }
-      }
-      if (kind.serverMemory && server.memory && typeof server.memory === 'object') {
-        for (const [person, records] of Object.entries(server.memory)) {
-          if (!Array.isArray(records)) continue
-          const response = await apiFetch('/api/memory/import', {
-            method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ person, records }),
-          })
-          if (!response.ok) throw new Error('服务器记忆恢复失败，本地数据尚未覆盖；服务器可能已恢复部分内容，请核查后重试')
-        }
+      const keys = kind.serverKeys ? server.keys : undefined
+      const memory = kind.serverMemory ? server.memory : undefined
+      if (keys !== undefined || memory !== undefined) {
+        const response = await apiFetch('/api/backups/restore', {
+          method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ keys, memory }),
+        })
+        if (!response.ok) throw new Error('服务器恢复未完成，本地数据尚未覆盖，请检查服务器版本和备份文件')
       }
     }
     const previous = Object.fromEntries(Object.keys(local).map(key => [key, localStorage.getItem(key)]))

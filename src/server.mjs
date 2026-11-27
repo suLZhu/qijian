@@ -402,18 +402,51 @@ const apiServer = createServer(async (req, res) => {
     for (const row of rows) { try { keys[row.person] = decryptSecret(row.key_enc) } catch { /* skip undecryptable */ } }
     return send(res, 200, { keys })
   }
+  function writeApiKey(person, apiKey) {
+    if (!isValidAssistantId(person)) throw new Error('人物身份无效')
+    if (apiKey.length > 8192) throw new Error('API Key 长度超出限制')
+    if (!apiKey) {
+      db.prepare('DELETE FROM api_keys WHERE person=?').run(person)
+      return false
+    }
+    db.prepare('INSERT INTO api_keys (person,key_enc,updated_at) VALUES (?,?,?) ON CONFLICT(person) DO UPDATE SET key_enc=excluded.key_enc, updated_at=excluded.updated_at')
+      .run(person, encryptSecret(apiKey), new Date().toISOString())
+    return true
+  }
+
   if (url.pathname === '/api/keys' && req.method === 'PUT') {
     try {
-      const b = await readBody(req)
-      const person = String(b.person || '')
-      if (!isValidAssistantId(person)) return send(res, 400, { error: '人物身份无效' })
-      const apiKey = String(b.apiKey || '').trim()
-      const now = new Date().toISOString()
-      if (!apiKey) { db.prepare('DELETE FROM api_keys WHERE person=?').run(person); return send(res, 200, { ok: true, saved: false }) }
-      if (apiKey.length > 8192) return send(res, 400, { error: 'API Key 长度超出限制' })
-      db.prepare('INSERT INTO api_keys (person,key_enc,updated_at) VALUES (?,?,?) ON CONFLICT(person) DO UPDATE SET key_enc=excluded.key_enc, updated_at=excluded.updated_at').run(person, encryptSecret(apiKey), now)
-      return send(res, 200, { ok: true, saved: true })
+      const body = await readBody(req)
+      const saved = writeApiKey(String(body.person || ''), String(body.apiKey || '').trim())
+      return send(res, 200, { ok: true, saved })
     } catch (error) { return send(res, error.status || 400, { error: error.message || '保存 API Key 失败' }) }
+  }
+
+  if (url.pathname === '/api/backups/restore' && req.method === 'POST') {
+    try {
+      const { keys = {}, memory = {} } = await readBody(req)
+      const isMap = value => value && typeof value === 'object' && !Array.isArray(value)
+      if (!isMap(keys) || !isMap(memory)) throw new Error('备份数据格式无效')
+      db.exec('BEGIN')
+      try {
+        for (const [person, key] of Object.entries(keys)) {
+          if (typeof key !== 'string') throw new Error('备份 Key 格式无效')
+          writeApiKey(person, key.trim())
+        }
+        for (const [person, records] of Object.entries(memory)) {
+          if (!isValidAssistantId(person) || !Array.isArray(records)) throw new Error('备份记忆格式无效')
+          for (let offset = 0; offset < records.length; offset += 1000) {
+            const batch = records.slice(offset, offset + 1000)
+            if (importMemoryRecords(db, person, batch).imported !== batch.length) throw new Error('备份包含无效记忆')
+          }
+        }
+        db.exec('COMMIT')
+      } catch (error) {
+        db.exec('ROLLBACK')
+        throw error
+      }
+      return send(res, 200, { ok: true })
+    } catch (error) { return send(res, error.status || 400, { error: error.message || '服务器恢复失败' }) }
   }
 
   // Shared ledger for both assistants. All routes require the existing authenticated session.
