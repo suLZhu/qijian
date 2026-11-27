@@ -156,3 +156,7 @@
 .qj-chat[data-bubble='bare'] .qj-message-content>p,.qj-chat[data-bubble='bare'] .qj-message-content>.rich-text{background:none}
 .qj-chat[data-bubble='outlined'] .qj-message-content>p,.qj-chat[data-bubble='outlined'] .qj-message-content>.rich-text{background:none;border:1px solid var(--qj-line)}
 .qj-chat[data-bubble='image'] .qj-message-content>p,.qj-chat[data-bubble='image'] .qj-message-content>.rich-text{background-image:var(--qj-bubble-image);background-size:100% 100%}
+
+.qj-settings-assistant{display:flex;align-items:center;gap:12px;padding:10px 0;margin-bottom:10px;border-bottom:1px solid var(--qj-line)}
+.qj-settings-assistant>span{flex:none;white-space:nowrap;font-size:13px}
+.qj-settings-assistant>.soft-select{flex:1;min-width:0}
