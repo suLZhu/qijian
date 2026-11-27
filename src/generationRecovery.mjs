@@ -11,39 +11,39 @@ function safeParse(raw) {
   } catch { return null }
 }
 
-export function readActiveGeneration(storage) {
-  if (!storage) return null
+export function readActiveGenerations(storage) {
   try {
-    const v = safeParse(storage.getItem(ACTIVE_GENERATION_KEY))
-    if (!v || !String(v.messageId || '')) return null
-    return {
-      person: String(v.person || ''),
-      conversationId: String(v.conversationId || ''),
-      messageId: String(v.messageId || ''),
-      at: Number(v.at) || 0,
-    }
-  } catch { return null }
+    const raw = safeParse(storage?.getItem(ACTIVE_GENERATION_KEY))
+    return (Array.isArray(raw) ? raw : raw ? [raw] : []).filter(v=>v?.messageId).map(v=>({
+      person:String(v.person||''), conversationId:String(v.conversationId||''), messageId:String(v.messageId), at:Number(v.at)||0
+    }))
+  } catch { return [] }
+}
+
+export function readActiveGeneration(storage) {
+  return readActiveGenerations(storage).at(-1) || null
 }
 
 export function startGeneration(storage, info = {}, now = Date.now()) {
   if (!storage || !String(info.messageId || '')) return false
   try {
-    storage.setItem(ACTIVE_GENERATION_KEY, JSON.stringify({
-      person: String(info.person || ''),
-      conversationId: String(info.conversationId || ''),
-      messageId: String(info.messageId),
-      at: Number(now) || Date.now(),
-    }))
+    const entry = {person:String(info.person||''),conversationId:String(info.conversationId||''),messageId:String(info.messageId),at:Number(now)||Date.now()}
+    const entries = readActiveGenerations(storage).filter(v=>v.person!==entry.person || v.conversationId!==entry.conversationId)
+    storage.setItem(ACTIVE_GENERATION_KEY, JSON.stringify([...entries,entry]))
     return true
   } catch { return false }
 }
 
 export function finishGeneration(storage, messageId) {
-  if (!storage) return false
-  const active = readActiveGeneration(storage)
-  // 只有本次请求自己才能清标记，避免旧请求覆盖新请求。
-  if (active && String(messageId || '') && active.messageId !== String(messageId)) return false
-  try { storage.removeItem(ACTIVE_GENERATION_KEY); return true } catch { return false }
+  if (!storage || !messageId) return false
+  try {
+    const entries = readActiveGenerations(storage)
+    const remaining = entries.filter(v=>v.messageId!==String(messageId))
+    if (entries.length===remaining.length) return false
+    if (remaining.length) storage.setItem(ACTIVE_GENERATION_KEY,JSON.stringify(remaining))
+    else storage.removeItem(ACTIVE_GENERATION_KEY)
+    return true
+  } catch { return false }
 }
 
 export function needsGenerationRecovery(active, sending) {
