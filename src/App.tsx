@@ -2322,8 +2322,7 @@ export default function App() {
     '--wallpaper','--wallpaper-opacity','--theme-font-family',
   ])
   const shellVars = activePack ? Object.fromEntries(Object.entries(themeVars).filter(([k]) => !packColorKeys.has(k))) : themeVars
-  const useApprovedLayout = true
-  if(useApprovedLayout) return <>
+  return <>
   <AppLayout
     modelLabel={resolveModelConfig(bindings[person]?.modelProfileId||defaultModelId||'',modelProfiles,modelConfig[person]).model||'选择模型'}
     renderModelPicker={close=> <ModelPickerSheet profiles={modelProfiles} activeId={bindings[person]?.modelProfileId||defaultModelId||''} vendorKeys={allVendorKeys(vendors)} binding={bindings[person]||emptyBinding()} onPatchBinding={next=>setBindings(old=>({...old,[person]:next}))} onPick={id=>{setBindings(old=>({...old,[person]:{...(old[person]||emptyBinding()),modelProfileId:id}}));close()}} onClose={close} subscriptionVendorIds={vendors.filter(v=>v.subscription).map(v=>v.id)} vendors={vendors} routeState={routeState} setRouteState={setRouteState} lastRouteInfo={lastRouteInfo} person={person}/>}
@@ -2358,10 +2357,6 @@ export default function App() {
       if(section==='工具看板') return <ToolDashboard key={target} person={target} personLabel={displayName(target)}/>
       if(section==='web') return <WebToolSettings/>
       if(section==='外观与主题') return <>
-        <label>主题包<select value={activePack?.id||''} onChange={event=>{
-          setStoredActivePack(event.target.value)
-          window.dispatchEvent(new Event('aihome:theme-pack'))
-        }}><option value="">默认外观</option>{[...BUILTIN_THEME_PACKS,...loadThemePacks()].map(pack=><option key={pack.id} value={pack.id}>{pack.name}</option>)}</select></label>
         <ThemeSettings value={themePrefs} onChange={setThemePrefs}/>
         <AssistantThemeSettings personAppearance={personAppearance} setPersonAppearance={setPersonAppearance} assets={customAssets} displayName={displayName}/>
       </>
@@ -2403,77 +2398,7 @@ export default function App() {
     <SystemSetupSheet active={authStatus === 'signedIn'}/>
   </>
 
-  return <main className={"shell theme-"+themePrefs.theme+" bubble-"+bubbleClass+" chatbg-"+bgClass+chatViewportLock+(beautifyClass?' '+beautifyClass:'')} style={{...shellVars,...(nativeTextZoomAvailable()?{'--font-scale':'1'}:{}),...(bgUrl?{'--chat-bg-image':'url("'+bgUrl+')'}:{}),...(bgClass==='image'?{'--chat-bg-opacity':String((themePrefs.chatBgOpacity??100)/100)}:{}),...(bubbleUrl?{'--bubble-image':'url("'+bubbleUrl+')'}:{})} as any}>
-    {/* 全面屏：百宝箱与历史聊天都收进左侧抽屉，默认只露一条贴边细把手，点一下才滑出。 */}
-    {/* 全面屏：主页显示完整「菜单」胶囊；进入房间/会话等页面自动收成贴边细把手，点一下才滑出。 */}
-    {page!=='settings'&&(()=>{
-      const edge=page!=='home'
-      return <button type="button" className={'mobile-menu-toggle'+(edge?' sidebar-edge-handle':'')+(edge&&sidebarOpen?' moved':'')} aria-label={sidebarOpen?'收起菜单':'打开菜单'} aria-expanded={sidebarOpen} onClick={()=>setSidebarOpen(v=>!v)}><span aria-hidden="true"><IconMenu size={17}/></span>{edge?null:<b>菜单</b>}</button>
-    })()}
-    {sidebarOpen&&<button type="button" className="sidebar-scrim" aria-label="关闭侧边栏" onClick={()=>setSidebarOpen(false)}/>}
-    <aside className={"app-sidebar"+(sidebarOpen?' sidebar-open':'')} aria-hidden={!sidebarOpen}>
-      <div className="sidebar-brand"><div className="sidebar-logo"><IconFlower size={17}/></div><div><b>侧边栏</b><small>HISTORY &amp; TOOLS</small></div><button className="sidebar-close" aria-label="收起侧边栏" onClick={()=>setSidebarOpen(false)}><IconClose size={15}/></button></div>
-      <div className="sidebar-scroll">
-        <section className="sidebar-section sidebar-nav">
-          <button type="button" className={'sidebar-nav-row'+(page==='home'?' active':'')} onClick={()=>{setSidebarOpen(false);navigate('home')}}><IconHome size={16}/><b>主页</b><small>概览 / 未读</small></button>
-          <button type="button" className={'sidebar-nav-row'+(page==='room'?' active':'')} onClick={()=>{setSidebarOpen(false);setPage('room');setActiveTool('');setChatOpen(false)}}><IconChat size={16}/><b>房间</b><small>聊天与工具</small></button>
-          <button type="button" className="sidebar-nav-row" onClick={()=>{setSidebarOpen(false);setPage('room');setChatOpen(false);setActiveTool('记忆面板')}}><span aria-hidden="true"><IconMemory size={17}/></span><b>记忆库</b><small>{displayName(person)}</small></button>
-        </section>
-        <section className="sidebar-section sidebar-combined">
-          <div className="sidebar-combined-card">
-            <div className="sidebar-combined-head"><b>历史聊天</b><small>{displayName(person)}</small></div>
-            <div className="sidebar-conv-list">
-              {drawerConvs.map((c:Conversation)=>(
-                <div className={'sidebar-conv-row'+(c.id===drawerActiveId?' active':'')} key={c.id}>
-                  {drawerRenameId===c.id
-                    ? <input className="sidebar-conv-input" autoFocus value={drawerRenameDraft} onChange={e=>setDrawerRenameDraft(e.target.value)} onKeyDown={e=>{if(e.key==='Enter')drawerRename(c.id);if(e.key==='Escape')setDrawerRenameId(null)}} onBlur={()=>drawerRename(c.id)} aria-label="重命名会话"/>
-                    : <button type="button" className="sidebar-conv-name" onClick={()=>drawerSwitch(c.id)}>{c.title||'新对话'}</button>}
-                  <button type="button" className="sidebar-conv-edit" aria-label={'重命名 '+(c.title||'新对话')} title="重命名" onClick={()=>{setDrawerRenameId(c.id);setDrawerRenameDraft(c.title||'')}}><IconEdit size={14}/></button>
-                  <button type="button" className="sidebar-conv-del" aria-label={'删除 '+(c.title||'新对话')} title="删除会话" onClick={()=>void drawerDelete(c.id)}><IconClose size={15}/></button>
-                </div>
-              ))}
-            </div>
-            <button type="button" className="sidebar-conv-new" onClick={drawerCreate}><IconPlus className="ui-icon-inline" size={14}/> 新建对话</button>
-            <div className="sidebar-combined-sep" aria-hidden="true"/>
-            <div className="sidebar-combined-head"><b>助手工具</b><small>{displayName(person)}</small></div>
-            <div className="sidebar-assistant-card">
-              <button type="button" className="sidebar-assistant-tool" onClick={()=>openFunShortcut('主动任务')}><span aria-hidden="true"><IconClock size={14}/></span><b>主动任务</b><small>定时 / 工作流</small></button>
-              <button type="button" className="sidebar-assistant-tool" onClick={()=>openFunShortcut('自主行动')}><span aria-hidden="true"><IconSun size={14}/></span><b>自主行动</b><small>自主行为面板</small></button>
-            </div>
-          </div>
-        </section>
-        {chatOpen&&<button type="button" className="sidebar-back-room" onClick={drawerBackToRoom}><IconBack className="ui-icon-inline" size={14}/> 返回房间</button>}
-      </div>
-        <button type="button" className="sidebar-settings" onClick={()=>{pageBeforeSettings.current=page;setSidebarOpen(false);navigate('settings')}}><IconSettings size={16}/><b>设置</b></button>
-      <div className="sidebar-footer"><span className="sidebar-status-dot"/><span>小家 · 侧边栏{inbox.filter(m=>!m.read_at).length?' · 未读 ' + inbox.filter(m=>!m.read_at).length:''}</span></div>
-    </aside>
-    {toast&&(()=>{const env=toast.kind==='task_result'?parseTaskEnvelope(toast.content):null;return <div className="inbox-toast" role="status"><button type="button" className="inbox-toast-main" onClick={()=>openInboxMessage(toast)}><b><IconMail className="ui-icon-inline" size={14}/> {displayName(toast.person)} · {env?'定时任务结果':toast.kind==='test'?'通知测试':'新消息'}</b><span>{env?env.answer||'（任务已完成，无文字总结）':toast.content}</span><small>{env?'点击查看结果会话':'点击打开聊天'}</small></button><button type="button" aria-label="收起消息" className="inbox-toast-dismiss" onClick={()=>setToast(null)}><IconClose size={15}/></button></div>})()}
-    <section className="screen">
-      {page === 'home' && <Home onPerson={openPerson} onOpenMemory={(target) => openToolFor(target, '记忆面板')} onOpenCalendar={() => openToolFor(person, '工作流')} time={time} today={todayLabel} displayName={displayName} characters={characters} conversations={conversations} inbox={inbox} />}
-      {page === 'room' && <Room person={person} setPerson={setPerson} displayName={displayName} roomName={roomName} chatOpen={chatOpen} setChatOpen={setChatOpen} assistants={assistants} setAssistants={setAssistants}
-        draft={draft} setDraft={setDraft} messages={messages} send={send} conversations={conversations} activeConversationIds={activeConversationIds} setConversations={setConversations} setActiveConversationIds={setActiveConversationIds} setMessages={setMessages}
-         modelProfiles={modelProfiles} defaultModelId={defaultModelId} bindings={bindings} setBindings={setBindings}
-         vendors={vendors} chatPool={chatPool} setChatPool={setChatPool}
-         routeState={routeState} setRouteState={setRouteState} lastRouteInfo={lastRouteInfo}
-         activeTool={activeTool} setActiveTool={(v)=>{ if(v===''&&toolReturnToSettings){ setToolReturnToSettings(false); setActiveTool(''); setPage('settings') } else setActiveTool(v) }} memory={memory} setMemory={setMemory}
-        prompt={prompt} setPrompt={setPrompt} characters={characters} setCharacters={setCharacters} worldbook={worldbook} setWorldbook={setWorldbook} worldEntries={worldEntries} setWorldEntries={setWorldEntries} memoryEntries={memoryEntries} setMemoryEntries={setMemoryEntries} mcpConnections={mcpConnections} setMcpConnections={setMcpConnections}
-        modelConfig={modelConfig[person]} setModelConfig={(v:React.SetStateAction<ModelConfig>)=>setModelConfig(old=>({...old,[person]:typeof v==='function'?v(old[person]):v}))} apiKey={apiKey[person]||''} setApiKey={(v:string)=>setApiKey(old=>({...old,[person]:v}))}
-        sending={sending} generationStage={generationStages[draftKey]||''} chatError={chatError} setChatError={setChatError}
-        personAppearance={personAppearance} setPersonAppearance={setPersonAppearance} customAssets={customAssets}
-        pendingSends={pendingSends}
-        enqueuePending={enqueuePending} flushPending={flushPending} cancelPending={cancelPending} editPendingText={editPendingText} stopGeneration={stopGeneration}
-        editMessage={editMessage} deleteMessage={deleteMessage} deleteMessages={deleteMessages} regenerateMessage={regenerateMessage} resendUserMessage={resendUserMessage} translateReasoning={translateReasoningText}
-        tasks={tasks} addTask={addTask}
-        userSettings={userSettings} setUserSettings={setUserSettings}
-        profileFromChat={profileFromChat} setProfileFromChat={setProfileFromChat} openAssistantProfile={openAssistantProfile} onOpenSettings={()=>{pageBeforeSettings.current='room';navigate('settings')}} packIcons={activePack?.icons} />}
-      {page === 'fun' && <Fun shortcut={funShortcut} onShortcutUsed={()=>setFunShortcut('')} displayName={displayName} />}
-      {page === 'settings' && <Settings packIcons={activePack?.icons} onBack={()=>{setPage('home');setActiveTool('');setChatOpen(false)}} onLogout={logout} cloudStatus={cloudStatus} themePrefs={themePrefs} setThemePrefs={setThemePrefs} customAssets={customAssets} conversations={conversations} modelConfig={modelConfig} personAppearance={personAppearance} setPersonAppearance={setPersonAppearance} onOpenTool={(tool)=>{setPerson(tool.person);setActiveTool(tool.tool);setPage('room');setToolReturnToSettings(true)}} displayName={displayName} timeZone={timeZone} setTimeZone={setTimeZone} worldEntries={worldEntries} setWorldEntries={setWorldEntries} modelProfiles={modelProfiles} setModelProfiles={setModelProfiles} bindings={bindings} setBindings={setBindings} vendors={vendors} setVendors={setVendors} subscriptions={subscriptions} setSubscriptions={setSubscriptions} onApiBaseApplied={recheckAfterApiChange} systemPeople={assistants.map(a=>a.id)} avatarOf={(id)=>characters[id]?.avatar||''} workspaceConfigs={workspaceConfigs} onWorkspaceSaved={(config)=>setWorkspaceConfigs(old=>({...old,[config.person]:config}))} defaultModelId={defaultModelId} setDefaultModelId={setDefaultModelId} />}
-    </section>
-    {fallbackNotice ? <div className="cloud-status error fallback-notice" role="status"><span><IconWarning className="ui-icon-inline" size={14}/> {fallbackNotice}</span><button onClick={()=>{setFallbackNotice('');navigate('settings')}}>去设置重新连接</button><button onClick={()=>setFallbackNotice('')}>知道了</button></div> : ((!isLocalMode()||cloudStatus==='error')&&cloudStatus!=='saved' && <div className={'cloud-status '+cloudStatus} role="status"><span>{cloudStatus==='saving'?(isLocalMode()?'本地保存中…':'云端保存中…'):cloudStatus==='error'?(isLocalMode()?'本地保存失败，请检查浏览器存储空间':'云端暂不可用，本地数据已保留'):'连接云端…'}</span>{cloudStatus==='error'&&<button onClick={retryCloudConnection}>{isLocalMode()?'重试保存':'重连云端'}</button>}</div>)}
-    <UiDialogHost/>
-    <WebBrowser page={webPage} onClose={() => setWebPage(null)}/>
-    <SystemSetupSheet active={authStatus === 'signedIn'}/>
-  </main>
+
 }
 
 function LoginScreen({status,password,setPassword,error,onSubmit,onUseLocal}:{status:'checking'|'signedOut'|'signedIn',password:string,setPassword:(v:string)=>void,error:string,onSubmit:(e:FormEvent)=>void,onUseLocal?:()=>void}) {
