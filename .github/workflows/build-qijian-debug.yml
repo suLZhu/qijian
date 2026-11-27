@@ -41,14 +41,16 @@ jobs:
           if [ ! -x "$SDKMANAGER" ]; then SDKMANAGER="$(find "$ANDROID_HOME/cmdline-tools" -name sdkmanager -type f | head -1)"; fi
           "$SDKMANAGER" 'platforms;android-36' 'build-tools;36.0.0' 'platform-tools'
       - name: Install JavaScript dependencies
-        run: npm install --no-audit --no-fund
+        run: |
+          npm ci --no-audit --no-fund --prefer-offline --fetch-retries=3 --fetch-retry-mintimeout=20000 --fetch-retry-maxtimeout=120000
+          npm ls --depth=0
       - name: Type-check and build web assets
         run: npm run build
       - name: Run vision, backup and time regression tests
         run: node --test tests/vision-attachments.test.mjs tests/backups.test.mjs tests/time-context.test.mjs
       - name: Chromium startup smoke test
         run: |
-          npm install --no-save --no-audit --no-fund puppeteer-core
+          npm install --no-save --no-audit --no-fund --prefer-offline --fetch-retries=3 puppeteer-core
           CHROME_BIN="$(command -v google-chrome || command -v chromium)" node tests/smoke-startup.mjs
       - name: Sync Capacitor
         run: npx cap sync android
