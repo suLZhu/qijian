@@ -1,3 +1,4 @@
+import { UsageStats } from './UsageStats'
 import { SettingsInjection, SettingsTools } from './SettingsControls'
 import { MediaSettings } from './MediaSettings'
 import { readWeatherContext } from './weatherContext.mjs'
@@ -2292,6 +2293,7 @@ export default function App() {
       if(section==='信息注入') return <><TimeZoneSettings timeZone={timeZone} setTimeZone={setTimeZone}/><SettingsInjection/></>
       if(section==='工具与扩展') return <SettingsTools/>
       if(section==='可选云同步') return <><ApiBaseSettings onApplied={recheckAfterApiChange}/>{!isLocalMode()&&<button className="settings-logout" onClick={logout}>退出登录</button>}</>
+      if(section==='AI 用量账本') return <UsageStats people={assistants.map(a=>a.id)} conversations={conversations} models={Object.fromEntries(assistants.map(a=>[a.id,resolveModelConfig(bindings[a.id]?.modelProfileId||defaultModelId||'',modelProfiles,modelConfig[a.id]).model]))} displayName={displayName}/>
       if(section==='关于栖间') return <><AppUpdateCard/><SettingsGuidePage/></>
       if(section==='请求诊断') return <RequestDiagnostics/>
       if(section==='缓存') return <WebCacheSettings/>
