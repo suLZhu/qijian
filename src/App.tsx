@@ -2321,6 +2321,7 @@ export default function App() {
     onViewChange={view=>{setChatOpen(view==='chat');setPage(view==='home'?'home':view==='settings'||view==='theme'?'settings':'room')}}
     assistants={assistants.map(a=>({id:a.id,name:a.name,avatar:characters[a.id]?.avatar||''}))}
     userAvatar={userSettings[person]?.avatar||''}
+    userName={roomName}
     onRenameConversation={(id,title)=>setConversations(old=>({...old,[person]:(old[person]||[]).map(c=>c.id===id?{...c,title}:c)}))}
     onTranslateReasoning={translateReasoningText}
     conversations={conversations}
