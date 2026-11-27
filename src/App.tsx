@@ -269,6 +269,7 @@ function useKeyboardViewport(){
 export default function App() {
   useKeyboardViewport()
   const [modelSettingsSection,setModelSettingsSection]=useState("vendor")
+  const [catalogSection,setCatalogSection]=useState("vendor:catalog")
   // 真机证据：切后台 / 回前台打点（对照 generation 链路日志，判断后台是否被系统暂停）。
   useEffect(() => {
     const onVis = () => genDebug(document.hidden ? 'app_backgrounded' : 'app_foregrounded', { hidden: document.hidden })
@@ -2279,6 +2280,7 @@ export default function App() {
       if(section==='全局主题') return <ThemeSettings value={themePrefs} onChange={setThemePrefs}/>
       if(section==='助手主题') return <AssistantThemeSettings person={target} personAppearance={personAppearance} setPersonAppearance={setPersonAppearance} assets={customAssets}/>
       if(section==='中转') return <ProviderManagement section={modelSettingsSection} onSection={setModelSettingsSection} vendors={vendors} setVendors={setVendors} setModelProfiles={setModelProfiles} modelProfiles={modelProfiles} defaultModelId={defaultModelId} setDefaultModelId={setDefaultModelId}/>
+      if(section==='模型目录') return <ProviderManagement section={catalogSection} onSection={s=>setCatalogSection(s==='vendor'?'vendor:catalog':s)} vendors={vendors} setVendors={setVendors} setModelProfiles={setModelProfiles} modelProfiles={modelProfiles} defaultModelId={defaultModelId} setDefaultModelId={setDefaultModelId}/>
       if(section==='聊天模型') return <DefaultModelPage profiles={modelProfiles} vendors={vendors} defaultModelId={defaultModelId} setDefaultModelId={setDefaultModelId} onBack={()=>{}}/>
       if(section==='生图'||section==='视频'||section==='语音') return <MediaSettings vendors={vendors} fixedMode={section==='生图'?'image':section==='视频'?'video':'audio'}/>
       if(section==='听觉') return <p>待开发</p>
@@ -3204,7 +3206,7 @@ function ProviderManagement({vendors,setVendors,setModelProfiles,section,onSecti
   return <div className="vendor-center">
     {isList&&<>
       <div className="vendor-kelivo-list-head">
-        <div className="vendor-head-tabs"><button type="button" onClick={()=>onSection("vendor:catalog")}>模型目录</button></div>
+
         <div className="vendor-kelivo-head-actions">
           <button type="button" className="vendor-head-add" onClick={()=>{resetEditUI();setNewName('OpenAI');setNewEndpoint('https://api.openai.com/v1');onSection('vendor:add')}}><IconPlus className="ui-icon-inline" size={14}/> 添加</button>
           <button type="button" className={'vendor-head-hide'+(showHidden?' on':'')} aria-pressed={showHidden} onClick={()=>setShowHidden(v=>!v)}>隐藏</button>
@@ -3288,7 +3290,7 @@ function ProviderManagement({vendors,setVendors,setModelProfiles,section,onSecti
 
     </>}
 
-    {showCatalog&&<><button type="button" onClick={backToList}>返回供应商</button><ModelCatalogPage vendors={vendors} onBack={backToList} onOpenVendor={id=>{openVendorPage(id);setTab('model')}}/></>}
+    {showCatalog&&<><ModelCatalogPage vendors={vendors} onBack={backToList} onOpenVendor={id=>{openVendorPage(id);setTab('model')}}/></>}
 
     {showDefault&&<DefaultModelPage profiles={modelProfiles} vendors={vendors} defaultModelId={defaultModelId} setDefaultModelId={setDefaultModelId} onBack={backToList}/>}
 
