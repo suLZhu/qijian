@@ -2275,12 +2275,10 @@ export default function App() {
     renderSystem={()=> <AndroidSystemSettings people={assistants.map(a=>a.id)} displayName={displayName} avatarOf={id=>characters[id]?.avatar||''}/>}
     renderSettings={(section,target)=>{
       if(section==='自主生活') return <ProactivePanel key={target} person={target} personLabel={displayName}/>
-      if(section==='SKILL') return <SettingsSkillPage people={assistants.map(a=>a.id)} displayName={displayName}/>
+      if(section==='SKILL') return <SkillWorkbench key={target} person={target} personLabel={displayName}/>
       if(section==='工具看板') return <ToolDashboard key={target} person={target} personLabel={displayName(target)}/>
-      if(section==='外观与主题') return <>
-        <ThemeSettings value={themePrefs} onChange={setThemePrefs}/>
-        <AssistantThemeSettings personAppearance={personAppearance} setPersonAppearance={setPersonAppearance} assets={customAssets} displayName={displayName}/>
-      </>
+      if(section==='全局主题') return <ThemeSettings value={themePrefs} onChange={setThemePrefs}/>
+      if(section==='助手主题') return <AssistantThemeSettings person={target} personAppearance={personAppearance} setPersonAppearance={setPersonAppearance} assets={customAssets}/>
       if(section==='中转') return <ProviderManagement section={modelSettingsSection} onSection={setModelSettingsSection} vendors={vendors} setVendors={setVendors} setModelProfiles={setModelProfiles} modelProfiles={modelProfiles} defaultModelId={defaultModelId} setDefaultModelId={setDefaultModelId}/>
       if(section==='聊天模型') return <DefaultModelPage profiles={modelProfiles} vendors={vendors} defaultModelId={defaultModelId} setDefaultModelId={setDefaultModelId} onBack={()=>{}}/>
       if(section==='生图'||section==='视频'||section==='语音') return <MediaSettings vendors={vendors} fixedMode={section==='生图'?'image':section==='视频'?'video':'audio'}/>
@@ -2752,20 +2750,14 @@ function RequestDiagnostics() {
   </section>
 }
 
-function SettingsSkillPage({people,displayName}:{people:string[];displayName:(p:string)=>string}) {
-  const [person,setPerson]=useState(people[0]||'')
-  return <div><div className="settings-tabs"><b className="settings-tabs-title">选择助手</b><div className="settings-tabs-row">{people.map(p=><button type="button" key={p} className={'settings-tab'+(p===person?' active':'')} onClick={()=>setPerson(p)}>{displayName(p)}</button>)}</div></div><SkillWorkbench key={person} person={person} personLabel={displayName}/></div>
-}
-
-function AssistantThemeSettings({personAppearance,setPersonAppearance,assets,displayName}:{
+function AssistantThemeSettings({person,personAppearance,setPersonAppearance,assets}:{
+  person:Person;
   personAppearance:Record<string,PersonAppearancePref>; setPersonAppearance:React.Dispatch<React.SetStateAction<Record<string,PersonAppearancePref>>>
-  assets:CustomAssets; displayName:(p:Person)=>string
+  assets:CustomAssets
 }) {
-  const [person,setPerson]=useState<Person>(YWX)
   return <div className="theme-page assistant-theme">
     <b>助手主题</b>
     <p className="muted">只影响所选助手的聊天气泡、背景与头像；整个小家的配色在「全局主题」。</p>
-    <label className="connection-person">助手<SoftSelect ariaLabel="选择要设置主题的助手" value={person} onChange={v=>setPerson(v as Person)} options={ASSISTANT_PEOPLE.map(id=>({value:id,label:displayName(id)}))}/></label>
     <PersonAppearance key={person} value={personAppearance[person]||null} assets={assets} onChange={v=>setPersonAppearance(old=>{const next={...old};if(v)next[person]=v;else delete next[person];return next})}/>
   </div>
 }
