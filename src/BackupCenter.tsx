@@ -140,29 +140,43 @@ export function BackupCenter({ people, vendors, setVendors, setModelProfiles }: 
       danger: true,
     })
     if (!ok) return
-    for (const [key, value] of Object.entries(local)) {
-      if (typeof value === 'string') localStorage.setItem(key, value)
-    }
     if (!isLocalMode() && payload.data?.server) {
       const server = payload.data.server
       if ((kind.serverKeys || kindId === 'models') && server.keys && typeof server.keys === 'object') {
         for (const [person, apiKey] of Object.entries(server.keys)) {
           if (typeof apiKey !== 'string') continue
-          await apiFetch('/api/keys', {
+          const response = await apiFetch('/api/keys', {
             method: 'PUT', credentials: 'include', headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ person, apiKey }),
           })
+          if (!response.ok) throw new Error('服务器 Key 恢复失败，本地数据尚未覆盖；服务器可能已恢复部分内容，请核查后重试')
         }
       }
       if (kind.serverMemory && server.memory && typeof server.memory === 'object') {
         for (const [person, records] of Object.entries(server.memory)) {
           if (!Array.isArray(records)) continue
-          await apiFetch('/api/memory/import', {
+          const response = await apiFetch('/api/memory/import', {
             method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ person, records }),
           })
+          if (!response.ok) throw new Error('服务器记忆恢复失败，本地数据尚未覆盖；服务器可能已恢复部分内容，请核查后重试')
         }
       }
+    }
+    const previous = Object.fromEntries(Object.keys(local).map(key => [key, localStorage.getItem(key)]))
+    try {
+      for (const [key, value] of Object.entries(local)) {
+        if (typeof value === 'string') localStorage.setItem(key, value)
+      }
+    } catch (error) {
+      let rollbackFailed = false
+      for (const [key, value] of Object.entries(previous)) {
+        try {
+          if (value === null) localStorage.removeItem(key)
+          else localStorage.setItem(key, value)
+        } catch { rollbackFailed = true }
+      }
+      throw new Error(rollbackFailed ? '本地恢复失败，部分原数据未能回滚，请保留备份并停止继续恢复' : '本地空间不足或写入失败，已回滚本地修改；服务器写入情况需另行核查')
     }
     // A local-only worldbook/MCP restore also needs cloud-write priority.
     // Otherwise startup may immediately replace it with an older snapshot.
