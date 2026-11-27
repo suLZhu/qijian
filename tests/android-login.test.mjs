@@ -268,3 +268,23 @@ test('服务端订阅续期与兼容目录缺代理时返回原因，普通目�
     assert.deepEqual((await direct.json()).models, ['same-model'])
   } finally { target.close() }
 })
+
+test('恢复事务遇到无效记忆时撤回已写入的 Key 和记忆', async () => {
+  const person = 'assistant-yanweixi'
+  const token = (await login()).body.token
+  const headers = { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' }
+  const readKeys = async () => (await (await fetch(BASE + '/api/keys', { headers })).json()).keys
+  const before = await readKeys()
+  const restore = memory => fetch(BASE + '/api/backups/restore', {
+    method: 'POST', headers,
+    body: JSON.stringify({ keys: { [person]: 'restore-test-key' }, memory: { [person]: memory } }),
+  })
+  const record = { id: 'restore-rollback-test', title: '测试恢复', content: '事务测试' }
+  assert.equal((await restore([record, {}])).status, 400)
+  assert.deepEqual(await readKeys(), before)
+  const readRecords = async () => (await (await fetch(BASE + '/api/memory/records?person=' + person, { headers })).json()).records
+  assert.equal((await readRecords()).some(item => item.id === record.id), false)
+  assert.equal((await restore([record])).status, 200)
+  assert.equal((await readKeys())[person], 'restore-test-key')
+  assert.equal((await readRecords()).some(item => item.id === record.id), true)
+})
