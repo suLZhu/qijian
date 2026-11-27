@@ -1,7 +1,6 @@
 import { useChatDisplay } from './ChatDisplay'
 import { saveChatDisplay } from './chatDisplayPrefs.mjs'
 import { useEffect, useState, type ReactNode } from 'react'
-import { AndroidSystemSettings } from './AndroidSystemSettings'
 import { AppLockSettings } from './AppLockSettings'
 import './AdvancedSettingsPreview.css'
 
@@ -21,7 +20,7 @@ const devicePanels: Panel[] = [
   { id: 'lock', title: '应用锁', note: 'PIN、锁定名单与排除名单' },
   { id: 'backup', title: '备份与恢复', note: '导出、恢复及同步状态' },
 ]
-export function AdvancedSettingsPreview({ kind, renderMcp, renderWorkspace, renderBackup }: { kind: 'tools' | 'device'; renderMcp?: () => ReactNode; renderWorkspace?: () => ReactNode; renderBackup?: () => ReactNode }) {
+export function AdvancedSettingsPreview({ kind, renderMcp, renderWorkspace, renderBackup, renderSystem }: { kind: 'tools' | 'device'; renderMcp?: () => ReactNode; renderWorkspace?: () => ReactNode; renderBackup?: () => ReactNode; renderSystem?: () => ReactNode }) {
   const prefs = useChatDisplay()
   const [weatherCity, setWeatherCity] = useState(prefs.weatherCity)
   const [panel, setPanel] = useState('')
@@ -68,19 +67,7 @@ export function AdvancedSettingsPreview({ kind, renderMcp, renderWorkspace, rend
       <div className="qj-advanced-empty">暂无演示调用记录。正式版按助手、工具与执行时间筛选。</div>
     </div>}
     {panel === 'workspace' && <div className="qj-advanced-body">{renderWorkspace?.()}</div>}
-    {panel === 'notify' && <div className="qj-advanced-body">
-      <AndroidSystemSettings
-        people={['assistant-yanweixi','assistant-yanshuo']}
-        displayName={id=>id==='assistant-yanweixi'?'小晏':'言朔'}
-        avatarOf={()=>''}
-      />
-      <p className="qj-advanced-note">这里已接入真实 Android 通知偏好、系统能力状态与测试通知；电脑预览会自动显示不可用。</p>
-    </div>}
-    {panel === 'background' && <div className="qj-advanced-list">
-      {row('后台持续生成','退出页面后继续生成回复',()=>setDialog({title:'后台持续生成',description:'正式版读取后台服务真实状态，不用模拟开关冒充成功。'}))}
-      {row('电池优化白名单','跳转系统省电限制设置',()=>setDialog({title:'电池优化白名单',description:'权限需用户在 Android 系统设置中自行授权。'}))}
-      {row('悬浮窗权限','显示授权状态',()=>setDialog({title:'悬浮窗',description:'需要原生设备权限，浏览器预览不可请求。'}))}
-    </div>}
+    {(panel === 'notify' || panel === 'background') && <div className="qj-advanced-body">{renderSystem?.()}</div>}
     {panel === 'lock' && <div className="qj-advanced-body">
       <AppLockSettings />
       <p className="qj-advanced-note">应用锁已接入原生真实应用列表、PIN 与无障碍服务状态。排除名单仍是下一步要补的原生能力。</p>

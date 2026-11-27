@@ -30,6 +30,7 @@ type LayoutPrototypeProps = {
   renderUsage?:()=>ReactNode
   renderTasks?:(person:string)=>ReactNode
   renderWorkspace?: () => ReactNode
+  renderSystem?: () => ReactNode
   renderBackup?: () => ReactNode
   renderResource?:(kind:'world'|'mcp')=>ReactNode
   vendors?:Vendor[]
@@ -268,7 +269,7 @@ export default function LayoutPrototype(props:LayoutPrototypeProps = {}) {
             section === '模型功能' ? <ModelFunctionsPreview /> :
             section === '定时任务' ? <><div className="qj-feature-intro"><h2>定时任务</h2></div><div className="qj-row-group">{people.map(id=><button key={id} className="qj-row" onClick={()=>setPerson(id)}><span>{displayName(id)}</span><small>{id===person?'当前助手':'切换助手'}</small><i><IconChevronRight size={15}/></i></button>)}</div>{props.renderTasks?.(person)}</> :
             section === '工具与扩展' ? <AdvancedSettingsPreview kind="tools" renderWorkspace={props.renderWorkspace} renderMcp={()=>props.renderResource?.('mcp')} /> :
-            section === '应用与设备' ? <AdvancedSettingsPreview kind="device" renderBackup={props.renderBackup} /> :
+            section === '应用与设备' ? <AdvancedSettingsPreview kind="device" renderBackup={props.renderBackup} renderSystem={props.renderSystem} /> :
             section === '记忆与上下文' ? <ContentSettingsPreview type="memory" renderWorldbook={()=>props.renderResource?.('world')} /> :
             section === '聊天与消息' ? <ChatDisplaySettings compact /> :
             section === '诊断与维护' ? <ContentSettingsPreview type="diagnostic" /> :

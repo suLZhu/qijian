@@ -2318,6 +2318,7 @@ export default function App() {
     onSend={prototypeSend}
     renderSubscription={()=> <SubscriptionAccounts vendors={vendors} setVendors={setVendors} setModelProfiles={setModelProfiles} subscriptions={subscriptions} setSubscriptions={setSubscriptions}/>}
     renderWorkspace={()=> <WorkspaceSettings people={assistants.map(a=>a.id)} displayName={displayName} onSaved={config=>setWorkspaceConfigs(old=>({...old,[config.person]:config}))}/>}
+    renderSystem={()=> <AndroidSystemSettings people={assistants.map(a=>a.id)} displayName={displayName} avatarOf={()=>''}/>}
     renderBackup={()=> <BackupCenter people={assistants.map(a=>a.id)} vendors={vendors} setVendors={setVendors} setModelProfiles={setModelProfiles}/>}
     renderResource={kind=> <ResourceLibrary key={kind} only={kind} worldEntries={worldEntries} setWorldEntries={setWorldEntries} modelProfiles={modelProfiles} setModelProfiles={setModelProfiles} bindings={bindings} setBindings={setBindings} displayName={displayName}/>}
     renderTasks={target=> <TaskManager key={target} person={target} personLabel={displayName} conversationId={activeConversationIds[target]||''}/>}
