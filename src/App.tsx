@@ -28,7 +28,7 @@ import { applyPackVars, getActivePackId, loadThemePacks, normalizeThemePack, set
 import { DEFAULT_ROOM_LAYOUT, loadRoomLayout, saveRoomLayout, resetRoomLayout, type RoomItem, type RoomLayout } from './roomLayout.mjs'
 import { WorkspaceSettings, type WorkspaceConfig } from './WorkspaceSettings'
 import { confirmDialog } from './uiDialog'
-import { planCompaction, conversationExcerpt, buildSummarySystemMessage, searchHistory, searchMessageList } from './contextCompression.mjs'
+import { CONTEXT_LIMITS, planCompaction, conversationExcerpt, buildSummarySystemMessage, searchHistory, searchMessageList } from './contextCompression.mjs'
 import { IconHome, IconChat, IconSettings, IconClock, IconMemory, IconCalendar, IconSun, IconPalette, IconPlug, IconChart, IconSparkles, IconFolder, IconShield, IconInfo, IconFlower, IconPlus, IconBack, IconChevronRight, IconChevronDown, IconChevronUp, IconClose, IconEdit, IconTrash, IconEye, IconEyeOff, IconArrowUp, IconArrowDown, IconSwitch, IconShare, IconTest, IconSearch, IconMinus, IconFile, IconWarning, IconMail, IconBook, IconCheck, IconCopy, IconRefresh, IconEmoji, IconPhoto, IconCoffee, IconMusic, IconLedger, IconGrid, IconMore, IconStar, IconMenu, IconMic, IconStop, IconSend, type IconComponent } from './icons'
 import { IconButton, SettingsRow } from './uiPrimitives'
 import { DEFAULT_BEAUTIFY_PACK, BEAUTIFY_PACKS } from './beautify'
@@ -95,7 +95,7 @@ import { AndroidSystemSettings } from './AndroidSystemSettings'
 import { channelPlan, notificationPayload, decideNotification, loadNotified, markNotified, routeFromNotificationOpen } from './notificationDispatch.mjs'
 import { buildAlarmPlan } from './taskAlarms.mjs'
 import { readNotificationPrefs } from './notificationPreferences.mjs'
-import { registerSystemHandlers, clearConversationNotifications, systemBridgeAvailable, syncSystemChannels, syncSystemAlarms, showSystemNotification, consumePendingOpen, readNativeDelivered, setGenerationForeground, nativeTextZoomAvailable, setAppTextZoom, nativeHttpStreamAvailable, openNativeWebView, readClipboardText, appVersion } from './nativeSystem.mjs'
+import { requestWebCacheClear, registerSystemHandlers, clearConversationNotifications, systemBridgeAvailable, syncSystemChannels, syncSystemAlarms, showSystemNotification, consumePendingOpen, readNativeDelivered, setGenerationForeground, nativeTextZoomAvailable, setAppTextZoom, nativeHttpStreamAvailable, openNativeWebView, readClipboardText, appVersion } from './nativeSystem.mjs'
 import { friendlyHttpError, routeInfoFromError } from './chatHttpError.mjs'
 import { readActiveGeneration, startGeneration, finishGeneration, needsGenerationRecovery, recoverInterruptedMessages } from './generationRecovery.mjs'
 import { BRAND_NAME, brandAsset } from './brandAssets'
@@ -1453,6 +1453,8 @@ export default function App() {
     let answer=''
     let finished=false
     // 记录本轮生成结果，供 finally 判断是否自动补发 pending（成功才补发；报错/中断保留）。
+    const diagnosticIds=new Set<string>()
+    let diagnosticError=''
     let genOutcome: 'ok'|'fail'|'noop' = 'noop'
     try {
       // 缓发 flush：把已显示的待发消息从历史里排除，随后合并成一条最终 user 消息——
@@ -1468,7 +1470,7 @@ export default function App() {
       const legacySummary = activeConv?.summaryKind !== 'excerpt' && anchorIndex >= 0 ? activeConv?.summary : ''
       let summaryCovered = legacySummary ? anchorIndex + 1 : 0
       let visibleHistory = priorHistory.slice(summaryCovered)
-      const compaction = planCompaction(visibleHistory)
+      const compaction = planCompaction(visibleHistory, readContextLimits())
       // 摘录随原文重算，编辑、删除或重生时只读取当前轮允许看到的历史。
       if (compaction.needed) {
         summaryCovered += compaction.cut
@@ -1638,6 +1640,7 @@ export default function App() {
             requestBody:{model:requestBody.model,stream:true,messages:requestMessages.map(message=>({role:message.role}))},
             assistantId:target, conversationId:sendConversationId, round, endpoint:activeModel.endpoint,
           })
+          diagnosticIds.add(snapshot.id)
           saveDiagLogs(localStorage,appendDiagLog(loadDiagLogs(localStorage),snapshot))
         } catch { /* 诊断存储不可用时继续聊天 */ }
         const chatProxy=()=>apiFetch('/api/chat',{method:'POST',credentials:'include',headers:{'Content-Type':'application/json'},signal:abortController.signal,body:JSON.stringify({assistantId:target,endpoint:activeModel.endpoint.trim(),chatUrl:activeChatUrl,apiKey:activeApiKey.trim(),apiKeys:apiKeyCandidates,timeZone,timeEnabled:chatPrefs.timeEnabled,body:requestBody,...(subscriptionProtocol?{subscriptionProtocol,subscriptionAccountId}:{}),...(routeMode?{routes:routePlan}:{})})})
@@ -1935,6 +1938,8 @@ export default function App() {
     } catch(err) {
       if (streamPaintTimer !== undefined) flushStreamPaint()
       const msg=err instanceof Error?err.message:String(err)
+      const status=msg.match(/\b[45][0-9]{2}\b/)?.[0]
+      diagnosticError=status?'请求错误 '+status:err instanceof TypeError?'网络或响应读取失败':'模型请求或工具执行失败'
       // 用户删除「正在生成」的回复会触发中止：消息已不在，不写错误文案、也不弹错误提示。
       if(!abortController.signal.aborted){
         if(regen){
@@ -1953,6 +1958,15 @@ export default function App() {
       if(sendAbortRef.current[sendScope]?.id===assistantMessageId)delete sendAbortRef.current[sendScope]
       delete sendingRef.current[sendScope]
       setSendingScopes(prev=>({...prev,[sendScope]:false}));setGenerationStages(prev=>({...prev,[sendScope]:''}))
+      try {
+        const elapsedMs=Math.round(performance.now()-requestStartedAt)
+        saveDiagLogs(localStorage,loadDiagLogs(localStorage).map(log=>diagnosticIds.has(log.id)?{
+          ...log, elapsedMs,
+          firstTokenMs:firstTokenAt&&upstreamStartedAt?Math.round(firstTokenAt-upstreamStartedAt):undefined,
+          outcome:abortController.signal.aborted?'已停止':genOutcome==='ok'?'成功':'失败',
+          error:abortController.signal.aborted?'':diagnosticError,
+        }:log))
+      } catch { /* 诊断存储不可用时继续收尾 */ }
       finishGeneration(localStorage, assistantMessageId)
       setGenerationForeground({action:'stop', messageId:assistantMessageId})
       // 生成成功 → 自动补发同会话的 pending，开启下一轮；报错/中断不自动发（保留给用户）。
@@ -2341,10 +2355,11 @@ export default function App() {
       </>
       if(section==='模型功能') return <VendorCenter section={modelSettingsSection} onSection={setModelSettingsSection} vendors={vendors} setVendors={setVendors} setModelProfiles={setModelProfiles} modelProfiles={modelProfiles} defaultModelId={defaultModelId} setDefaultModelId={setDefaultModelId}/>
       if(section==='记忆与上下文') return <>
+        <ContextSettings/>
         <MemoryPanel key={target} person={target} personLabel={displayName(target)} personMessages={messages[target]||[]}/>
         <ResourceLibrary only="world" worldEntries={worldEntries} setWorldEntries={setWorldEntries} modelProfiles={modelProfiles} setModelProfiles={setModelProfiles} bindings={bindings} setBindings={setBindings} displayName={displayName}/>
       </>
-      if(section==='诊断与维护') return <><RequestDiagnostics/><AppUpdateCard/><AndroidSystemSettings people={assistants.map(a=>a.id)} displayName={displayName} avatarOf={id=>characters[id]?.avatar||''}/><ToolDashboard key={target} person={target} personLabel={displayName(target)}/></>
+      if(section==='诊断与维护') return <><RequestDiagnostics/><WebCacheSettings/><AppUpdateCard/><AndroidSystemSettings people={assistants.map(a=>a.id)} displayName={displayName} avatarOf={id=>characters[id]?.avatar||''}/><ToolDashboard key={target} person={target} personLabel={displayName(target)}/></>
       return null
     }}
     renderRoomScene={(target, onAction)=> <RoomDecoration key={target} person={target} onAction={onAction}/>}
@@ -4071,13 +4086,61 @@ function WebToolSettings() {
   </form>
 }
 
+const CONTEXT_SETTINGS_KEY='ai-home.contextLimits'
+
+function readContextLimits() {
+  const raw=read<Partial<typeof CONTEXT_LIMITS> | null>(CONTEXT_SETTINGS_KEY,null)
+  const limit=(value:number|undefined,min:number,max:number,fallback:number)=>
+    Number.isInteger(value)?Math.min(max,Math.max(min,value!)):fallback
+  const maxMessages=limit(raw?.maxMessages,10,400,CONTEXT_LIMITS.maxMessages)
+  return {
+    maxMessages,
+    keepMessages:limit(raw?.keepMessages,2,maxMessages,Math.min(maxMessages,CONTEXT_LIMITS.keepMessages)),
+    maxChars:limit(raw?.maxChars,2000,250000,CONTEXT_LIMITS.maxChars),
+  }
+}
+
+function ContextSettings() {
+  const [limits,setLimits]=useState(readContextLimits)
+  const [notice,setNotice]=useState('')
+  const fields=[['maxMessages','裁剪前消息数'],['keepMessages','裁剪后保留消息数'],['maxChars','历史字符预算']] as const
+  return <form onSubmit={event=>{
+    event.preventDefault()
+    try {
+      localStorage.setItem(CONTEXT_SETTINGS_KEY,JSON.stringify(limits))
+      setLimits(readContextLimits())
+      setNotice('已保存，下次聊天请求生效')
+    } catch { setNotice('保存失败') }
+  }}>
+    <h3>聊天上下文</h3>
+    {fields.map(([key,label])=><label key={key}>{label}<input type="number" step="1" value={limits[key]} onChange={event=>setLimits({...limits,[key]:Number(event.target.value)})}/></label>)}
+    <button type="submit">保存上下文设置</button>
+    {notice&&<p role="status">{notice}</p>}
+  </form>
+}
+
+function WebCacheSettings() {
+  const [notice,setNotice]=useState('')
+  return <section>
+    <button type="button" onClick={async()=>{
+      const confirmed=await confirmDialog({
+        title:'清理网页缓存',
+        message:'清理 Android WebView 的网页资源缓存，保留聊天、设置和备份。',
+        confirmLabel:'清理',
+      })
+      if(confirmed) setNotice(requestWebCacheClear()?'已提交清理请求':'当前环境无法清理 Android 网页缓存')
+    }}>清理网页缓存</button>
+    {notice&&<p role="status">{notice}</p>}
+  </section>
+}
+
 function RequestDiagnostics() {
   const [logs,setLogs]=useState(()=>loadDiagLogs(localStorage))
   return <section>
     <h3>模型请求记录</h3>
     <button type="button" onClick={()=>setLogs(loadDiagLogs(localStorage))}>刷新</button>
     {!logs.length&&<p>暂无请求记录</p>}
-    {logs.map(log=><details key={log.id}><summary>{log.at} · {log.model}</summary><pre>{formatDiagSummary(log)}</pre></details>)}
+    {logs.map(log=><details key={log.id}><summary>{log.at} · {log.model}</summary><pre>{[log.outcome,log.elapsedMs===undefined?'':'总耗时 '+log.elapsedMs+' ms',log.firstTokenMs===undefined?'':'首字 '+log.firstTokenMs+' ms',log.error,formatDiagSummary(log)].filter(Boolean).join("\n")}</pre></details>)}
   </section>
 }
 

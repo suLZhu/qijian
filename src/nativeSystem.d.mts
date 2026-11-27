@@ -38,3 +38,5 @@ export declare function openNativeWebView(url: string, title?: string): boolean
 export declare function readClipboardText(): Promise<string>
 
 export declare function appVersion(): string
+
+export declare function requestWebCacheClear(): boolean

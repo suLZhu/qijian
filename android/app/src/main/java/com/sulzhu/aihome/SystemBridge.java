@@ -56,6 +56,15 @@ final class SystemBridge {
     private Context ctx() { return activity.getApplicationContext(); }
 
     @JavascriptInterface
+    public void clearWebCache() {
+        activity.runOnUiThread(() -> {
+            if (activity.getBridge() != null && activity.getBridge().getWebView() != null) {
+                activity.getBridge().getWebView().clearCache(true);
+            }
+        });
+    }
+
+    @JavascriptInterface
     public String status() {
         try {
             Context c = ctx();

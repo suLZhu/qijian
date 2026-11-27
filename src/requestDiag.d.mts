@@ -6,6 +6,10 @@ export interface DiagMessage {
   tool_call_id?: string
 }
 export interface DiagSnapshot {
+  elapsedMs?: number
+  firstTokenMs?: number
+  outcome?: string
+  error?: string
   id: string
   at: string
   assistantId: string

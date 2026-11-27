@@ -292,3 +292,10 @@ export function registerSystemHandlers(handler) {
   handlers.add(handler)
   return () => handlers.delete(handler)
 }
+
+
+export function requestWebCacheClear() {
+  const b = bridge()
+  if (typeof b?.clearWebCache !== 'function') return false
+  try { b.clearWebCache(); return true } catch { return false }
+}
