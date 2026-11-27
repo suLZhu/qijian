@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { appLockApps, appLockAvailable, appLockOpenSettings, appLockSetLocked, appLockSetPin, appLockStatus, type AppLockApp, type AppLockStatus } from './appLock.mjs'
+import { appLockApps, appLockAvailable, appLockOpenSettings, appLockSetLocked, appLockSetExcluded, appLockSetPin, appLockStatus, type AppLockApp, type AppLockStatus } from './appLock.mjs'
 
 export function AppLockSettings() {
   const available = appLockAvailable()
@@ -69,10 +69,15 @@ export function AppLockSettings() {
     <input className="memory-search" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="搜索应用名称或包名" aria-label="搜索应用"/>
 
     <div className="app-lock-list">
-      {filtered.map((app) => <label className="app-lock-row" key={app.pkg}>
-        <input type="checkbox" checked={app.locked} onChange={() => toggle(app)}/>
+      {filtered.map((app) => <div className="app-lock-row" key={app.pkg}>
+        <input aria-label={"锁定" + app.label} disabled={app.excluded} type="checkbox" checked={app.locked} onChange={() => toggle(app)}/>
         <span className="app-lock-name"><b>{app.label}</b><small>{app.pkg}</small></span>
-      </label>)}
+        <label><input type="checkbox" checked={!!app.excluded} onChange={() => {
+          if (!appLockSetExcluded(app.pkg, !app.excluded)) { setMessage('排除名单保存失败，请确认 APK 支持此功能'); return }
+          refresh()
+          setMessage(app.excluded ? '已移出排除名单，原锁定设置恢复生效' : '已排除，此应用不会触发锁定')
+        }}/>排除</label>
+      </div>)}
       {filtered.length === 0 && <p className="muted">没有匹配的应用。</p>}
     </div>
   </div>

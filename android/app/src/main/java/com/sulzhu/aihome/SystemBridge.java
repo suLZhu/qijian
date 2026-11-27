@@ -332,6 +332,14 @@ final class SystemBridge {
     }
 
     @JavascriptInterface
+    public String appLockSetExcluded(String pkg, boolean excluded) {
+        try {
+            AppLockStore.setExcluded(ctx(), pkg, excluded);
+            return new JSONObject().put("ok", true).toString();
+        } catch (Exception e) { return "{}"; }
+    }
+
+    @JavascriptInterface
     public String appLockSetPin(String pin) {
         try {
             boolean ok = AppLockStore.setPin(ctx(), pin);

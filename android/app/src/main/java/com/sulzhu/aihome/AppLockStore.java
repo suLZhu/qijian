@@ -56,8 +56,19 @@ final class AppLockStore {
         persistLocked(c, set);
     }
 
+    static Set<String> excluded(Context c) {
+        return new HashSet<>(prefs(c).getStringSet("excluded", new HashSet<>()));
+    }
+
+    static void setExcluded(Context c, String pkg, boolean value) {
+        if (TextUtils.isEmpty(pkg) || c.getPackageName().equals(pkg)) return;
+        Set<String> set = excluded(c);
+        if (value) set.add(pkg); else set.remove(pkg);
+        prefs(c).edit().putStringSet("excluded", set).apply();
+    }
+
     static boolean isLocked(Context c, String pkg) {
-        return !TextUtils.isEmpty(pkg) && locked(c).contains(pkg);
+        return !TextUtils.isEmpty(pkg) && locked(c).contains(pkg) && !excluded(c).contains(pkg);
     }
 
     static boolean hasPin(Context c) {
@@ -131,6 +142,7 @@ final class AppLockStore {
                 row.put("pkg", pkg);
                 row.put("label", String.valueOf(pm.getApplicationLabel(ai)));
                 row.put("locked", lockedSet.contains(pkg));
+                row.put("excluded", excluded(c).contains(pkg));
                 rows.add(row);
             }
             Collections.sort(rows, new Comparator<JSONObject>() {

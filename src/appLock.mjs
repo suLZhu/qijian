@@ -42,3 +42,10 @@ export function appLockOpenSettings() {
   const b = sys()
   try { b?.appLockOpenSettings?.() } catch { /* 忽略 */ }
 }
+
+
+export function appLockSetExcluded(pkg, excluded) {
+  const b = sys()
+  if (!b || typeof b.appLockSetExcluded !== 'function') return false
+  try { return !!JSON.parse(b.appLockSetExcluded(pkg, !!excluded)).ok } catch { return false }
+}

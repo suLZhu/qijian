@@ -70,7 +70,7 @@ export function AdvancedSettingsPreview({ kind, renderMcp, renderWorkspace, rend
     {(panel === 'notify' || panel === 'background') && <div className="qj-advanced-body">{renderSystem?.()}</div>}
     {panel === 'lock' && <div className="qj-advanced-body">
       <AppLockSettings />
-      <p className="qj-advanced-note">应用锁已接入原生真实应用列表、PIN 与无障碍服务状态。排除名单仍是下一步要补的原生能力。</p>
+      <p className="qj-advanced-note">应用锁已接入原生真实应用列表、PIN 与无障碍服务状态。排除名单优先于锁定名单。</p>
     </div>}
     {panel === 'backup' && <div className="qj-advanced-body">{renderBackup?.()}</div>}
     {notice && <p className="qj-advanced-notice" role="status">{notice}</p>}
