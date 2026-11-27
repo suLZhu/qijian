@@ -11,8 +11,8 @@ const ICON_INDEX: Record<string,number> = Object.fromEntries(ICON_KEYS.map((k,i)
 function IconImage({name,size=20,className}:{name:string}&IconProps){
   const index=ICON_INDEX[name]??0
   const sheetWidth=ICON_KEYS.length*size
-  const style={width:sheetWidth,height:size,maxWidth:'none',transform:'translateX(' + (-index*size) + 'px)'} as CSSProperties
-  return <span className={'ui-icon-image'+(className?' '+className:'')} style={{width:size,height:size}} aria-hidden="true"><img src="/ui-icons-sprite.svg" alt="" draggable={false} style={style}/></span>
+  const style: CSSProperties = {display:'inline-block',width:size,height:size,minWidth:size,maxWidth:size,flex:'0 0 '+size+'px',overflow:'hidden',backgroundImage:'url(/ui-icons-sprite.svg)',backgroundSize:sheetWidth+'px '+size+'px',backgroundPosition:(-index*size)+'px 0',backgroundRepeat:'no-repeat',verticalAlign:'middle'}
+  return <span className={'ui-icon-image'+(className?' '+className:'')} style={style} aria-hidden="true"/>
 }
 
 export const IconHome: IconComponent = props => <IconImage name="home" {...props}/>
