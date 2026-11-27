@@ -3204,9 +3204,7 @@ function ProviderManagement({vendors,setVendors,setModelProfiles,section,onSecti
   return <div className="vendor-center">
     {isList&&<>
       <div className="vendor-kelivo-list-head">
-        <div className="vendor-head-tabs">
-          
-        </div>
+        <div className="vendor-head-tabs"><button type="button" onClick={()=>onSection("vendor:catalog")}>模型目录</button></div>
         <div className="vendor-kelivo-head-actions">
           <button type="button" className="vendor-head-add" onClick={()=>{resetEditUI();setNewName('OpenAI');setNewEndpoint('https://api.openai.com/v1');onSection('vendor:add')}}><IconPlus className="ui-icon-inline" size={14}/> 添加</button>
           <button type="button" className={'vendor-head-hide'+(showHidden?' on':'')} aria-pressed={showHidden} onClick={()=>setShowHidden(v=>!v)}>隐藏</button>
@@ -3290,7 +3288,7 @@ function ProviderManagement({vendors,setVendors,setModelProfiles,section,onSecti
 
     </>}
 
-    {showCatalog&&<ModelCatalogPage vendors={vendors} onBack={backToList} onOpenVendor={id=>{setTab('model');openVendorPage(id)}}/>}
+    {showCatalog&&<><button type="button" onClick={backToList}>返回供应商</button><ModelCatalogPage vendors={vendors} onBack={backToList} onOpenVendor={id=>{openVendorPage(id);setTab('model')}}/></>}
 
     {showDefault&&<DefaultModelPage profiles={modelProfiles} vendors={vendors} defaultModelId={defaultModelId} setDefaultModelId={setDefaultModelId} onBack={backToList}/>}
 
