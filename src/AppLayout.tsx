@@ -104,6 +104,8 @@ export default function AppLayout(props:AppLayoutProps = {}) {
   const people = data.assistants.map(a=>a.id)
   const [localPerson, setLocalPerson] = useState<Person>(()=>readAssistantState().assistants[0]?.id || LEGACY_ASSISTANTS[0].id)
   const person = props.person || localPerson
+  const [settingsAssistant,setSettingsAssistant]=useState('')
+  const settingsPerson=people.includes(settingsAssistant)?settingsAssistant:people.includes(person)?person:people[0]||person
   const setPerson = (id:string) => { if(props.onPersonChange) props.onPersonChange(id); else setLocalPerson(id) }
   const displayName = (id:string)=>data.assistants.find(a=>a.id===id)?.name || id
   const avatar=(id:string)=>{const src=(data.assistants.find(a=>a.id===id) as AssistantView|undefined)?.avatar;return src?<img src={assetUrl(src)} alt=""/>:displayName(id).slice(0,1)}
@@ -313,7 +315,7 @@ export default function AppLayout(props:AppLayoutProps = {}) {
               if(tab==='订阅账号') return props.renderSubscription?.()
               if(tab==='世界书'||tab==='MCP') return props.renderResource?.(tab==='世界书'?'world':'mcp')
               if(tab==='备份与恢复') return props.renderBackup?.()
-              if(['定时任务','自主生活','记忆管理','工具看板'].includes(tab)) return <><SoftSelect ariaLabel="助手" value={person} options={people.map(id=>({value:id,label:displayName(id)}))} onChange={setPerson}/>{tab==='定时任务'?props.renderTasks?.(person):props.renderSettings?.(tab,person)}</>
+              if(['定时任务','自主生活','记忆管理','工具看板','SKILL','助手主题'].includes(tab)) return <><div className="qj-settings-assistant"><span>选择助手</span><SoftSelect ariaLabel="选择助手" value={settingsPerson} options={people.map(id=>({value:id,label:displayName(id)}))} onChange={setSettingsAssistant}/></div><div key={tab+settingsPerson}>{tab==='定时任务'?props.renderTasks?.(settingsPerson):props.renderSettings?.(tab,settingsPerson)}</div></>
               if(tab==='聊天展示') return <ChatDisplaySettings compact/>
               return props.renderSettings?.(tab,person)
             }}/>}
@@ -380,6 +382,7 @@ export default function AppLayout(props:AppLayoutProps = {}) {
 }
 
 const settingTabs: Record<string,string[]> = {
+  '外观与主题':['全局主题','助手主题'],
   '供应商与订阅':['中转','订阅账号'],
   '模型功能':['聊天模型','生图','视频','语音','听觉'],
   '聊天与消息':['聊天展示','上下文','信息注入'],
