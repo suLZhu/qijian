@@ -28,7 +28,7 @@ import { type WorkspaceConfig } from './WorkspaceSettings'
 import { confirmDialog } from './uiDialog'
 import { CONTEXT_LIMITS, planCompaction, conversationExcerpt, buildSummarySystemMessage, searchHistory, searchMessageList } from './contextCompression.mjs'
 import { IconChat, IconClock, IconMemory, IconSparkles, IconPlus, IconBack, IconChevronRight, IconChevronDown, IconChevronUp, IconClose, IconEdit, IconTrash, IconEye, IconEyeOff, IconArrowUp, IconArrowDown, IconTest, IconSearch, IconMinus, IconWarning, IconMail, IconCheck, IconRefresh, IconGrid, IconMore, IconStar, type IconComponent } from './icons'
-import { DEFAULT_BEAUTIFY_PACK, BEAUTIFY_PACKS } from './beautify'
+import { DEFAULT_BEAUTIFY_PACK } from './beautify'
 import { BUILTIN_THEME_PACKS } from './builtinThemePacks.mjs'
 import { PersonAppearance } from './PersonAppearance'
 import { reportToolCallStart, reportToolCallEnd, classifyToolError, type ToolCallSource } from './toolCalls'
@@ -88,7 +88,7 @@ import { AndroidSystemSettings } from './AndroidSystemSettings'
 import { channelPlan, notificationPayload, decideNotification, loadNotified, markNotified, routeFromNotificationOpen } from './notificationDispatch.mjs'
 import { buildAlarmPlan } from './taskAlarms.mjs'
 import { readNotificationPrefs } from './notificationPreferences.mjs'
-import { requestWebCacheClear, registerSystemHandlers, clearConversationNotifications, systemBridgeAvailable, syncSystemChannels, syncSystemAlarms, showSystemNotification, consumePendingOpen, readNativeDelivered, setGenerationForeground, nativeTextZoomAvailable, setAppTextZoom, nativeHttpStreamAvailable, openNativeWebView, readClipboardText} from './nativeSystem.mjs'
+import { requestWebCacheClear, registerSystemHandlers, clearConversationNotifications, systemBridgeAvailable, syncSystemChannels, syncSystemAlarms, showSystemNotification, consumePendingOpen, readNativeDelivered, setGenerationForeground, nativeTextZoomAvailable, setAppTextZoom, nativeHttpStreamAvailable, openNativeWebView} from './nativeSystem.mjs'
 import { friendlyHttpError, routeInfoFromError } from './chatHttpError.mjs'
 import { readActiveGeneration, startGeneration, finishGeneration, needsGenerationRecovery, recoverInterruptedMessages } from './generationRecovery.mjs'
 // 像素黑白选框/图标层必须最后导入，才能覆盖各组件自带的彩色样式。
@@ -1043,17 +1043,6 @@ export default function App() {
     return () => { alive = false }
   }, [authStatus])
 
-  useEffect(() => {
-    const update = () => {
-      const now = new Date()
-      setTime(new Intl.DateTimeFormat('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false }).format(now))
-      // 日期跟着同一个计时器走：跨过零点时首页不用重新挂载也能换日期。
-      setTodayLabel(now.toLocaleDateString('zh-CN', { month: 'long', day: 'numeric', weekday: 'long' }))
-    }
-    update()
-    const timer = window.setInterval(update, 30000)
-    return () => window.clearInterval(timer)
-  }, [])
 
   useEffect(() => { localStorage.setItem('ai-home.assistants', JSON.stringify(assistants)) }, [assistants])
   useEffect(() => { try { localStorage.setItem('ai-home.conversations', JSON.stringify(conversations)) } catch { /* keep chat usable if local storage is full */ } }, [conversations])
@@ -2203,7 +2192,6 @@ export default function App() {
       setMessages((old:Record<Person,ChatMessage[]>)=>({...old,[person]:nextActive.messages||[]}))
     }
     setChatError('')
-    setDrawerRenameId(null)
   }
   function prototypeSelectPerson(id:string){
     const target=id as Person
@@ -2240,7 +2228,6 @@ export default function App() {
   const bubbleUrl=bubbleId==='image'?customAssets.bubble:''
   // 聊天打开时给整条布局链上锁：shell 用 height 封顶（而非 min-height），
   // 消息列表成为唯一滚动容器，页面整体不再被聊天记录撑长。
-  const chatViewportLock=page==='room'&&chatOpen?' shell-chat-lock':''
   // 美化包激活时颜色变量交给包（写在 :root 上），shell 不再用内置主题色覆盖，否则包只换背景、颜色还是紫的。
   const themeVars = themeStyle(themePrefs)
   const packColorKeys = new Set([
@@ -2254,6 +2241,11 @@ export default function App() {
   const shellVars = activePack ? Object.fromEntries(Object.entries(themeVars).filter(([k]) => !packColorKeys.has(k))) : themeVars
   return <>
   <AppLayout
+    appearanceStyle={shellVars as React.CSSProperties}
+    chatBackground={bgClass}
+    bubbleStyle={bubbleClass}
+    chatBackgroundUrl={bgUrl}
+    bubbleImageUrl={bubbleUrl}
     modelLabel={resolveModelConfig(bindings[person]?.modelProfileId||defaultModelId||'',modelProfiles,modelConfig[person]).model||'选择模型'}
     renderModelPicker={close=> <ModelPickerSheet profiles={modelProfiles} activeId={bindings[person]?.modelProfileId||defaultModelId||''} vendorKeys={allVendorKeys(vendors)} binding={bindings[person]||emptyBinding()} onPatchBinding={next=>setBindings(old=>({...old,[person]:next}))} onPick={id=>{setBindings(old=>({...old,[person]:{...(old[person]||emptyBinding()),modelProfileId:id}}));close()}} onClose={close} subscriptionVendorIds={vendors.filter(v=>v.subscription).map(v=>v.id)} vendors={vendors} routeState={routeState} setRouteState={setRouteState} lastRouteInfo={lastRouteInfo} person={person}/>}
     openSettingsSignal={openSettingsSignal}
