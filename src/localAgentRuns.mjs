@@ -4,6 +4,7 @@ const KEY = 'ai-home.local.agentRuns'
 const active = new Map()
 const listeners = new Set()
 let execute = null
+let externalBusy = () => false
 
 function storage() {
   if (typeof localStorage === 'undefined') throw new Error('本地运行记录存储不可用')
@@ -31,10 +32,11 @@ function update(id, changes) {
   return run
 }
 
-export function registerLocalAgentExecutor(handler) {
+export function registerLocalAgentExecutor(handler, busy = () => false) {
   if (typeof handler !== 'function') throw new TypeError('执行器无效')
   execute = handler
-  return () => { if (execute === handler) execute = null }
+  externalBusy = busy
+  return () => { if (execute === handler) { execute = null; externalBusy = () => false } }
 }
 // Called only by the single Android main WebView after a restart. Never retry a
 // request whose upstream outcome is unknown; retain partial usage and answer.
@@ -53,6 +55,9 @@ export function recoverInterruptedLocalAgentRuns() {
     for (const run of recovered) publish('run_finished', run)
   }
   return recovered.length
+}
+export function isLocalAgentBusy(person) {
+  return [...active.values()].some(item => item.person === person) || !!externalBusy(person)
 }
 export function subscribeLocalAgentEvents(listener) {
   listeners.add(listener)
@@ -74,14 +79,14 @@ export function reportLocalAgentUsage(id, usage) {
   publish('run_usage', run)
   return true
 }
-export function startLocalAgentRun({ person, prompt, source = 'manual', conversationId = '' }) {
+export function startLocalAgentRun({ person, prompt, source = 'manual', conversationId = '', internal = false }) {
   // Preserve the existing honest error until the app has registered its executor.
   if (!execute) throw new Error('本地 Agent 执行器尚未接入')
   person = String(person || '').trim()
   prompt = String(prompt || '').trim()
   if (!person || person.length > 120) throw new Error('人物身份无效')
   if (!prompt || prompt.length > 20000) throw new Error('任务内容需为 1 至 20000 字')
-  if (source !== 'manual') throw new Error('本地 Agent 暂只支持手动运行')
+  if (source !== 'manual' && !(internal === true && source === 'proactive')) throw new Error('不支持此运行来源')
   if ([...active.values()].some(item => item.person === person)) throw new Error('当前助手已有任务正在执行')
   const id = crypto.randomUUID(), at = new Date().toISOString()
   const run = { id, assistantId: person, source, conversationId: String(conversationId || ''), prompt, answer: '', rounds: 0, toolCalls: 0, status: 'running', usage: {}, model: '', createdAt: at, updatedAt: at, finishedAt: null }

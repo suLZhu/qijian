@@ -706,7 +706,7 @@ export default function App() {
           // 主动消息成功进入收件箱后发系统通知。任务类走「写回聊天」入口统一发，
           // 否则同一 runId 会因为 task_notice / task_result 两条收件箱行弹两次。
           for(const m of fresh){
-            if(m.kind==='task_result'||m.kind==='task_notice')continue
+            if(m.kind==='task_result'||m.kind==='task_notice'||m.kind==='proactive_result')continue
             notifyAfterWrite({kind:m.kind||'message',person:m.person,messageId:m.id,text:m.content,at:Date.parse(m.created_at)||Date.now()})
           }
         }
@@ -721,14 +721,14 @@ export default function App() {
       },[authStatus,notifyAfterWrite])
   useEffect(()=>{if(!toast)return;const timer=window.setTimeout(()=>setToast(null),6500);return()=>window.clearTimeout(timer)},[toast])
   async function openInboxMessage(message:InboxMessage) {
-    const envelope = message.kind === 'task_result' ? parseTaskEnvelope(message.content) : null
+    const envelope = (message.kind === 'task_result' || message.kind === 'proactive_result') ? parseTaskEnvelope(message.content) : null
     if (envelope?.conversationId && !(conversations[message.person] || []).some(c => c.id === envelope.conversationId)) {
       setChatError('通知对应的会话已不存在')
       return
     }
     setOpenChatSignal(value => value + 1)
     setPerson(message.person);setPage('room');setChatOpen(true);setActiveTool('');setToast(null)
-    if (message.kind === 'task_result') {
+    if (message.kind === 'task_result' || message.kind === 'proactive_result') {
       // 任务结果：跳到绑定会话供查看；已读确认交给「持久化成功后 ack」的管线，
       // 点击本身绝不提前确认——否则可能确认一条尚未落盘的消息。
       const env = envelope
@@ -1192,15 +1192,15 @@ export default function App() {
   useEffect(() => {
     if (authStatus !== 'signedIn' || !cloudReady) return
     for (const m of inbox) {
-      if (m.kind !== 'task_result' || m.read_at) continue
+      if (!['task_result','proactive_result'].includes(m.kind) || m.read_at) continue
       const decision = decideTaskConsumption(conversationsRef.current[m.person], m.content)
       if (decision.action === 'write') {
         const { runId, title, prompt, answer } = decision.envelope
         const conversationId = decision.conversationId
         genDebug('task_exec_started',{runId,person:m.person,scheduledAt:String(m.created_at||''),conversationId,source:'cloud_inbox'})
-        updateActiveConversationMessages(m.person, prev => prev.some(x => x && x.taskRunId === runId) ? prev : [...prev, { role: 'assistant', content: answer, id: 'task-' + runId, taskRunId: runId, contextNote: title ? '定时任务：' + title : '定时任务结果', taskDetails: prompt }], conversationId)
+        updateActiveConversationMessages(m.person, prev => prev.some(x => x && x.taskRunId === runId) ? prev : [...prev, { role: 'assistant', content: answer, id: 'task-' + runId, taskRunId: runId, contextNote: m.kind==='proactive_result' ? '自主生活' : title ? '定时任务：' + title : '定时任务结果', taskDetails: prompt }], conversationId)
         // 云端任务结果写回原会话后发通知；runId 与本地任务、原生闹钟是同一个稳定键。
-        notifyAfterWrite({kind:'task',person:m.person,runId,text:answer,conversationId,messageId:m.id,at:Date.parse(m.created_at)||Date.now()})
+        notifyAfterWrite({kind:m.kind==='proactive_result'?'message':'task',person:m.person,runId,text:answer,conversationId,messageId:m.id,at:Date.parse(m.created_at)||Date.now()})
         genDebug('task_exec_completed',{runId,person:m.person,notifiedAt:Date.now(),source:'cloud_inbox'})
         pendingTaskAcks.current.set(m.id, { runId, person: m.person, conversationId })
         // 把防抖哨兵拨到已超期：任务结果必须尽快落盘，之后才能确认已读。
@@ -1226,7 +1226,7 @@ export default function App() {
   // 正在进行的模型请求：删除「正在生成」的助手消息时中止它；回写全部按 id 匹配，
   //   消息删除后天然无处可写，绝不会删除后又重新出现。
   const sendAbortRef = useRef<Record<string,{ id: string; controller: AbortController }>>({})
-  async function send(textInput: string, attachments: MessageAttachment[] = [], options: { assistantId?: Person; conversationId?: string; queuedIds?: string[]; insertUser?: boolean; historyEndIndex?: number; regenerate?: { replaceId: string; originalContent: string; originalUsage?: TokenUsage }; pendingId?: string; preserveDraft?: boolean; agent?: { id: string; signal: AbortSignal; onResult: (result: LocalAgentResult) => void } } = {}): Promise<'ok'|'fail'|'noop'> {
+  async function send(textInput: string, attachments: MessageAttachment[] = [], options: { assistantId?: Person; conversationId?: string; queuedIds?: string[]; insertUser?: boolean; historyEndIndex?: number; regenerate?: { replaceId: string; originalContent: string; originalUsage?: TokenUsage }; pendingId?: string; preserveDraft?: boolean; agent?: { id: string; signal: AbortSignal; onResult: (result: LocalAgentResult) => void; allowMemorySearch?: boolean; allowTools?: boolean } } = {}): Promise<'ok'|'fail'|'noop'> {
     const text = textInput.trim()
     const target = options.assistantId ?? person
     const updateMessages = options.agent ? (() => {}) as typeof updateActiveConversationMessages : updateActiveConversationMessages
@@ -1385,7 +1385,7 @@ export default function App() {
     // because its recent messages are already provided verbatim below.
     // 注意：必须在气泡插入之后 await——否则用户消息要陪检索一起等云端往返。
     let recalledContext = ''
-    if (text.length >= 2) {
+    if (text.length >= 2 && options.agent?.allowMemorySearch !== false) {
       // 记忆相关请求是增强项，不得拖住普通聊天：并行发起，超过软超时就跳过。
       const [recallResponse, memResponse] = await Promise.all([
         fetchWithSoftTimeout('/api/memory/search?person='+encodeURIComponent(target)+'&q='+encodeURIComponent(text.slice(0,160))+'&exclude='+encodeURIComponent(sendConversationId||''), { credentials:'include' }, 900, abortController.signal).catch(()=>null),
@@ -1534,7 +1534,7 @@ export default function App() {
       let mcpToolSchemaChars=0
       let mcpToolCount=0
       // The active assistant may manage only worldbook entries bound to itself.
-      if (chatPrefs.toolsEnabled) {
+      if (chatPrefs.toolsEnabled && options.agent?.allowTools !== false) {
       openAITools.push({type:'function',function:{name:'worldbook_create_entry',description:'在当前助手自己的世界书中新增条目。仅当用户明确要求记录或更新世界设定时使用；不要写入用户未确认的重大设定。',parameters:{type:'object',properties:{title:{type:'string'},keywords:{type:'string'},content:{type:'string'},always:{type:'boolean'},enabled:{type:'boolean'}},required:['title','keywords','content'],additionalProperties:false}}})
       openAITools.push({type:'function',function:{name:'worldbook_search_entries',description:'搜索当前助手有权限访问的世界书条目。',parameters:{type:'object',properties:{query:{type:'string'}},required:['query'],additionalProperties:false}}})
       openAITools.push({type:'function',function:{name:'worldbook_update_entry',description:'更新当前助手已绑定的世界书条目；必须先搜索并使用准确条目 ID。',parameters:{type:'object',properties:{id:{type:'string'},title:{type:'string'},keywords:{type:'string'},content:{type:'string'},always:{type:'boolean'},enabled:{type:'boolean'}},required:['id'],additionalProperties:false}}})
@@ -1972,12 +1972,36 @@ export default function App() {
     const conversationId = run.conversationId || activeConversationIdsRef.current[run.assistantId] || ''
     if (!conversationId || !conversationsRef.current[run.assistantId]?.some(c => c.id === conversationId)) throw new Error('助手没有可用的聊天会话')
     if (Object.entries(sendingRef.current).some(([key, busy]) => { try { return busy && JSON.parse(key)[0] === run.assistantId } catch { return false } })) throw new Error('助手正在忙，请稍后重试')
+    const proactiveConfig = run.source === 'proactive' ? read<Record<string,any>>('ai-home.local.proactive', {})[run.assistantId] : null
+    if (run.source === 'proactive' && (!proactiveConfig?.enabled || !proactiveConfig?.allow_chat)) throw new Error('自主生活权限已关闭')
     let result: LocalAgentResult | undefined
-    const status = await sendRef.current(run.prompt, [], { assistantId:run.assistantId, conversationId, insertUser:false, preserveDraft:true, agent:{ id:run.id, signal, onResult:value => { result=value } } })
+    const status = await sendRef.current(run.prompt, [], { assistantId:run.assistantId, conversationId, insertUser:false, preserveDraft:true, agent:{ id:run.id, signal, allowTools:run.source !== 'proactive', allowMemorySearch:run.source !== 'proactive' || !!proactiveConfig?.allow_memory_search, onResult:value => { result=value } } })
     signal.throwIfAborted()
     if (status !== 'ok' || !result) throw new Error(status === 'noop' ? '助手正在忙，请稍后重试' : '模型或工具执行失败，请检查聊天设置和诊断')
     return result
-  }), [])
+  }, person => Object.entries(sendingRef.current).some(([key, busy]) => { try { return busy && JSON.parse(key)[0] === person } catch { return false } })), [])
+  // 前台和回前台时检查本地自主唤醒；进程被系统回收时不宣称持续执行。
+  useEffect(() => {
+    if (authStatus !== 'signedIn' || !cloudReady) return
+    let alive = true, ticking = false
+    const tick = async () => {
+      if (!alive || ticking || document.hidden || !isLocalMode()) return
+      ticking = true
+      try {
+        for (const assistant of assistants) {
+          if (!alive || document.hidden) break
+          const conversationId = activeConversationIdsRef.current[assistant.id] || ''
+          if (!conversationId) continue
+          await apiFetch('/api/proactive', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({person:assistant.id, action:'wake', automatic:true, conversationId}) })
+        }
+      } finally { ticking = false }
+    }
+    void tick().catch(()=>{})
+    const timer = window.setInterval(() => void tick().catch(()=>{}), 60000)
+    const onVisible = () => { if (!document.hidden) void tick().catch(()=>{}) }
+    document.addEventListener('visibilitychange', onVisible)
+    return () => { alive=false; window.clearInterval(timer); document.removeEventListener('visibilitychange', onVisible) }
+  }, [authStatus, cloudReady, assistants])
   // 同步锁：effect 重挂载、按钮点击可能同刻竞争同一条 pending，锁保证同时只进一次 send。
   const flushLockRef = useRef(new Set<string>())
 
@@ -2344,7 +2368,7 @@ export default function App() {
     onConfirmPending={()=>void flushPending(person,activeConversationIds[person]||'',true)}
     renderBinding={kind=><WorldMcpMatrix key={person+kind} mode="bind" only={kind} person={person} worldEntries={worldEntries} setWorldEntries={setWorldEntries}/>}
   />
-    {toast&&(()=>{const env=toast.kind==='task_result'?parseTaskEnvelope(toast.content):null;return <div className="inbox-toast" role="status"><button type="button" className="inbox-toast-main" onClick={()=>openInboxMessage(toast)}><b><IconMail className="ui-icon-inline" size={14}/> {displayName(toast.person)} · {env?'定时任务结果':toast.kind==='test'?'通知测试':'新消息'}</b><span>{env?env.answer||'（任务已完成，无文字总结）':toast.content}</span><small>{env?'点击查看结果会话':'点击打开聊天'}</small></button><button type="button" aria-label="收起消息" className="inbox-toast-dismiss" onClick={()=>setToast(null)}><IconClose size={15}/></button></div>})()}
+    {toast&&(()=>{const env=['task_result','proactive_result'].includes(toast.kind)?parseTaskEnvelope(toast.content):null;return <div className="inbox-toast" role="status"><button type="button" className="inbox-toast-main" onClick={()=>openInboxMessage(toast)}><b><IconMail className="ui-icon-inline" size={14}/> {displayName(toast.person)} · {env?(toast.kind==='proactive_result'?'主动消息':'定时任务结果'):toast.kind==='test'?'通知测试':'新消息'}</b><span>{env?env.answer||'（任务已完成，无文字总结）':toast.content}</span><small>{env?'点击查看结果会话':'点击打开聊天'}</small></button><button type="button" aria-label="收起消息" className="inbox-toast-dismiss" onClick={()=>setToast(null)}><IconClose size={15}/></button></div>})()}
     {fallbackNotice ? <div className="cloud-status error fallback-notice" role="status"><span><IconWarning className="ui-icon-inline" size={14}/> {fallbackNotice}</span><button onClick={()=>{setFallbackNotice('');setOpenSettingsSignal(value=>value+1)}}>去设置重新连接</button><button onClick={()=>setFallbackNotice('')}>知道了</button></div> : ((!isLocalMode()||cloudStatus==='error')&&cloudStatus!=='saved' && <div className={'cloud-status '+cloudStatus} role="status"><span>{cloudStatus==='saving'?(isLocalMode()?'本地保存中…':'云端保存中…'):cloudStatus==='error'?(isLocalMode()?'本地保存失败，请检查浏览器存储空间':'云端暂不可用，本地数据已保留'):'连接云端…'}</span>{cloudStatus==='error'&&<button onClick={retryCloudConnection}>{isLocalMode()?'重试保存':'重连云端'}</button>}</div>)}
     <UiDialogHost/>
     <WebBrowser page={webPage} onClose={() => setWebPage(null)}/>
@@ -2633,7 +2657,7 @@ function ProactivePanel({person,personLabel}:{person:Person;personLabel?:(p:Pers
  const refresh=useCallback(async()=>{const r=await apiFetch('/api/proactive?person='+encodeURIComponent(person));const d=await r.json();if(!r.ok)throw Error(d.error||'读取失败');setConfig(d.settings);setEvents(d.events||[]);setTokenUsage(d.tokenUsage||null)},[person])
  useEffect(()=>{refresh().catch(e=>setNotice(e.message))},[refresh])
  async function act(body:any){setBusy(true);setNotice('');try{const r=await apiFetch('/api/proactive',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({person,...body})});const d=await r.json();if(!r.ok)throw Error(d.error||'操作失败');setNotice(body.action==='wake'?(d.queued?'已唤醒助手，运行结果稍后出现在记录里。':'没有排队：'+d.reason):'已保存');await refresh()}catch(e){setNotice(e instanceof Error?e.message:String(e))}finally{setBusy(false)}}
- return <div className="tool-panel"><h3>{who} · 自主生活</h3><p className="muted">按设置检查唤醒条件；服务端执行后会记录结果，本地模式会提示需要后台执行器。</p>{config&&<section className="memory-create"><label>自主唤醒 <input type="checkbox" checked={!!config.enabled} onChange={e=>setConfig({...config,enabled:e.target.checked?1:0})}/></label><label>允许主动聊天<input type="checkbox" checked={!!(config.allow_chat??1)} onChange={e=>setConfig({...config,allow_chat:e.target.checked?1:0})}/></label><label>允许读取长期记忆<input type="checkbox" checked={!!(config.allow_memory_search??1)} onChange={e=>setConfig({...config,allow_memory_search:e.target.checked?1:0})}/></label><label>主动程度<SoftSelect value={config.mode} onChange={v=>setConfig({...config,mode:v})} options={[{value:'quiet',label:'安静陪伴'},{value:'natural',label:'自然主动'},{value:'lively',label:'活泼黏人'}]}/></label><label>心跳间隔（小时）<input type="number" min={2} max={72} value={config.interval_hours} onChange={e=>setConfig({...config,interval_hours:Number(e.target.value)})}/></label><label>每天最多唤醒次数<input type="number" min={1} max={48} value={config.daily_wake_limit??6} onChange={e=>setConfig({...config,daily_wake_limit:Number(e.target.value)})}/></label><label>每天 Token 警戒值<input type="number" min={1000} max={500000} step={1000} value={config.daily_token_limit??12000} onChange={e=>setConfig({...config,daily_token_limit:Number(e.target.value)})}/></label><label>免打扰开始（0–23时）<input type="number" min={0} max={23} value={config.quiet_start} onChange={e=>setConfig({...config,quiet_start:Number(e.target.value)})}/></label><label>免打扰结束（0–23时）<input type="number" min={0} max={23} value={config.quiet_end} onChange={e=>setConfig({...config,quiet_end:Number(e.target.value)})}/></label><div className="memory-form-actions"><button disabled={busy} onClick={()=>act({action:'configure',...config,enabled:!!config.enabled})}>保存设置</button><button disabled={busy} onClick={()=>act({action:'wake'})}>测试唤醒</button><button disabled={busy} onClick={()=>refresh().catch(e=>setNotice(e.message))}>刷新记录</button><button disabled={busy} onClick={async()=>{try{const r=await apiFetch('/api/inbox/test',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({person})});if(!r.ok)throw Error('发送失败');setNotice('测试消息已进入小家收件箱，前台横幅会在下一次轮询时出现。')}catch(e){setNotice(String(e))}}}>测试消息弹窗</button></div></section>}{notice&&<p className="muted" role="status">{notice}</p>}{tokenUsage&&<p className="muted">今日已上报 {tokenUsage.tokens} Token / {config?.daily_token_limit??12000}；{tokenUsage.unknown?'部分调用未返回用量，已暂停自主唤醒。':'达到警戒值后停止下一次唤醒；单次调用可能超过警戒值。'}</p>}{config?.plan_note&&<p className="muted">助手计划：{config.plan_note}</p>}<h4>最近唤醒事件</h4>{events.length===0?<p className="muted">还没有唤醒记录。</p>:events.map(e=><article className="memory-item" key={e.id}><b>{e.mood==='curious'?'✨ 好奇 / 想分享':'自主唤醒'}</b><p>{e.reason}</p><small>{new Date(e.created_at).toLocaleString()} · {e.status==='pending'?'正在处理':e.status==='sent'?'已发送':e.status==='silent'?'选择不打扰':e.status==='failed'?'运行失败':'已忽略'}</small>{e.status==='pending'&&<button disabled={busy} onClick={()=>act({action:'dismiss',id:e.id})}>忽略</button>}</article>)}</div>
+ return <div className="tool-panel"><h3>{who} · 自主生活</h3><p className="muted">按设置检查唤醒条件；本地模式在应用前台检查，回到前台时补查。</p>{config&&<section className="memory-create"><label>自主唤醒 <input type="checkbox" checked={!!config.enabled} onChange={e=>setConfig({...config,enabled:e.target.checked?1:0})}/></label><label>允许主动聊天<input type="checkbox" checked={!!(config.allow_chat??1)} onChange={e=>setConfig({...config,allow_chat:e.target.checked?1:0})}/></label><label>允许读取长期记忆<input type="checkbox" checked={!!(config.allow_memory_search??1)} onChange={e=>setConfig({...config,allow_memory_search:e.target.checked?1:0})}/></label><label>主动程度<SoftSelect value={config.mode} onChange={v=>setConfig({...config,mode:v})} options={[{value:'quiet',label:'安静陪伴'},{value:'natural',label:'自然主动'},{value:'lively',label:'活泼黏人'}]}/></label><label>心跳间隔（小时）<input type="number" min={2} max={72} value={config.interval_hours} onChange={e=>setConfig({...config,interval_hours:Number(e.target.value)})}/></label><label>每天最多唤醒次数<input type="number" min={1} max={48} value={config.daily_wake_limit??6} onChange={e=>setConfig({...config,daily_wake_limit:Number(e.target.value)})}/></label><label>每天 Token 警戒值<input type="number" min={1000} max={500000} step={1000} value={config.daily_token_limit??12000} onChange={e=>setConfig({...config,daily_token_limit:Number(e.target.value)})}/></label><label>免打扰开始（0–23时）<input type="number" min={0} max={23} value={config.quiet_start} onChange={e=>setConfig({...config,quiet_start:Number(e.target.value)})}/></label><label>免打扰结束（0–23时）<input type="number" min={0} max={23} value={config.quiet_end} onChange={e=>setConfig({...config,quiet_end:Number(e.target.value)})}/></label><div className="memory-form-actions"><button disabled={busy} onClick={()=>act({action:'configure',...config,enabled:!!config.enabled})}>保存设置</button><button disabled={busy} onClick={()=>act({action:'wake'})}>测试唤醒</button><button disabled={busy} onClick={()=>refresh().catch(e=>setNotice(e.message))}>刷新记录</button><button disabled={busy} onClick={async()=>{try{const r=await apiFetch('/api/inbox/test',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({person})});if(!r.ok)throw Error('发送失败');setNotice('测试消息已进入小家收件箱，前台横幅会在下一次轮询时出现。')}catch(e){setNotice(String(e))}}}>测试消息弹窗</button></div></section>}{notice&&<p className="muted" role="status">{notice}</p>}{tokenUsage&&<p className="muted">今日已上报 {tokenUsage.tokens} Token / {config?.daily_token_limit??12000}；{tokenUsage.unknown?'部分调用未返回用量，已暂停自主唤醒。':'达到警戒值后停止下一次唤醒；单次调用可能超过警戒值。'}</p>}{config?.plan_note&&<p className="muted">助手计划：{config.plan_note}</p>}<h4>最近唤醒事件</h4>{events.length===0?<p className="muted">还没有唤醒记录。</p>:events.map(e=><article className="memory-item" key={e.id}><b>{e.mood==='curious'?'✨ 好奇 / 想分享':'自主唤醒'}</b><p>{e.reason}</p><small>{new Date(e.created_at).toLocaleString()} · {e.status==='pending'?'正在处理':e.status==='sent'?'已发送':e.status==='silent'?'选择不打扰':e.status==='failed'?'运行失败':'已忽略'}</small>{e.status==='pending'&&<button disabled={busy} onClick={()=>act({action:'dismiss',id:e.id})}>忽略</button>}</article>)}</div>
 }
 
 

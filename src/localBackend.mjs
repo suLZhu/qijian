@@ -1,4 +1,4 @@
-import { startLocalAgentRun, listLocalAgentRuns, getLocalAgentRun, cancelLocalAgentRun, subscribeLocalAgentEvents } from './localAgentRuns.mjs'
+import { startLocalAgentRun, listLocalAgentRuns, getLocalAgentRun, cancelLocalAgentRun, subscribeLocalAgentEvents, isLocalAgentBusy } from './localAgentRuns.mjs'
 import { createMcpConnectionPool } from './server/mcpConnectionPool.mjs'
 // 本地模式后端垫片（LocalBackend）：未配置服务器地址时，浏览器/WebView 内
 // 直接应答全部 /api/* 请求，让 App 开箱即用——不依赖任何云端或本机后端进程。
@@ -17,7 +17,9 @@ import { createMcpConnectionPool } from './server/mcpConnectionPool.mjs'
 //
 // 纯 ESM、无框架依赖；apiBase.mjs 在 local 模式下把 apiFetch 路由到这里。
 import { mcpMigrationKey } from './mcpMigration.mjs'
-import { injectTimeContext } from './timeContext.mjs'
+import { injectTimeContext, buildTimeContext } from './timeContext.mjs'
+import { decideProactiveWake, isQuietHour } from './proactiveRules.mjs'
+import { proactivePrompt, isProactiveSilence } from './proactivePrompt.mjs'
 import { readKeyCandidates, isRetryableKeyStatus, resolveChatAccess, chatRequestUrl } from './vendors.mjs'
 import { resolveModelConfig } from './resourceBindings.mjs'
 import { scheduledConversationInstructions, isScheduledConversationTask, scheduledConversationContext, scheduledConversationAnswer } from './server/agent/scheduledConversation.mjs'
@@ -47,6 +49,7 @@ const K = {
   inbox: 'ai-home.local.inbox',
   tasks: 'ai-home.local.tasks',
   proactive: 'ai-home.local.proactive',
+  proactiveEvents: 'ai-home.local.proactiveEvents',
   policies: 'ai-home.local.policies',
   widgets: 'ai-home.local.widgets',
 }
@@ -553,6 +556,62 @@ async function runLocalConversationTask(task, nowMs) {
     if (protectedRun) setGenerationForeground({ action: 'stop', messageId: runId })
     activeLocalTasks.delete(task.id)
   }
+}
+
+// Local proactive runs are bounded by the same wake decisions as the server.
+// Delivery is persisted before the event is marked sent; inbox id deduplicates replay.
+function localProactiveUsage(person, now, timeZone) {
+  const today = buildTimeContext(now, timeZone).date
+  const runs = readJSON('ai-home.local.agentRuns', [])
+  let tokens = 0, unknown = 0
+  for (const run of Array.isArray(runs) ? runs : []) {
+    if (run?.assistantId !== person || run.source !== 'proactive' || run.status === 'running') continue
+    if (buildTimeContext(new Date(run.createdAt), timeZone).date !== today) continue
+    const p = Number(run.usage?.promptTokens), c = Number(run.usage?.completionTokens)
+    if (!Number.isFinite(p) || !Number.isFinite(c) || p + c <= 0) unknown++
+    else tokens += Math.max(0, p) + Math.max(0, c)
+  }
+  return { tokens, unknown }
+}
+function settleLocalProactive(event) {
+  if (event.type !== 'run_finished') return
+  const events = readJSON(K.proactiveEvents, [])
+  const row = events.find(item => item?.run_id === event.runId && item.status === 'pending')
+  if (!row) return
+  const run = getLocalAgentRun(event.runId)
+  const config = readJSON(K.proactive, {})[row.person]
+  const timeZone = readJSON(K.state, {})?.timeZone
+  let status = 'failed'
+  if (!config?.enabled || !config.allow_chat || isQuietHour(config, new Date(), timeZone)) status = 'dismissed'
+  else if (run?.status === 'succeeded' && isProactiveSilence(run.answer)) status = 'silent'
+  else if (run?.status === 'succeeded') {
+    const inbox = readJSON(K.inbox, [])
+    const id = 'proactive-' + run.id
+    const content = taskResultEnvelope({ runId:run.id, conversationId:row.conversation_id, answer:run.answer })
+    if (!inbox.some(item => item?.id === id)) writeJSON(K.inbox, [{ id, person:row.person, kind:'proactive_result', content, created_at:nowISO(), read_at:null }, ...inbox])
+    status = 'sent'
+  }
+  writeJSON(K.proactiveEvents, events.map(item => item?.id === row.id ? { ...item, status, updated_at:nowISO() } : item))
+}
+subscribeLocalAgentEvents(event => { try { settleLocalProactive(event) } catch { /* pending remains recoverable */ } })
+function startLocalProactive(person, conversationId, manual = false) {
+  const config = readJSON(K.proactive, {})[person]
+  if (!config) return { queued:false, reason:'disabled' }
+  const state = readJSON(K.state, {}) || {}
+  const timeZone = state.timeZone
+  const now = new Date()
+  const events = readJSON(K.proactiveEvents, []).filter(item => item?.person === person)
+  const usage = localProactiveUsage(person, now, timeZone)
+  if (isLocalAgentBusy(person)) return { queued:false, reason:'assistant_busy' }
+  const decision = decideProactiveWake({ config, now, timeZone, manual, events, usage, isBusy:() => isLocalAgentBusy(person) })
+  if (!decision.queued) return decision
+  const selected = String(conversationId || readJSON('ai-home.activeConversationIds', {})[person] || '')
+  if (!selected || !state.conversations?.[person]?.some(item => item?.id === selected)) return { queued:false, reason:'没有可用聊天会话' }
+  const run = startLocalAgentRun({ person, conversationId:selected, source:'proactive', internal:true, prompt:proactivePrompt(person, config.plan_note) + '\n本次自主行动不使用工具；不确定时可以选择沉默。' })
+  const all = readJSON(K.proactiveEvents, [])
+  const row = { id:uuid(), person, reason:manual?'用户手动测试唤醒':'自主心跳', mood:'curious', status:'pending', run_id:run.id, conversation_id:selected, created_at:nowISO(), updated_at:nowISO() }
+  try { writeJSON(K.proactiveEvents, [row, ...all]) } catch (error) { cancelLocalAgentRun(run.id); throw error }
+  return { queued:true, id:row.id, runId:run.id }
 }
 
 // ── 路由分发 ────────────────────────────────────────────────────────────────
@@ -1211,13 +1270,14 @@ export async function localHandle(path, init) {
       return json(200, { ok: true })
     }
 
-    // ── 自主生活（proactive）：配置可本地保存；唤醒需要后台执行器 → 降级 ──
+    // ── 自主生活：前台调度共用本地 Agent 执行器 ──
     if (p === '/api/proactive' && method === 'GET') {
       const person = q.get('person') || ''
       if (!person) return json(400, { error: '无效人物' })
       const all = readJSON(K.proactive, {})
       const settings = all[person] || { person, enabled: 0, mode: 'natural', quiet_start: 23, quiet_end: 8, interval_hours: 12, daily_wake_limit: 6, daily_token_limit: 12000, allow_chat: 1, allow_memory_search: 1, updated_at: nowISO() }
-      return json(200, { settings, events: [], heat: null, tokenUsage: null })
+      const events = readJSON(K.proactiveEvents, []).filter(item => item?.person === person).slice(0, 30)
+      return json(200, { settings, events, heat: null, tokenUsage: localProactiveUsage(person, new Date(), readJSON(K.state, {})?.timeZone) })
     }
     if (p === '/api/proactive' && method === 'POST') {
       const b = await readBody(init)
@@ -1231,18 +1291,26 @@ export async function localHandle(path, init) {
         const all = readJSON(K.proactive, {})
         all[person] = settings
         try { writeJSON(K.proactive, all) } catch { return json(500, { error: '本地存储写入失败' }) }
+        if (!settings.enabled || !settings.allow_chat || !settings.allow_memory_search) {
+          const events = readJSON(K.proactiveEvents, [])
+          for (const event of events) if (event?.person === person && event.status === 'pending') cancelLocalAgentRun(event.run_id)
+        }
         return json(200, { settings })
       }
-      if (b.action === 'wake') return json(200, { queued: false, reason: '本地模式需要后台执行器，配置云服务器后可用' })
+      if (b.action === 'wake') return json(200, startLocalProactive(person, b.conversationId, b.automatic !== true))
       if (b.action === 'cool') return json(200, { heat: null })
-      if (b.action === 'dismiss') return json(200, { ok: true })
+      if (b.action === 'dismiss') {
+        const events = readJSON(K.proactiveEvents, []), event = events.find(item => item?.id === b.id && item.person === person && item.status === 'pending')
+        if (event) { writeJSON(K.proactiveEvents, events.map(item => item.id === event.id ? { ...item, status:'dismissed', updated_at:nowISO() } : item)); cancelLocalAgentRun(event.run_id) }
+        return json(200, { ok: true })
+      }
       return json(400, { error: '未知操作' })
     }
 
     // 本地运行生命周期：只有注册真实执行器后才接受新任务。
     if (p === '/api/agent/runs' && method === 'GET') return json(200, { runs: listLocalAgentRuns(q.get('person') || '', q.get('limit')) })
     if (p === '/api/agent/runs' && method === 'POST') {
-      try { const b = await readBody(init); return json(201, { run: startLocalAgentRun(b) }) }
+      try { const b = await readBody(init); return json(201, { run: startLocalAgentRun({ ...b, internal:false }) }) }
       catch (error) { return json(400, { error: error instanceof Error ? error.message : '本地 Agent 启动失败' }) }
     }
     const agentRun = p.match(/^\/api\/agent\/runs\/([0-9a-f-]{36})$/)
