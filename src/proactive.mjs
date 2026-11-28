@@ -1,5 +1,7 @@
 import { randomUUID } from "node:crypto"
 import { buildTimeContext } from "./timeContext.mjs"
+import { decideProactiveWake } from "./proactiveRules.mjs"
+export { isQuietHour } from "./proactiveRules.mjs"
 // Server-side wake decisions are deterministic; the model never silently invents a message.
 // Background model execution and delivery are wired by the server.
 const PEOPLE = ['assistant-yanweixi','assistant-yanshuo']
@@ -48,10 +50,6 @@ export function configure(db,person,input) {
 export function proactiveTimeZone(db) {
  try { return JSON.parse(db.prepare('SELECT payload FROM app_state WHERE id=1').get()?.payload || '{}').timeZone } catch { return undefined }
 }
-export function isQuietHour(config,now=new Date(),timeZone) {
- const hour=buildTimeContext(now,timeZone).hour
- return config.quiet_start===config.quiet_end?false:config.quiet_start<config.quiet_end?hour>=config.quiet_start&&hour<config.quiet_end:hour>=config.quiet_start||hour<config.quiet_end
-}
 // Provider-reported usage only. A request may cross the threshold before its
 // usage arrives, so this is a stop-before-next-call threshold, not a guarantee
 // that the final day's total can never exceed the configured value.
@@ -75,29 +73,11 @@ export function proactiveTokenUsage(db,person,now=new Date()) {
 export function wake(db,person,{manual=false,now=new Date(),busy:busyCallback=()=>false}={}) {
  if(!PEOPLE.includes(person))throw new Error('无效人物')
  const config=settings(db,person)
- if(!config.enabled)return {queued:false,reason:'disabled'}
- if(!config.allow_chat)return {queued:false,reason:'chat_not_allowed'}
- if(isQuietHour(config,now,proactiveTimeZone(db)))return {queued:false,reason:'quiet_hours'}
  const timeZone=proactiveTimeZone(db)
- const today=buildTimeContext(now,timeZone).date
- const recent=db.prepare('SELECT created_at FROM proactive_events WHERE person=? AND created_at>=?').all(person,new Date(now.getTime()-48*3600000).toISOString())
- const used=recent.filter(row=>buildTimeContext(new Date(row.created_at),timeZone).date===today).length
- if(used>=config.daily_wake_limit)return {queued:false,reason:'daily_limit',used,limit:config.daily_wake_limit}
- const reported=proactiveTokenUsage(db,person,now)
- if(reported.unknown)return {queued:false,reason:'usage_unavailable'}
- if(reported.tokens>=config.daily_token_limit)return {queued:false,reason:'token_limit',used:reported.tokens,limit:config.daily_token_limit}
- if(!manual) {
-  // Other background and foreground model work already occupies this assistant.
-  // Leave heat intact so the next tick can retry when the conversation is idle.
-  const busy=db.prepare("SELECT 1 FROM agent_runs WHERE assistant_id=? AND status='running' LIMIT 1").get(person)
-  if(busy)return {queued:false,reason:'assistant_busy'}
-  if(busyCallback(person))return {queued:false,reason:'assistant_busy'}
- }
- const pending=db.prepare("SELECT count(*) AS n FROM proactive_events WHERE person=? AND status='pending'").get(person).n
- if(pending)return {queued:false,reason:'pending_exists'}
- const last=db.prepare('SELECT created_at FROM proactive_events WHERE person=? ORDER BY created_at DESC LIMIT 1').get(person)
- const minHours=config.mode==='quiet'?Math.max(24,config.interval_hours):config.mode==='lively'?Math.max(2,Math.floor(config.interval_hours/2)):config.interval_hours
- if(!manual&&last&&now.getTime()-new Date(last.created_at).getTime()<minHours*3600000)return {queued:false,reason:'cooldown'}
+ // Include old pending events and the latest event even when the interval exceeds 48 hours.
+ const recent=db.prepare("SELECT created_at,status FROM proactive_events WHERE person=? AND (created_at>=? OR status='pending' OR id=(SELECT id FROM proactive_events WHERE person=? ORDER BY created_at DESC LIMIT 1))").all(person,new Date(now.getTime()-48*3600000).toISOString(),person)
+ const decision=decideProactiveWake({config,now,timeZone,manual,events:recent,usage:proactiveTokenUsage(db,person,now),isBusy:()=>Boolean(db.prepare("SELECT 1 FROM agent_runs WHERE assistant_id=? AND status='running' LIMIT 1").get(person))||busyCallback(person)})
+ if(!decision.queued)return decision
  const mood='curious'
  const reason=manual?'用户手动测试唤醒':'定时心跳：检查是否有真实进展、值得分享的发现或待办事项'
  const id=randomUUID()
