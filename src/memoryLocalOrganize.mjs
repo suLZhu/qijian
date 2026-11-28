@@ -35,15 +35,19 @@ export function normalizeLocalAuto(raw) {
   }
 }
 
-export function readLocalAuto() {
+function localAutoKey(person) { return person ? LOCAL_AUTO_KEY + '.' + encodeURIComponent(person) : LOCAL_AUTO_KEY }
+
+export function readLocalAuto(person = '') {
   try {
-    return normalizeLocalAuto(JSON.parse(localStorage.getItem(LOCAL_AUTO_KEY) || 'null'))
+    const own = localStorage.getItem(localAutoKey(person))
+    const legacy = JSON.parse(own ?? localStorage.getItem(LOCAL_AUTO_KEY) ?? 'null')
+    return normalizeLocalAuto(person && own === null && legacy ? { ...legacy, lastRunAt: null, lastRun: null } : legacy)
   } catch { return normalizeLocalAuto(null) }
 }
 
-export function writeLocalAuto(patch) {
-  const next = normalizeLocalAuto({ ...readLocalAuto(), ...patch })
-  try { localStorage.setItem(LOCAL_AUTO_KEY, JSON.stringify(next)) } catch { /* 私密模式忽略 */ }
+export function writeLocalAuto(patch, person = '') {
+  const next = normalizeLocalAuto({ ...readLocalAuto(person), ...patch })
+  try { localStorage.setItem(localAutoKey(person), JSON.stringify(next)) } catch { /* 私密模式忽略 */ }
   return next
 }
 
@@ -119,6 +123,15 @@ function stripFence(text) {
   return fence ? fence[1].trim() : t
 }
 
+function assertModelArray(text) {
+  const raw = stripFence(text), start = raw.indexOf('['), end = raw.lastIndexOf(']')
+  if (start < 0 || end <= start) throw new Error('模型没有返回有效的记忆列表，未更新整理进度')
+  let parsed
+  try { parsed = JSON.parse(raw.slice(start, end + 1)) } catch { throw new Error('模型返回的记忆列表格式无效，未更新整理进度') }
+  if (!Array.isArray(parsed)) throw new Error('模型没有返回有效的记忆列表，未更新整理进度')
+  return parsed
+}
+
 export function parseProposals(text) {
   const raw = stripFence(text)
   const start = raw.indexOf('[')
@@ -178,10 +191,10 @@ export function parseTidyItems(text) {
   return out.slice(0, 40)
 }
 
-export async function tidyMemoryLibrary({ person, records, endpoint, apiKey, chatUrl, model, autoConfirm = true, rules = '' }) {
+export async function tidyMemoryLibrary({ person, records, requestChat, autoConfirm = true, rules = '' }) {
   const list = (Array.isArray(records) ? records : []).filter(r => r && r.lifecycle !== 'rejected').slice(0, 40)
   if (!list.length) return { created: 0, archived: 0, scanned: 0 }
-  if (!endpoint || !apiKey || !model) throw new Error('先在供应商里配好模型，再整理记忆库。')
+  if (typeof requestChat !== 'function') throw new Error('尚未配置记忆整理模型')
   const lines = list.map(r => `- id=${r.id}｜${r.title}｜${String(r.content || '').slice(0, 300)}｜关键词：${r.keywords || '无'}`).join('\n')
   const prompt = [
     '下面是这位助手已经存下的长期记忆（每条带 id）。请把它们整理成更少、更清楚的条目。',
@@ -198,24 +211,18 @@ export async function tidyMemoryLibrary({ person, records, endpoint, apiKey, cha
     '只输出 JSON 数组：[{"title":"…","content":"…","keywords":"…","category":"偏好习惯","sources":["id1","id2"]}]',
   ].filter(Boolean).join('\n')
 
-  const response = await apiFetch('/api/chat', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      endpoint, apiKey, chatUrl,
-      body: {
-        model, stream: false, temperature: 0.2,
-        messages: [{ role: 'system', content: TIDY_SYSTEM }, { role: 'user', content: prompt }],
-      },
-    }),
-  })
+  const response = await requestChat({ stream:false, temperature:0.2, messages:[{ role:'system', content:TIDY_SYSTEM }, { role:'user', content:prompt }] })
   const text = await response.text()
   if (!response.ok) {
     let message = text
     try { message = JSON.parse(text)?.error || text } catch { /* 原样展示 */ }
     throw new Error(String(message).replace(/^上游返回\s*/, '').slice(0, 120))
   }
-  const items = parseTidyItems(extractContent(text))
+  const content = extractContent(text)
+  const rawItems = assertModelArray(content)
+  const items = parseTidyItems(content)
+  if (rawItems.length && !items.length) throw new Error('模型返回的记忆内容无效，未修改记忆')
+  if (items.some(item => !item.sources.length || item.sources.some(id => !list.some(row => row.id === id)))) throw new Error('模型返回的记忆来源无效，未修改记忆')
   let created = 0
   let archived = 0
   for (const item of items) {
@@ -233,31 +240,33 @@ export async function tidyMemoryLibrary({ person, records, endpoint, apiKey, cha
       }),
     })
     const data = await saved.json().catch(() => ({}))
-    if (!saved.ok || data?.duplicate) continue
+    if (!saved.ok) throw new Error(data?.error || '记忆保存失败，请检查后重试')
+    if (data?.duplicate) continue
     created += 1
-    for (const id of item.sources) {
+    for (const id of autoConfirm ? item.sources : []) {
       if (!list.some(r => r.id === id)) continue
       const moved = await apiFetch('/api/memory/records/' + id + '/transition', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ lifecycle: 'archived' }),
       })
-      if (moved.ok) archived += 1
+      if (!moved.ok) throw new Error('整理后的记忆已保存，但原记忆归档失败，请检查记忆库')
+      archived += 1
     }
   }
   return { created, archived, scanned: list.length }
 }
 
 // embedTarget 有值时顺带算 embedding，聊天召回就能走语义相似度。
-export async function runLocalOrganize({ person, messages, endpoint, apiKey, chatUrl, model, cfg, embedTarget }) {
-  if (!endpoint || !apiKey || !model) throw new Error('先在「供应商」里配好并选中一个可用模型，再整理。')
+export async function runLocalOrganize({ person, messages, requestChat, cfg, embedTarget }) {
+  if (typeof requestChat !== 'function') throw new Error('尚未配置记忆整理模型')
+  const startedAt = new Date().toISOString()
   const list = (Array.isArray(messages) ? messages : []).filter(m => m && (m.role === 'user' || m.role === 'assistant') && messageText(m))
   const since = cfg.lastRunAt ? new Date(cfg.lastRunAt).getTime() : 0
   const recent = list.filter(m => { const at = new Date(m.at || m.createdAt || 0).getTime() || 0; if (at > Date.now() + 60000) return false; if (!since) return true; return !!at && at > since }).slice(-60)
   if (!recent.length) return { created: 0, scanned: 0, duplicate: 0 }
 
   const body = {
-    model,
     stream: false,
     temperature: 0.2,
     messages: [
@@ -265,18 +274,17 @@ export async function runLocalOrganize({ person, messages, endpoint, apiKey, cha
       { role: 'user', content: buildPrompt(recent, cfg.rules) },
     ],
   }
-  const response = await apiFetch('/api/chat', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ endpoint, apiKey, chatUrl, body }),
-  })
+  const response = await requestChat(body)
   const text = await response.text()
   if (!response.ok) {
     let message = text
     try { message = JSON.parse(text)?.error || text } catch { /* 原样展示 */ }
     throw new Error(String(message).replace(/^上游返回\s*/, '').slice(0, 120))
   }
-  const proposals = parseProposals(extractContent(text))
+  const content = extractContent(text)
+  const rawItems = assertModelArray(content)
+  const proposals = parseProposals(content)
+  if (rawItems.length && !proposals.length) throw new Error('模型返回的记忆内容无效，未更新整理进度')
   let created = 0
   let duplicate = 0
   let embedded = 0
@@ -300,12 +308,12 @@ export async function runLocalOrganize({ person, messages, endpoint, apiKey, cha
         ...(embedding ? { embedding } : {}),
       }),
     })
-    if (!saved.ok) continue
     const data = await saved.json().catch(() => ({}))
+    if (!saved.ok) throw new Error(data?.error || '记忆保存失败，未更新整理进度')
     if (data?.duplicate) duplicate += 1
     else created += 1
   }
-  const lastRunAt = new Date().toISOString()
-  writeLocalAuto({ lastRunAt, lastRun: { status: 'succeeded', finishedAt: lastRunAt, error: '', scanned: recent.length, created, proposals: proposals.length, embedded } })
+  const lastRunAt = startedAt
+  writeLocalAuto({ lastRunAt, lastRun: { status: 'succeeded', finishedAt: new Date().toISOString(), error: '', scanned: recent.length, created, proposals: proposals.length, embedded } }, person)
   return { created, scanned: recent.length, duplicate }
 }

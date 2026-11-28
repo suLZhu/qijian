@@ -1,3 +1,4 @@
+import { directModelFetch } from './nativeSystem.mjs'
 // 记忆专用模型：整理模型与向量（embedding）模型各占一个槽位，和聊天模型解耦。
 // 留空 = 跟随聊天模型 / 不做向量检索，保证老数据零影响。
 export const MEMORY_MODELS_KEY = 'ai-home.memoryModels'
@@ -14,13 +15,14 @@ export function normalizeMemoryModels(raw) {
   return { organize: slot(v.organize), embed: slot(v.embed) }
 }
 
-export function readMemoryModels() {
-  try { return normalizeMemoryModels(JSON.parse(localStorage.getItem(MEMORY_MODELS_KEY) || 'null')) } catch { return normalizeMemoryModels(null) }
+function memoryModelsKey(person) { return person ? MEMORY_MODELS_KEY + '.' + encodeURIComponent(person) : MEMORY_MODELS_KEY }
+export function readMemoryModels(person = '') {
+  try { return normalizeMemoryModels(JSON.parse(localStorage.getItem(memoryModelsKey(person)) ?? localStorage.getItem(MEMORY_MODELS_KEY) ?? 'null')) } catch { return normalizeMemoryModels(null) }
 }
 
-export function writeMemoryModels(next) {
+export function writeMemoryModels(next, person = '') {
   const normalized = normalizeMemoryModels(next)
-  try { localStorage.setItem(MEMORY_MODELS_KEY, JSON.stringify(normalized)) } catch { /* 私密模式忽略 */ }
+  try { localStorage.setItem(memoryModelsKey(person), JSON.stringify(normalized)) } catch { /* 私密模式忽略 */ }
   return normalized
 }
 
@@ -37,14 +39,14 @@ function embeddingsUrl(endpoint) {
 
 export function embeddingTarget(vendors, slotValue) {
   const vendor = (vendors || []).find(v => v && v.id === slotValue?.vendorId)
-  if (!vendor || !slotValue?.model) return null
+  if (!vendor || !slotValue?.model || vendor.subscription || vendor.subscriptionAccountId || vendor.subscriptionChannel) return null
   return { endpoint: embeddingsUrl(vendor.endpoint), apiKey: pickKey(vendor), model: slotValue.model }
 }
 
 // 一次 embedding 请求：拿不到就抛错，由调用方退回关键词匹配。
 export async function embedText(target, input, fetchImpl) {
   if (!target || !target.endpoint || !target.model) return null
-  const doFetch = fetchImpl || fetch
+  const doFetch = fetchImpl || directModelFetch
   const response = await doFetch(target.endpoint, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...(target.apiKey ? { Authorization: 'Bearer ' + target.apiKey } : {}) },

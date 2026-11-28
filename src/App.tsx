@@ -17,7 +17,8 @@ import { enabledSkillsBlock, loadSkills, parseSkillMarkdown } from './skills.mjs
 import { loadDiagLogs, formatDiagSummary, appendDiagLog, saveDiagLogs, buildDiagSnapshot } from './requestDiag.mjs'
 const ToolDashboard = lazy(() => import('./ToolDashboard').then(module => ({ default: module.ToolDashboard })))
 const MemoryPanel = lazy(() => import('./MemoryPanel').then(module => ({ default: module.MemoryPanel })))
-import { readMemoryModels, embeddingTarget, embedText, cosine } from './memoryModels.mjs'
+import { readMemoryModels, embeddingTarget, embedText, cosine, type MemoryModelSlot } from './memoryModels.mjs'
+import { runLocalOrganize, tidyMemoryLibrary, readLocalAuto } from './memoryLocalOrganize.mjs'
 import { UiDialogHost } from './UiDialogHost'
 import { SystemSetupSheet } from './SystemSetupSheet'
 const BackupCenter = lazy(() => import('./BackupCenter').then(module => ({ default: module.BackupCenter })))
@@ -1404,7 +1405,7 @@ export default function App() {
           const memData = await memResponse.json()
           const list = (Array.isArray(memData.records) ? memData.records : []) as { title: string; content: string; keywords?: string; embedding?: number[] }[]
           if (list.length) {
-            const mm = readMemoryModels()
+            const mm = readMemoryModels(target)
             const embedTarget = mm.embed.model ? embeddingTarget(vendors, mm.embed) : null
             const queryVector = embedTarget ? await settleWithin(embedText(embedTarget, text.slice(0, 500)).catch(()=>null), 700, null) : null
             const scored = list.map(record => {
@@ -2102,24 +2103,29 @@ export default function App() {
 
   // P1-5：按需翻译 reasoning。与 send() 完全隔离——不写会话历史、不发通知、不自动触发。
   // 复用同一 /api/chat 代理与当前模型配置，但用 stream:false 取一次完整回复。
-  async function translateReasoningText(text: string): Promise<string> {
-    const target = person
-    const activeModel = resolveModelConfig(bindings[target]?.modelProfileId || defaultModelId || '', modelProfiles, modelConfig[target])
-    const activeVendor = activeModel.vendorId ? vendors.find(v=>v.id===activeModel.vendorId) : undefined
+  async function requestAuxiliaryModel(target: string, body: {stream:boolean; temperature?:number; messages:{role:string;content:string}[]}, preferred?: MemoryModelSlot): Promise<Response> {
+    const base = resolveModelConfig(bindings[target]?.modelProfileId || defaultModelId || '', modelProfiles, modelConfig[target])
+    const chosen = preferred?.model ? vendors.find(v => v.id === preferred.vendorId && v.enabled !== false) : undefined
+    if (preferred?.model && !chosen) throw new Error('记忆整理模型的供应商不存在或已停用。')
+    const activeModel = chosen ? {...base, vendorId:chosen.id, endpoint:chosen.endpoint, model:preferred!.model} : base
+    const activeVendor = activeModel.vendorId ? vendors.find(v => v.id === activeModel.vendorId) : undefined
     const activeChatUrl = activeVendor ? chatRequestUrl(activeVendor) : ''
-    const access = resolveChatAccess(vendors, subscriptions, activeModel.vendorId || '', bindings[target]?.keyId || '', apiKey[target] || '')
+    const sameVendor = !chosen || chosen.id === base.vendorId
+    const access = resolveChatAccess(vendors, subscriptions, activeModel.vendorId || '', sameVendor ? bindings[target]?.keyId || '' : '', sameVendor ? apiKey[target] || '' : '')
     const apiKeyCandidates = access.apiKeys
     const activeApiKey = apiKeyCandidates[0] || ''
     const logicalId = activeLogicalId(routeState, target, logicalModelId(activeModel.model || ''))
-    const routePlan = buildRoutePlan({routes:routeState.routes,logicalId,vendors,subscriptions,fallbackKeys:[],binding:{fixedRouteId:fixedRouteId(routeState,target)},maxAttempts:MAX_ROUTE_ATTEMPTS})
-    const routeMode = routePlan.length>0
+    const routePlan = chosen ? [] : buildRoutePlan({routes:routeState.routes,logicalId,vendors,subscriptions,fallbackKeys:[],binding:{fixedRouteId:fixedRouteId(routeState,target)},maxAttempts:MAX_ROUTE_ATTEMPTS})
+    const routeMode = routePlan.length > 0
     const subscriptionProtocol = routeMode ? '' : access.protocol
-    const subscriptionAccountId = access.accountId
-    if(!routeMode && access.error) throw new Error(access.error)
-    if(subscriptionProtocol&&isLocalMode()&&!nativeHttpStreamAvailable())throw new Error('订阅聊天需要 App 原生网络桥，请用最新 APK 或连接服务器。')
-    if(!routeMode&&!subscriptionProtocol&&(!activeModel.endpoint.trim()||!activeModel.model.trim()||!activeApiKey.trim()))throw new Error('尚未配置可用的模型，无法翻译。')
-    const body={model:activeModel.model.trim(),messages:buildTranslationMessages(text),stream:false}
-    const response=await apiFetch('/api/chat',{method:'POST',credentials:'include',headers:{'Content-Type':'application/json'},body:JSON.stringify({assistantId:target,endpoint:activeModel.endpoint.trim(),chatUrl:activeChatUrl,apiKey:activeApiKey.trim(),apiKeys:apiKeyCandidates,timeZone,body,...(subscriptionProtocol?{subscriptionProtocol,subscriptionAccountId}:{}),...(routeMode?{routes:routePlan}:{})})})
+    if (!routeMode && access.error) throw new Error(access.error)
+    if (subscriptionProtocol && isLocalMode() && !nativeHttpStreamAvailable()) throw new Error('订阅模型需要 App 原生网络桥，请用最新 APK 或连接服务器。')
+    if (!routeMode && !subscriptionProtocol && (!activeModel.endpoint.trim() || !activeModel.model.trim() || !activeApiKey.trim())) throw new Error('尚未配置可用的模型。')
+    return apiFetch('/api/chat',{method:'POST',credentials:'include',headers:{'Content-Type':'application/json'},body:JSON.stringify({assistantId:target,endpoint:activeModel.endpoint.trim(),chatUrl:activeChatUrl,apiKey:activeApiKey.trim(),apiKeys:apiKeyCandidates,timeZone,body:{...body,model:activeModel.model.trim()},...(subscriptionProtocol?{subscriptionProtocol,subscriptionAccountId:access.accountId}:{}),...(routeMode?{routes:routePlan}:{})})})
+  }
+
+  async function translateReasoningText(text: string): Promise<string> {
+    const response = await requestAuxiliaryModel(person, {messages:buildTranslationMessages(text),stream:false})
     if(!response.ok)throw new Error('翻译请求失败（HTTP '+response.status+'）')
     const data:any=await response.json()
     const out=data?.choices?.[0]?.message?.content??data?.choices?.[0]?.text
@@ -2352,7 +2358,10 @@ export default function App() {
       if(section==='生图'||section==='视频'||section==='语音') return <MediaSettings vendors={vendors} fixedMode={section==='生图'?'image':section==='视频'?'video':'audio'}/>
       if(section==='听觉') return <HearingSettings key={target} vendors={vendors} person={target}/>
       if(section==='上下文') return <ContextSettings/>
-      if(section==='记忆管理') return <MemoryPanel key={target} person={target} personLabel={displayName(target)} personMessages={messages[target]||[]}/>
+      if(section==='记忆管理') return <MemoryPanel key={target} person={target} personLabel={displayName(target)} personMessages={messages[target]||[]}
+        modelOptions={vendors.filter(v=>v.enabled!==false).flatMap(v=>v.models.map(m=>({vendorId:v.id,model:m.id,label:v.name+' · '+m.name})))}
+        onRunOrganize={cfg=>runLocalOrganize({person:target,messages:messages[target]||[],cfg,requestChat:body=>requestAuxiliaryModel(target,body,readMemoryModels(target).organize),embedTarget:embeddingTarget(vendors,readMemoryModels(target).embed)})}
+        onTidyMemories={records=>tidyMemoryLibrary({person:target,records,autoConfirm:readLocalAuto(target).autoConfirm,requestChat:body=>requestAuxiliaryModel(target,body,readMemoryModels(target).organize)})}/>
       if(section==='信息注入') return <><TimeZoneSettings timeZone={timeZone} setTimeZone={setTimeZone}/><SettingsInjection/></>
       if(section==='工具与扩展') return <SettingsTools/>
       if(section==='可选云同步') return <><ApiBaseSettings onApplied={recheckAfterApiChange}/>{!isLocalMode()&&<button className="settings-logout" onClick={logout}>退出登录</button>}</>

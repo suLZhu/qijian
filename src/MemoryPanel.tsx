@@ -3,7 +3,7 @@
 // 把原先埋在「工具调用看板」里的记忆治理搬到助手自己的长期记忆入口，
 // 并接上服务端每 5 分钟一次的自动整理：这里只负责展示和手动触发，
 // 「要不要整理」由服务端规则决定，避免模型自己决定何时记忆。
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import './ToolDashboard.css'
 import './MemoryPanel.css'
 import { isLocalMode } from './apiBase.mjs'
@@ -183,8 +183,8 @@ function AutoOrganizeCard({ person }: { person: string }) {
 
 // 记忆专用模型：整理模型 / 向量模型各一个槽位，和聊天模型解耦。
 // 留空分别表示「跟随聊天模型」和「不做向量检索（退回关键词）」。
-function MemoryModelCard({ options }: { options: { vendorId: string; model: string; label: string }[] }) {
-  const [models, setModels] = useState(() => readMemoryModels())
+function MemoryModelCard({ person, options }: { person: string; options: { vendorId: string; model: string; label: string }[] }) {
+  const [models, setModels] = useState(() => readMemoryModels(person))
   const [notice, setNotice] = useState('')
   const encode = (slot: { vendorId: string; model: string }) => (slot.model ? slot.vendorId + '::' + slot.model : '')
   const decode = (value: string) => {
@@ -213,7 +213,7 @@ function MemoryModelCard({ options }: { options: { vendorId: string; model: stri
       </label>
     </div>
     <div className="memory-auto-actions">
-      <button type="button" onClick={() => { writeMemoryModels(models); setNotice('记忆模型已保存。') }}>保存模型设置</button>
+      <button type="button" onClick={() => { writeMemoryModels(models,person); setNotice('记忆模型已保存。') }}>保存模型设置</button>
     </div>
     <p className="tool-dash-note">向量模型要供应商提供 OpenAI 兼容的 <code>/v1/embeddings</code>，并且先在该供应商的「模型」里加上它（例如 text-embedding-3-small）才能选到；不支持的供应商会自动退回关键词匹配，记忆本身照常保存。</p>
   </section>
@@ -221,11 +221,12 @@ function MemoryModelCard({ options }: { options: { vendorId: string; model: stri
 
 // 本地模式的自动整理：没有服务器，就在这台设备上用当前模型跑一次。
 // 交互和服务器版保持一致（阈值 / 自动生效 / 规则 / 立即整理），只是调度换成「打开面板时触发」。
-function LocalAutoCard({ personMessages, onRun }: {
+function LocalAutoCard({ person, personMessages, onRun }: {
+  person: string
   personMessages: unknown[]
   onRun?: (cfg: LocalAuto) => Promise<{ created: number; scanned: number; duplicate: number }>
 }) {
-  const [cfg, setCfg] = useState<LocalAuto>(() => readLocalAuto())
+  const [cfg, setCfg] = useState<LocalAuto>(() => readLocalAuto(person))
   const [busy, setBusy] = useState('')
   const [notice, setNotice] = useState('')
   const [error, setError] = useState('')
@@ -234,18 +235,18 @@ function LocalAutoCard({ personMessages, onRun }: {
   const trigger = localTrigger(cfg, stats)
   const patch = (next: Partial<LocalAuto>) => setCfg(old => ({ ...old, ...next }))
 
-  async function run(current: LocalAuto) {
+  const run = useCallback(async (current: LocalAuto) => {
     if (!onRun || busy) return
     setBusy('run'); setError(''); setNotice('')
     try {
       const result = await onRun(current)
-      setCfg(readLocalAuto())
+      setCfg(readLocalAuto(person))
       setNotice(result.scanned === 0
         ? '上次整理之后没有新的对话。'
         : `看了 ${result.scanned} 条对话，新增 ${result.created} 条记忆${result.duplicate ? `（${result.duplicate} 条重复已跳过）` : ''}。`)
     } catch (e) { setError(e instanceof Error ? e.message : '整理失败') }
     finally { setBusy('') }
-  }
+  }, [onRun, busy, person])
 
   // 打开面板时如果已经攒够，就自动跑一次；每个挂载周期只跑一次，避免反复请求模型。
   useEffect(() => {
@@ -254,7 +255,7 @@ function LocalAutoCard({ personMessages, onRun }: {
       autoRan.current = true
       void run(cfg)
     }
-  }, [trigger])
+  }, [trigger, onRun, busy, run, cfg])
 
   const pending = trigger === 'disabled' ? '自动整理已关闭，仍可手动整理。'
     : busy === 'run' ? '正在整理，稍等…'
@@ -266,7 +267,7 @@ function LocalAutoCard({ personMessages, onRun }: {
     <div className="memory-auto-head">
       <div>
         <b>自动整理</b>
-        <small>本地模式：打开记忆面板且攒够条件时，用当前模型把新对话整理成记忆。只在本机执行，不上传。</small>
+        <small>本地模式：打开记忆面板且攒够条件时，用当前模型把新对话整理成记忆。对话片段会发送至所选模型供应商。</small>
       </div>
       <label className="memory-auto-switch">
         <span className="memory-auto-state">{cfg.enabled ? '已开启' : '已关闭'}</span>
@@ -323,7 +324,7 @@ function LocalAutoCard({ personMessages, onRun }: {
     </div>
 
     <div className="memory-auto-actions">
-      <button type="button" onClick={() => { writeLocalAuto(cfg); setCfg(readLocalAuto()); setNotice('策略已保存。') }}>{busy === 'save' ? '保存中…' : '保存策略'}</button>
+      <button type="button" onClick={() => { writeLocalAuto(cfg,person); setCfg(readLocalAuto(person)); setNotice('策略已保存。') }}>{busy === 'save' ? '保存中…' : '保存策略'}</button>
       <button type="button" className="memory-auto-run" onClick={() => void run(cfg)} disabled={!!busy || !onRun}>
         {busy === 'run' ? '整理中…' : '立即整理'}
       </button>
@@ -345,9 +346,9 @@ export function MemoryPanel({ person, personLabel, onJumpToSource, personMessage
       <h3>{personLabel ? personLabel + ' 的记忆' : '记忆面板'}</h3>
       <p>助手记下来的事默认先进候选区；打开「整理后自动生效」后会直接进入记忆库。你随时可以归档或拒绝，拒绝过的内容会留下墓碑，不会再被重复提议。</p>
     </header>
-    {isLocalMode() && !!modelOptions?.length && <MemoryModelCard options={modelOptions} />}
+    {isLocalMode() && !!modelOptions?.length && <MemoryModelCard person={person} options={modelOptions} />}
     {isLocalMode()
-      ? <LocalAutoCard personMessages={personMessages || []} onRun={onRunOrganize} />
+      ? <LocalAutoCard key={person} person={person} personMessages={personMessages || []} onRun={onRunOrganize} />
       : <AutoOrganizeCard person={person} />}
     <MemoryGovernancePanel person={person} onJumpToSource={onJumpToSource} onTidy={onTidyMemories} />
   </div>

@@ -158,33 +158,59 @@ function WidgetSheet({ widget, onClose, onSaved }: { widget: RoomWidget; onClose
   const [noteText, setNoteText] = useState(String(widget.config?.text || ''))
   const customTimerRef = useRef<number | undefined>(undefined)
   const customDataRef = useRef<any>(widget.config?.data || {})
+  const currentRef = useRef(widget)
+  const saveQueueRef = useRef<Promise<RoomWidget | null>>(Promise.resolve(widget))
+  const pendingCustomRef = useRef(false)
+
+  const save = useCallback((patch: { title?: string; config?: any; customData?: any }) => {
+    setBusy(true)
+    const job = saveQueueRef.current.then(async () => {
+      const current = currentRef.current
+      const config = patch.customData !== undefined ? { ...current.config, data: patch.customData } : patch.config
+      try {
+        const response = await apiFetch('/api/widgets/' + encodeURIComponent(current.id), {
+          method: 'PATCH', credentials: 'include', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ person: current.person, ...(patch.title !== undefined ? {title:patch.title} : {}), ...(config !== undefined ? {config} : {}) }),
+        })
+        const data = await response.json().catch(() => ({}))
+        if (!response.ok) throw new Error(data.error || '保存失败')
+        currentRef.current = data.widget
+        setCurrent(data.widget)
+        setError('')
+        onSaved()
+        return data.widget as RoomWidget
+      } catch (err) {
+        setError(err instanceof Error ? err.message : '保存失败')
+        return null
+      }
+    })
+    saveQueueRef.current = job
+    void job.then(() => { if (saveQueueRef.current === job) setBusy(false) })
+    return job
+  }, [onSaved])
+
+  const flushCustom = useCallback(() => {
+    window.clearTimeout(customTimerRef.current)
+    customTimerRef.current = undefined
+    if (!pendingCustomRef.current) return saveQueueRef.current
+    pendingCustomRef.current = false
+    const data = customDataRef.current
+    return save({customData:data}).then(result => {
+      if (!result) pendingCustomRef.current = true
+      return result
+    })
+  }, [save])
+
   const saveCustomData = useCallback((data: any) => {
     customDataRef.current = data
+    pendingCustomRef.current = true
     window.clearTimeout(customTimerRef.current)
-    customTimerRef.current = window.setTimeout(() => {
-      void save({ config: { ...current.config, data } })
-    }, 400)
-  }, [current])
-  useEffect(() => () => { window.clearTimeout(customTimerRef.current) }, [])
+    customTimerRef.current = window.setTimeout(() => { void flushCustom() }, 400)
+  }, [flushCustom])
 
-  async function save(patch: { title?: string; config?: any }) {
-    if (busy) return null
-    setBusy(true)
-    setError('')
-    try {
-      const response = await apiFetch('/api/widgets/' + encodeURIComponent(current.id), {
-        method: 'PATCH', credentials: 'include', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ person: current.person, title: patch.title ?? title, config: patch.config ?? current.config }),
-      })
-      const data = await response.json().catch(() => ({}))
-      if (!response.ok) throw new Error(data.error || '保存失败')
-      setCurrent(data.widget)
-      onSaved()
-      return data.widget as RoomWidget
-    } catch (err) {
-      setError(err instanceof Error ? err.message : '保存失败')
-      return null
-    } finally { setBusy(false) }
+  async function closeSheet() {
+    const saved = await flushCustom()
+    if (saved) onClose()
   }
 
   async function rename() {
@@ -235,6 +261,9 @@ function WidgetSheet({ widget, onClose, onSaved }: { widget: RoomWidget; onClose
 
   async function removeWidget() {
     if (!(await confirmDialog({ title: '删除小组件', message: '删除「' + current.title + '」？里面的内容也会一起删除。', confirmLabel: '删除', danger: true }))) return
+    window.clearTimeout(customTimerRef.current)
+    pendingCustomRef.current = false
+    await saveQueueRef.current
     setBusy(true)
     try {
       const response = await apiFetch('/api/widgets/' + encodeURIComponent(current.id), {
@@ -249,11 +278,11 @@ function WidgetSheet({ widget, onClose, onSaved }: { widget: RoomWidget; onClose
   }
 
   const ledger = ledgerTotals(current.config)
-  return <div className="widget-sheet-scrim" onClick={onClose}>
+  return <div className="widget-sheet-scrim" onClick={() => void closeSheet()}>
     <div className="widget-sheet" role="dialog" aria-modal="true" aria-label={current.title} onClick={event => event.stopPropagation()}>
       <div className="widget-sheet-head">
         <span className="widget-sheet-type">{TYPE_META[current.type]?.label || '小组件'}</span>
-        <button type="button" className="widget-sheet-close" onClick={onClose} aria-label="关闭"><IconClose size={15}/></button>
+        <button type="button" className="widget-sheet-close" onClick={() => void closeSheet()} aria-label="关闭"><IconClose size={15}/></button>
       </div>
       <input className="widget-title-input" value={title} onChange={event => setTitle(event.target.value)} onBlur={() => void rename()} aria-label="小组件名称" />
       {error && <p className="widget-error" role="alert">{error}</p>}

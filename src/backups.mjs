@@ -6,7 +6,7 @@ const EXCLUDED_LOCAL_KEYS = new Set(['ai-home.sessionToken'])
 
 export const BACKUP_KINDS = [
   { id: 'models', label: '模型配置', prefix: '模型', desc: '供应商 / 模型 / 绑定 / API Key', keys: ['ai-home.vendors', 'ai-home.modelProfiles', 'ai-home.bindings', 'ai-home.modelConfig', 'ai-home.subscriptions', 'ai-home.apiKey'], serverKeys: true },
-  { id: 'memory', label: '记忆', prefix: '记忆', desc: '助手记住的事，含候选/已归档', keys: ['ai-home.local.memoryRecords'], serverMemory: true },
+  { id: 'memory', label: '记忆', prefix: '记忆', desc: '助手记住的事，含候选/已归档', keys: ['ai-home.local.memoryRecords', 'ai-home.memoryAuto', 'ai-home.memoryModels'], keyPrefixes: ['ai-home.memoryAuto.', 'ai-home.memoryModels.'], serverMemory: true },
   { id: 'chat', label: '聊天记录', prefix: '聊天', desc: '全部会话与消息', keys: ['ai-home.conversations', 'ai-home.messages', 'ai-home.activeConversationIds'] },
   { id: 'world', label: '世界书', prefix: '世界书', desc: '世界书条目 / 助手世界书内容', keys: ['ai-home.worldEntries', 'ai-home.worldbook'] },
   { id: 'mcp', label: 'MCP', prefix: 'MCP', desc: 'MCP 连接 / 本地服务配置', keys: ['ai-home.mcpConnections', 'ai-home.local.mcp'] },
@@ -33,6 +33,10 @@ export function collectBackupLocal(storage, kindId) {
     const value = storage.getItem(key)
     if (typeof value === 'string') out[key] = value
   }
+  for (let i = 0; i < storage.length; i++) {
+    const key = storage.key(i)
+    if (key && (kind.keyPrefixes || []).some(prefix => key.startsWith(prefix))) out[key] = storage.getItem(key) || ''
+  }
   return out
 }
 
@@ -45,12 +49,12 @@ export function localKeysForRestore(payload, kindId) {
     // A category restore must never overwrite unrelated settings, even with a malformed file.
     if (kind.all) return Object.fromEntries(Object.entries(source).filter(([key,value]) =>
       key.startsWith('ai-home.') && !EXCLUDED_LOCAL_KEYS.has(key) && typeof value === 'string'))
-    return Object.fromEntries((kind.keys || []).filter(key => typeof source[key] === 'string').map(key => [key,source[key]]))
+    return Object.fromEntries(Object.entries(source).filter(([key,value]) => typeof value === 'string' && ((kind.keys || []).includes(key) || (kind.keyPrefixes || []).some(prefix => key.startsWith(prefix)))))
   }
   if (payload.kind === 'full' && kindId !== 'full') {
     const out = {}
     const local = payload.data.local && typeof payload.data.local === 'object' ? payload.data.local : {}
-    for (const key of kind.keys || []) if (typeof local[key] === 'string') out[key] = local[key]
+    for (const [key, value] of Object.entries(local)) if (typeof value === 'string' && ((kind.keys || []).includes(key) || (kind.keyPrefixes || []).some(prefix => key.startsWith(prefix)))) out[key] = value
     return out
   }
   throw new Error('备份类型不匹配：这是「' + (backupKind(payload.kind)?.label || payload.kind) + '」，不能恢复到「' + kind.label + '」')

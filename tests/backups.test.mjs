@@ -119,3 +119,13 @@ test('同一更新时间的多条记忆分页备份仍完整且不重复', () =>
     assert.deepEqual([...first, ...second].map(x => x.id), ['c', 'b', 'a'])
   } finally { db.close() }
 })
+
+
+test('记忆分类备份和恢复包含各助手的整理和模型配置', () => {
+  const memoryStorage = fakeStorage({'ai-home.memoryAuto.a':'{\"enabled\":true}', 'ai-home.memoryModels.a':'{}', 'ai-home.memoryModels.b':'{}', 'ai-home.vendors':'[]'})
+  const local = collectBackupLocal(memoryStorage, 'memory')
+  assert.deepEqual(Object.keys(local).sort(), ['ai-home.memoryAuto.a','ai-home.memoryModels.a','ai-home.memoryModels.b'])
+  const payload = makeBackupEnvelope('memory', {...local, 'ai-home.vendors':'[]'})
+  assert.deepEqual(localKeysForRestore(payload, 'memory'), local)
+  assert.deepEqual(localKeysForRestore(makeBackupEnvelope('full', {...local,'ai-home.vendors':'[]'}), 'memory'), local)
+})
