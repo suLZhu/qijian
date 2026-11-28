@@ -30,7 +30,7 @@ export function startGeneration(storage, info = {}, now = Date.now()) {
   if (!storage || !String(info.messageId || '')) return false
   try {
     const entry = {person:String(info.person || ''), conversationId:String(info.conversationId || ''), messageId:String(info.messageId), at:Number(now)||Date.now()}
-    const rows = readActiveGenerations(storage).filter(x => x.messageId !== entry.messageId)
+    const rows = readActiveGenerations(storage).filter(x => x.messageId !== entry.messageId && !(entry.person && entry.conversationId && x.person === entry.person && x.conversationId === entry.conversationId))
     storage.setItem(ACTIVE_GENERATION_KEY, JSON.stringify([...rows, entry]))
     return true
   } catch { return false }

@@ -92,57 +92,6 @@ final class SystemBridge {
         }
     }
 
-    /**
-     * 同步 HTTP POST（仅 HTTPS）：给本地模式直连远程 MCP 用。
-     * WebView 的 fetch 会被远端 CORS 拦截，走原生请求则不受同源策略限制。
-     * 返回 {"status":200,"headers":{...},"body":"..."} 或 {"error":"..."}。
-     */
-    @JavascriptInterface
-    public String httpPost(String url, String headersJson, String body) {
-        try {
-            java.net.URL u = new java.net.URL(url);
-            if (!"https".equalsIgnoreCase(u.getProtocol())) {
-                return new JSONObject().put("error", "仅支持 HTTPS").toString();
-            }
-            java.net.HttpURLConnection conn = (java.net.HttpURLConnection) u.openConnection();
-            conn.setRequestMethod("POST");
-            conn.setConnectTimeout(12000);
-            conn.setReadTimeout(25000);
-            conn.setDoOutput(true);
-            conn.setRequestProperty("Content-Type", "application/json");
-            conn.setRequestProperty("Accept", "application/json, text/event-stream");
-            if (headersJson != null) {
-                JSONObject h = new JSONObject(headersJson);
-                java.util.Iterator<String> it = h.keys();
-                while (it.hasNext()) {
-                    String k = it.next();
-                    conn.setRequestProperty(k, h.optString(k));
-                }
-            }
-            byte[] payload = body == null ? new byte[0] : body.getBytes("UTF-8");
-            conn.setFixedLengthStreamingMode(payload.length);
-            try (java.io.OutputStream os = conn.getOutputStream()) {
-                os.write(payload);
-            }
-            int code = conn.getResponseCode();
-            java.io.InputStream in = code >= 400 ? conn.getErrorStream() : conn.getInputStream();
-            String text = in == null ? "" : readAll(in);
-            JSONObject headers = new JSONObject();
-            for (java.util.Map.Entry<String, java.util.List<String>> e : conn.getHeaderFields().entrySet()) {
-                if (e.getKey() == null) continue;
-                headers.put(e.getKey().toLowerCase(java.util.Locale.ROOT), String.join(",", e.getValue()));
-            }
-            conn.disconnect();
-            return new JSONObject().put("status", code).put("headers", headers).put("body", text).toString();
-        } catch (Exception e) {
-            try {
-                return new JSONObject().put("error", e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage()).toString();
-            } catch (Exception ignored) {
-                return "{\"error\":\"HTTP 请求失败\"}";
-            }
-        }
-    }
-
     @JavascriptInterface
     public void modelHttp(String id, String policy, String method, String url, String headersJson, String body) {
         if (id == null || id.isEmpty()) return;
@@ -264,38 +213,6 @@ final class SystemBridge {
             intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
             activity.startActivity(intent);
         } catch (Exception ignored) { }
-    }
-
-    /** 原生 HTTPS GET：给订阅账号拉 Codex 模型目录用（WebView 直连会被 CORS 拦）。 */
-    @JavascriptInterface
-    public String httpGet(String url, String headersJson) {
-        try {
-            java.net.URL u = new java.net.URL(url);
-            if (!"https".equalsIgnoreCase(u.getProtocol())) {
-                return new JSONObject().put("error", "仅支持 HTTPS").toString();
-            }
-            java.net.HttpURLConnection conn = (java.net.HttpURLConnection) u.openConnection();
-            conn.setRequestMethod("GET");
-            conn.setConnectTimeout(12000);
-            conn.setReadTimeout(20000);
-            conn.setRequestProperty("Accept", "application/json");
-            if (headersJson != null) {
-                JSONObject h = new JSONObject(headersJson);
-                java.util.Iterator<String> it = h.keys();
-                while (it.hasNext()) {
-                    String k = it.next();
-                    conn.setRequestProperty(k, h.optString(k));
-                }
-            }
-            int code = conn.getResponseCode();
-            java.io.InputStream in = code >= 400 ? conn.getErrorStream() : conn.getInputStream();
-            String text = in == null ? "" : readAll(in);
-            conn.disconnect();
-            return new JSONObject().put("status", code).put("body", text).toString();
-        } catch (Exception e) {
-            try { return new JSONObject().put("error", e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage()).toString(); }
-            catch (Exception ignored) { return "{\"error\":\"GET 请求失败\"}"; }
-        }
     }
 
     private static String readAll(java.io.InputStream in) throws java.io.IOException {

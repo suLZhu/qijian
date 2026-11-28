@@ -44,16 +44,10 @@ jobs:
         run: |
           npm ci --no-audit --no-fund --prefer-offline --fetch-retries=3 --fetch-retry-mintimeout=20000 --fetch-retry-maxtimeout=120000
           npm ls --depth=0
-      - name: Generate unified Lucide PNG icons
+      - name: Validate checked-in unified Lucide PNG icons
         run: |
-          python3 -m venv /tmp/qijian-icons
-          /tmp/qijian-icons/bin/pip install CairoSVG==2.7.1
-          npm pack lucide-static@0.468.0 --pack-destination /tmp
-          mkdir -p /tmp/qijian-lucide
-          tar -xzf /tmp/lucide-static-0.468.0.tgz -C /tmp/qijian-lucide
-          /tmp/qijian-icons/bin/python scripts/generate-ui-icons.py /tmp/qijian-lucide/package
-      - name: Reject legacy icon renderers
-        run: node tests/icon-system-guard.mjs
+          node tests/icon-system-guard.mjs
+          node --test tests/compose-tools.test.mjs
       - name: Type-check and build web assets
         run: npm run build
       - name: Run vision, backup and time regression tests

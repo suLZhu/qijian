@@ -24,9 +24,7 @@ export declare function listBackupFiles(): { name: string; size: number; modifie
 export declare function readBackupFile(name: string): { ok: boolean; name?: string; content?: string; error?: string } | null
 export declare function deleteBackupFile(name: string): boolean
 
-export declare function nativeHttpGet(url: string, headers?: Record<string, string>): { status?: number; body?: string; error?: string } | null
 
-export declare function nativeHttpPost(url: string, headers?: Record<string, string>, body?: string): { status?: number; body?: string; error?: string } | null
 export declare function openExternalUrl(url: string): boolean
 
 export declare function nativeHttpStreamAvailable(): boolean

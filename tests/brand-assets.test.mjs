@@ -103,8 +103,8 @@ test('所有用户可见品牌名为「栖间」，无旧称残留', () => {
   assert.match(strings, /<string name="title_activity_main">栖间<\/string>/, '最近任务标题')
   assert.match(read('index.html'), /<title>栖间<\/title>/, 'Web title')
   assert.match(read('index.html'), /href="\/favicon\.png"/)
-  assert.match(read('src/App.tsx'), /<b>关于 栖间<\/b>/)
-  assert.match(read('src/App.tsx'), /BRAND_NAME/)
+  assert.match(read('src/layout/sections.ts'), /\['关于栖间',/)
+  assert.match(read('src/App.tsx'), /section==='关于栖间'/)
 })
 
 test('内部 applicationId / package 保持不变，历史存储 key 未做无意义重构', () => {

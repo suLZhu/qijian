@@ -99,12 +99,6 @@ async function fetchThroughBridge(policy, url, { method = 'GET', headers, body, 
   })
 }
 
-export function nativeHttpPost(url, headers = {}, body = '') {
-  const b = bridge()
-  if (!b || typeof b.httpPost !== 'function') return null
-  try { return parse(b.httpPost(String(url || ''), JSON.stringify(headers || {}), String(body || ''))) } catch { return null }
-}
-
 export function openNativeWebView(url, title = '') {
   const b = bridge()
   if (!b || typeof b.openWebView !== 'function') return false
@@ -120,9 +114,9 @@ export function openExternalUrl(url) {
 export function appVersion() {
   const b = bridge()
   if (b && typeof b.appVersion === 'function') {
-    try { return String(b.appVersion() || '') } catch { /* 回退 */ }
+    try { const version = String(b.appVersion() || ''); if (version) return version } catch { /* 回退 */ }
   }
-  return '3.8'
+  return '网页版'
 }
 
 export async function readClipboardText() {
@@ -139,12 +133,6 @@ export async function readClipboardText() {
     }
   } catch { /* 需要用户手势或权限 */ }
   return ''
-}
-
-export function nativeHttpGet(url, headers = {}) {
-  const b = bridge()
-  if (!b || typeof b.httpGet !== 'function') return null
-  try { return parse(b.httpGet(String(url || ''), JSON.stringify(headers || {}))) } catch { return null }
 }
 
 export function setGenerationForeground(payload) {

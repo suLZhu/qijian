@@ -29,7 +29,7 @@ import { normalizeSubscriptions, SUBSCRIPTION_STORAGE_KEY } from './subscription
 import { subscriptionOperations } from './subscriptionOperations.mjs'
 import { runRouteChat } from './chatRouteRunner.mjs'
 import { subscriptionChatResponse } from './subscriptionChatResponse.mjs'
-import { directModelFetch, subscriptionModelFetch, nativeHttpStreamAvailable, nativeHttpGet, setGenerationForeground } from './nativeSystem.mjs'
+import { directModelFetch, subscriptionModelFetch, nativeHttpStreamAvailable, setGenerationForeground } from './nativeSystem.mjs'
 import { parseSearchResults } from './webSearch.mjs'
 import { WIDGET_TYPES, WIDGET_TITLES, defaultConfig, normalizeConfig } from './server/widgets.mjs'
 
@@ -710,16 +710,19 @@ export async function localHandle(path, init) {
     if (p === '/api/web/search' && method === 'GET') {
       const query = String(q.get('q') || '').trim().slice(0, 200)
       if (!query) return json(400, { error: '搜索词不能为空' })
-      const response = nativeHttpGet('https://html.duckduckgo.com/html/?q=' + encodeURIComponent(query), {
-        Accept: 'text/html',
-        'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.6',
-        'User-Agent': 'Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124 Mobile Safari/537.36',
-      })
-      if (!response) return json(400, { error: '联网搜索需要 App 原生网络桥；请用最新 APK，或连接服务器。' })
-      if (response.error) return json(502, { error: '搜索请求失败：' + response.error })
-      const status = Number(response.status) || 0
-      if (status >= 400) return json(502, { error: '搜索服务返回 HTTP ' + status })
-      const results = parseSearchResults(String(response.body || ''), 8)
+      const controller = new AbortController()
+      const timer = setTimeout(() => controller.abort(), 30000)
+      let results
+      try {
+        const response = await directModelFetch('https://html.duckduckgo.com/html/?q=' + encodeURIComponent(query), {
+          headers: { Accept: 'text/html', 'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.6' },
+          signal: controller.signal,
+        })
+        if (!response.ok) return json(502, { error: '搜索服务返回 HTTP ' + response.status })
+        results = parseSearchResults(await response.text(), 8)
+      } catch (error) {
+        return json(502, { error: '搜索请求失败：' + (error?.message || String(error)) })
+      } finally { clearTimeout(timer) }
       if (!results.length) return json(502, { error: '搜索没有返回结果，稍后再试或换个关键词' })
       return json(200, { query, results })
     }

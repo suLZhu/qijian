@@ -436,8 +436,7 @@ body.has-pack .shell::before{display:none!important}
 .shell #subscription-accounts,
 .shell .tool-dash,
 .shell .memory-panel,
-.shell .backup-center,
-.shell .workspace-settings{
+.shell .backup-center{
   padding-top:0!important;
   margin-top:0!important;
 }

@@ -1,12 +1,12 @@
-import { UsageStats } from './UsageStats'
+const UsageStats = lazy(() => import('./UsageStats').then(module => ({ default: module.UsageStats })))
 import { SettingsInjection, SettingsTools } from './SettingsControls'
-import { MediaSettings } from './MediaSettings'
+const MediaSettings = lazy(() => import('./MediaSettings').then(module => ({ default: module.MediaSettings })))
 import { readWeatherContext } from './weatherContext.mjs'
 import type { LedgerRound } from './usageLedger.mjs'
-import { useCallback, useEffect, useState, useRef, type FormEvent, type ChangeEvent } from 'react'
+import { lazy, useCallback, useEffect, useState, useRef, type FormEvent, type ChangeEvent } from 'react'
 import './App.css'
 import AppLayout from './AppLayout'
-import { ThemeSettings } from './ThemeSettings'
+const ThemeSettings = lazy(() => import('./ThemeSettings').then(module => ({ default: module.ThemeSettings })))
 import './ThemePage.css'
 import { DEFAULT_THEME,themeStyle,type ThemePrefs,type CustomAssets,type PersonAppearancePref,EMPTY_ASSETS } from './theme'
 import { LEGACY_ASSISTANTS, DEFAULT_DISPLAY_NAMES, migrateLocalStorage, toAssistantId, type AssistantRecord } from './assistantIdentity'
@@ -14,12 +14,12 @@ import { CharacterSettings, blankCard, type CharacterCard } from './CharacterSet
 import { WorldbookEditor, type WorldEntry } from './WorldbookEditor'
 import { enabledSkillsBlock, loadSkills, parseSkillMarkdown } from './skills.mjs'
 import { loadDiagLogs, formatDiagSummary, appendDiagLog, saveDiagLogs, buildDiagSnapshot } from './requestDiag.mjs'
-import { ToolDashboard } from './ToolDashboard'
-import { MemoryPanel } from './MemoryPanel'
+const ToolDashboard = lazy(() => import('./ToolDashboard').then(module => ({ default: module.ToolDashboard })))
+const MemoryPanel = lazy(() => import('./MemoryPanel').then(module => ({ default: module.MemoryPanel })))
 import { readMemoryModels, embeddingTarget, embedText, cosine } from './memoryModels.mjs'
 import { UiDialogHost } from './UiDialogHost'
 import { SystemSetupSheet } from './SystemSetupSheet'
-import { BackupCenter } from './BackupCenter'
+const BackupCenter = lazy(() => import('./BackupCenter').then(module => ({ default: module.BackupCenter })))
 import { WebBrowser, type WebPage } from './WebBrowser'
 import { GUIDE_BRIEF, GUIDE_MARKDOWN } from './guide.mjs'
 import { applyWebUpdate, compareVersions, currentBundle, liveUpdateSupported, notifyAppReady, resetToBuiltin } from './liveUpdate.mjs'
@@ -39,7 +39,7 @@ import { CONTEXT_LIMITS, planCompaction, conversationExcerpt, buildSummarySystem
 import { IconChat, IconClock, IconMemory, IconSparkles, IconPlus, IconBack, IconChevronRight, IconChevronDown, IconChevronUp, IconClose, IconEdit, IconTrash, IconEye, IconEyeOff, IconArrowUp, IconArrowDown, IconTest, IconSearch, IconMinus, IconWarning, IconMail, IconCheck, IconRefresh, IconGrid, IconMore, IconStar, type IconComponent } from './icons'
 import { DEFAULT_BEAUTIFY_PACK } from './beautify'
 import { BUILTIN_THEME_PACKS } from './builtinThemePacks.mjs'
-import { PersonAppearance } from './PersonAppearance'
+const PersonAppearance = lazy(() => import('./PersonAppearance').then(module => ({ default: module.PersonAppearance })))
 import { reportToolCallStart, reportToolCallEnd, classifyToolError, type ToolCallSource } from './toolCalls'
 import { decideTaskConsumption, parseTaskEnvelope } from './taskResult.mjs'
 import { normalizeTimeZone, buildTimeContext } from './timeContext.mjs'
@@ -66,7 +66,7 @@ import { restoreModelConfigs, emptyBinding, normalizeProfiles, normalizeBindings
 import { normalizeVendors, syncVendorProfiles, allVendorKeys, resolveChatAccess, chatRequestUrl, modelListUrl, groupModels, orderedKeys, DEFAULT_API_PATH, type Vendor } from './vendors.mjs'
 // 订阅账号：本地持久化归一化；极简账号登录面板单独放一个文件。
 import { SUBSCRIPTION_STORAGE_KEY, normalizeSubscriptions, type SubscriptionAccount } from './subscriptionChannels.mjs'
-import { SubscriptionAccounts } from './SubscriptionAccounts'
+const SubscriptionAccounts = lazy(() => import('./SubscriptionAccounts').then(module => ({ default: module.SubscriptionAccounts })))
 // 统一模型线路层：一个逻辑模型可挂多条线路，主线路优先 + 自动 fallback。
 // 线路配置（可能含内联 Key）只存本机，整包不进云端快照。
 import { logicalModelId, buildRoutePlan, MAX_ROUTE_ATTEMPTS } from './modelRoutes.mjs'
@@ -75,7 +75,7 @@ import { summarizeRouteReport } from './routeFallback.mjs'
 // 统一简洁下拉：替换原生 select，避免 Android WebView 弹系统白方框。
 import { SoftSelect } from './SoftSelect'
 import { ModelPickerSheet } from './ModelPickerSheet'
-import { ModelSpecPage } from './ModelSpecPage'
+const ModelSpecPage = lazy(() => import('./ModelSpecPage').then(module => ({ default: module.ModelSpecPage })))
 import { ModelChips } from './ModelChips'
 import { specForModel, withModelSpec, clearModelSpec, specBadges, inferModelSpec } from './modelSpecs.mjs'
 import { parseKelivoModelConfigs, kelivoConfigsToVendors, kelivoImportSummary } from './kelivoImport.mjs'
@@ -92,7 +92,7 @@ import { App as CapApp } from '@capacitor/app'
 import { loadCustomAssets, saveCustomAssets } from './assetStore.mjs'
 // Android 系统能力：真实状态列表、系统通知、精确闹钟、开机恢复。
 // 桌面没有原生桥时全部静默降级，不影响现有聊天 / 订阅 / 多线路链路。
-import { AndroidSystemSettings } from './AndroidSystemSettings'
+const AndroidSystemSettings = lazy(() => import('./AndroidSystemSettings').then(module => ({ default: module.AndroidSystemSettings })))
 import { channelPlan, notificationPayload, decideNotification, loadNotified, markNotified, routeFromNotificationOpen } from './notificationDispatch.mjs'
 import { buildAlarmPlan } from './taskAlarms.mjs'
 import { readNotificationPrefs } from './notificationPreferences.mjs'
@@ -2235,7 +2235,7 @@ export default function App() {
   // 聊天打开时给整条布局链上锁：shell 用 height 封顶（而非 min-height），
   // 消息列表成为唯一滚动容器，页面整体不再被聊天记录撑长。
   // 美化包激活时颜色变量交给包（写在 :root 上），shell 不再用内置主题色覆盖，否则包只换背景、颜色还是紫的。
-  const themeVars = themeStyle(themePrefs)
+  const themeVars = {...themeStyle(themePrefs), ...(nativeTextZoomAvailable()?{'--font-scale':'1'}:{})}
   const packColorKeys = new Set([
     '--accent','--accent-soft','--accent-contrast','--accent-ink','--page-bg','--app-bg','--surface','--surface-elevated','--card','--field',
     '--ink','--muted','--line','--divider','--border-subtle','--ok','--warning','--danger',
