@@ -5,6 +5,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { localHandle, localAttachmentUrl, warmupLocalAttachments } from '../src/localBackend.mjs'
+import { fetchMemoryRecordsWithin } from '../src/memoryPages.mjs'
 
 function memStorage() {
   const m = new Map()
@@ -299,5 +300,7 @@ test('本机记忆列表按状态分页，更新时间相同时顺序稳定', as
   const second=await getJSON('/api/memory/records?person='+person+'&limit=100&offset=100')
   assert.equal(first.data.records.length,100);assert.equal(second.data.records.length,25)
   assert.equal(new Set([...first.data.records,...second.data.records].map(x=>x.id)).size,125)
+  const recalled = await fetchMemoryRecordsWithin(person,'active',{fetchApi:localHandle,timeoutMs:900})
+  assert.equal(recalled.length,125);assert.ok(recalled.some(row=>row.id==='000'))
   assert.equal((await getJSON('/api/memory/records?person='+person+'&lifecycle=invalid')).status,400)
 })

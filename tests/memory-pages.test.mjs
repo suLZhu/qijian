@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import {fetchAllMemoryRecords} from '../src/memoryPages.mjs'
+import {fetchAllMemoryRecords, fetchMemoryRecordsWithin, rankMemoryRecords} from '../src/memoryPages.mjs'
 
 test('读取超过一页的完整记忆并保留助手隔离',async()=>{
   const rows=Array.from({length:725},(_,i)=>({id:String(i),person:'a'})), calls=[]
@@ -16,3 +16,24 @@ test('分页重复或第二页失败时不返回伪造的完整结果',async()=>
 })
 
  test('不接受其他助手的记忆记录',async()=>{await assert.rejects(fetchAllMemoryRecords('a',undefined,async()=>Response.json({records:[{id:'x',person:'b'}]})),/不属于当前助手/)})
+
+
+test('聊天记忆分页整体受软时限约束并取消网络',async()=>{
+  let aborted=false
+  const fetcher=(_url,init)=>new Promise((_resolve,reject)=>{init.signal.addEventListener('abort',()=>{aborted=true;reject(Error('aborted'))})})
+  await assert.rejects(fetchMemoryRecordsWithin('a','active',{timeoutMs:10,fetchApi:fetcher}),/超时|aborted/)
+  assert.equal(aborted,true)
+})
+
+test('用户停止生成会取消记忆检索',async()=>{
+  const controller=new AbortController();controller.abort(); let called=false
+  await assert.rejects(fetchMemoryRecordsWithin('a','active',{signal:controller.signal,fetchApi:async()=>{called=true;return Response.json({records:[]})}}),/取消/)
+  assert.equal(called,false)
+})
+
+
+test('召回无关键词的相关标题正文，忽略无关记忆',()=>{
+  const rows=[{title:'茶饮偏好',content:'用户喜欢茉莉花茶',keywords:''},{title:'其他',content:'喜欢打篮球',keywords:''}]
+  const result=rankMemoryRecords(rows,'我最近想喝茉莉花茶',null,()=>0)
+  assert.equal(result.length,1);assert.equal(result[0].record.title,'茶饮偏好')
+})
