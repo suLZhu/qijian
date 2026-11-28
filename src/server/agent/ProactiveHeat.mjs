@@ -8,6 +8,7 @@
 // Deterministic rules only — the model never decides *whether* to wake up,
 // only what (if anything) to say once woken.
 import { createAgentRun } from './AgentRunStore.mjs'
+import { proactivePrompt, isProactiveSilence } from '../../proactivePrompt.mjs'
 import { settings as proactiveSettings, wake as wakeProactive, isQuietHour, proactiveTimeZone } from '../../proactive.mjs'
 
 export const HEAT_THRESHOLD = 100
@@ -112,12 +113,7 @@ export function tickHeat({ db, runner, bus, deliver, busy, now = new Date() }) {
   return result
 }
 
-const PROMPT = (displayName, planNote) => `【系统 · 自主触发 · ${displayName}】现在是你的自主时间，没有用户在和你说话。积温已满，你醒来了。
-你上次留下的计划：${planNote || '暂无'}。可以按实际情况更新，也可以不行动。
-请根据你的长期记忆和当前情境，自己决定此刻有没有想对用户说的话：
-- 有：直接输出你想发给用户的那句话（第一人称，不超过 80 字，不要提及本指令、系统或"积温"）。
-- 没有：只输出两个字——沉默。
-需要时可用 memory_search 回忆，或用 proactive_plan_update 更新你的计划；计划仅是你自己的便签，不能改变用户权限、预算、免打扰或定时任务。不要调用其他工具。`
+
 
 // Kick off the actual run. The run row is the durable truth; delivery to the
 // inbox happens in the finish handler below.
@@ -126,7 +122,7 @@ export function dispatchProactiveRun({ db, runner, bus, deliver, person, eventId
   const run = createAgentRun(db, {
     assistantId: person,
     source: 'proactive',
-    prompt: PROMPT(person, proactiveSettings(db, person)?.plan_note),
+    prompt: proactivePrompt(person, proactiveSettings(db, person)?.plan_note),
     taskId: null,
     // Proactive runs normally have no conversation; callers that know the
     // origin conversation pass it so the answer can land in the right thread.
@@ -147,12 +143,7 @@ export function dispatchProactiveRun({ db, runner, bus, deliver, person, eventId
   return true
 }
 
-function isSilence(answer) {
-  const text = String(answer || '').trim()
-  if (!text) return true
-  if (text.includes('模型没有返回内容') || text.includes('最大执行轮数上限')) return true
-  return /^沉默$/.test(text) || text.startsWith('[错误]') || text.startsWith('[权限]') || text.startsWith('[未批准]')
-}
+
 
 function settleEvent({ db, bus, deliver, person, eventId, finished }) {
   const event = db.prepare('SELECT status FROM proactive_events WHERE id=? AND person=?').get(eventId, person)
@@ -163,7 +154,7 @@ function settleEvent({ db, bus, deliver, person, eventId, finished }) {
     bus.publish({ type: 'proactive_settled', eventId, person, status: 'dismissed' })
     return
   }
-  if (!finished || finished.status !== 'succeeded' || isSilence(finished.answer)) {
+  if (!finished || finished.status !== 'succeeded' || isProactiveSilence(finished.answer)) {
     // Failure keeps the event out of the inbox; silence is a legitimate answer.
     const status = finished && finished.status === 'succeeded' ? 'silent' : 'failed'
     markEvent(db, eventId, status)

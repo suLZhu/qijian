@@ -26,3 +26,12 @@ test('历史待处理事件和超过两天的冷却期不能遗漏', () => {
   assert.equal(decide({ events: [{ created_at: old, status: 'done' }] }).reason, 'cooldown')
   assert.equal(decide({ events: [{ created_at: old, status: 'done' }], manual: true }).queued, true)
 })
+
+test('自主消息提示与沉默判断可由本地和服务端共用', async () => {
+  const { proactivePrompt, isProactiveSilence } = await import('../src/proactivePrompt.mjs')
+  assert.match(proactivePrompt('小晏', ''), /没有用户在和你说话/)
+  assert.match(proactivePrompt('小晏', '读书'), /读书/)
+  assert.equal(isProactiveSilence('沉默'), true)
+  assert.equal(isProactiveSilence('[错误] 请求失败'), true)
+  assert.equal(isProactiveSilence('你今天忙不忙？'), false)
+})
