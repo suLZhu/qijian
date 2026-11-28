@@ -19,6 +19,7 @@ const ToolDashboard = lazy(() => import('./ToolDashboard').then(module => ({ def
 const MemoryPanel = lazy(() => import('./MemoryPanel').then(module => ({ default: module.MemoryPanel })))
 import { readMemoryModels, embeddingTarget, embedText, cosine, type MemoryModelSlot } from './memoryModels.mjs'
 import { runLocalOrganize, tidyMemoryLibrary, readLocalAuto } from './memoryLocalOrganize.mjs'
+import { observeAuxiliaryRequest } from './auxiliaryModel.mjs'
 import { UiDialogHost } from './UiDialogHost'
 import { SystemSetupSheet } from './SystemSetupSheet'
 const BackupCenter = lazy(() => import('./BackupCenter').then(module => ({ default: module.BackupCenter })))
@@ -2103,7 +2104,7 @@ export default function App() {
 
   // P1-5：按需翻译 reasoning。与 send() 完全隔离——不写会话历史、不发通知、不自动触发。
   // 复用同一 /api/chat 代理与当前模型配置，但用 stream:false 取一次完整回复。
-  async function requestAuxiliaryModel(target: string, body: {stream:boolean; temperature?:number; messages:{role:string;content:string}[]}, preferred?: MemoryModelSlot): Promise<Response> {
+  async function requestAuxiliaryModel(target: string, body: {stream:boolean; temperature?:number; messages:{role:string;content:string}[]}, preferred?: MemoryModelSlot, trigger = '辅助模型'): Promise<Response> {
     const base = resolveModelConfig(bindings[target]?.modelProfileId || defaultModelId || '', modelProfiles, modelConfig[target])
     const chosen = preferred?.model ? vendors.find(v => v.id === preferred.vendorId && v.enabled !== false) : undefined
     if (preferred?.model && !chosen) throw new Error('记忆整理模型的供应商不存在或已停用。')
@@ -2121,11 +2122,19 @@ export default function App() {
     if (!routeMode && access.error) throw new Error(access.error)
     if (subscriptionProtocol && isLocalMode() && !nativeHttpStreamAvailable()) throw new Error('订阅模型需要 App 原生网络桥，请用最新 APK 或连接服务器。')
     if (!routeMode && !subscriptionProtocol && (!activeModel.endpoint.trim() || !activeModel.model.trim() || !activeApiKey.trim())) throw new Error('尚未配置可用的模型。')
-    return apiFetch('/api/chat',{method:'POST',credentials:'include',headers:{'Content-Type':'application/json'},body:JSON.stringify({assistantId:target,endpoint:activeModel.endpoint.trim(),chatUrl:activeChatUrl,apiKey:activeApiKey.trim(),apiKeys:apiKeyCandidates,timeZone,body:{...body,model:activeModel.model.trim()},...(subscriptionProtocol?{subscriptionProtocol,subscriptionAccountId:access.accountId}:{}),...(routeMode?{routes:routePlan}:{})})})
+    return observeAuxiliaryRequest({storage:localStorage,person:target,trigger,body,
+      request:()=>apiFetch('/api/chat',{method:'POST',credentials:'include',headers:{'Content-Type':'application/json'},body:JSON.stringify({assistantId:target,endpoint:activeModel.endpoint.trim(),chatUrl:activeChatUrl,apiKey:activeApiKey.trim(),apiKeys:apiKeyCandidates,timeZone,body:{...body,model:activeModel.model.trim()},...(subscriptionProtocol?{subscriptionProtocol,subscriptionAccountId:access.accountId}:{}),...(routeMode?{routes:routePlan}:{})})}),
+      identify:response=>{
+        const used = response.headers.get('X-Route-Used') || ''
+        const route = routePlan.find(r=>r.routeId===used)
+        const routeVendorId = routeState.routes.find(r=>r.id===used)?.vendorId || ''
+        if (routeMode && !route) return {model:'',vendorId:'',vendor:'未记录来源',subscription:false,known:false}
+        return {model:route?.model || activeModel.model,vendorId:route ? routeVendorId || 'route:'+route.routeId : activeVendor?.id || '',vendor:route ? vendors.find(v=>v.id===routeVendorId)?.name || route.label : activeVendor?.name || '',subscription:route ? route.source==='subscription' : !!subscriptionProtocol}
+      }})
   }
 
   async function translateReasoningText(text: string): Promise<string> {
-    const response = await requestAuxiliaryModel(person, {messages:buildTranslationMessages(text),stream:false})
+    const response = await requestAuxiliaryModel(person, {messages:buildTranslationMessages(text),stream:false}, undefined, '推理翻译')
     if(!response.ok)throw new Error('翻译请求失败（HTTP '+response.status+'）')
     const data:any=await response.json()
     const out=data?.choices?.[0]?.message?.content??data?.choices?.[0]?.text
@@ -2360,8 +2369,8 @@ export default function App() {
       if(section==='上下文') return <ContextSettings/>
       if(section==='记忆管理') return <MemoryPanel key={target} person={target} personLabel={displayName(target)} personMessages={messages[target]||[]}
         modelOptions={vendors.filter(v=>v.enabled!==false).flatMap(v=>v.models.map(m=>({vendorId:v.id,model:m.id,label:v.name+' · '+m.name})))}
-        onRunOrganize={cfg=>runLocalOrganize({person:target,messages:messages[target]||[],cfg,requestChat:body=>requestAuxiliaryModel(target,body,readMemoryModels(target).organize),embedTarget:embeddingTarget(vendors,readMemoryModels(target).embed)})}
-        onTidyMemories={records=>tidyMemoryLibrary({person:target,records,autoConfirm:readLocalAuto(target).autoConfirm,requestChat:body=>requestAuxiliaryModel(target,body,readMemoryModels(target).organize)})}/>
+        onRunOrganize={cfg=>runLocalOrganize({person:target,messages:messages[target]||[],cfg,requestChat:body=>requestAuxiliaryModel(target,body,readMemoryModels(target).organize,'记忆整理'),embedTarget:embeddingTarget(vendors,readMemoryModels(target).embed)})}
+        onTidyMemories={records=>tidyMemoryLibrary({person:target,records,autoConfirm:readLocalAuto(target).autoConfirm,requestChat:body=>requestAuxiliaryModel(target,body,readMemoryModels(target).organize,'记忆整理')})}/>
       if(section==='信息注入') return <><TimeZoneSettings timeZone={timeZone} setTimeZone={setTimeZone}/><SettingsInjection/></>
       if(section==='工具与扩展') return <SettingsTools/>
       if(section==='可选云同步') return <><ApiBaseSettings onApplied={recheckAfterApiChange}/>{!isLocalMode()&&<button className="settings-logout" onClick={logout}>退出登录</button>}</>
