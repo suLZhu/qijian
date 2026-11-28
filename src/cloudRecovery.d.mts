@@ -39,3 +39,5 @@ export declare function pickActiveConversationIds(convs: ConversationsMap, activ
 export declare function pickActiveMessagesFromSnapshot(convs: ConversationsMap, activeIds: Record<string, string> | null | undefined): Record<string, RecoveryMessageLike[]>
 
 export declare function restoreConversationLists(snapshot: { conversations?: unknown; messages?: unknown }, previous?: ConversationsMap, now?: string): ConversationsMap
+
+export declare function syncRestoredSnapshot(storage: Pick<Storage, 'removeItem'>, snapshot: unknown, send: (snapshot: unknown) => Promise<Response>): Promise<void>

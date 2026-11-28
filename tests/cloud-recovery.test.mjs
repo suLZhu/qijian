@@ -4,7 +4,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import {
-  restoreConversationLists, RECOVERY_BACKUP_KEY, classifyCloudLoadError, conversationsHaveData,
+  syncRestoredSnapshot, restoreConversationLists, RECOVERY_BACKUP_KEY, classifyCloudLoadError, conversationsHaveData,
   countConversationMessages, decideCloudLoadAction, shouldBackupBeforeApply,
   buildRecoveryBackup, pickActiveConversationIds, pickActiveMessagesFromSnapshot,
 } from '../src/cloudRecovery.mjs'
@@ -250,4 +250,17 @@ test('恢复时从常用会话选当前项，并保留已归档的历史', () =>
   const restored = restoreConversationLists({ conversations: { [A]: [archived, current], [B]: [archived] } })
   assert.equal(restored[A][0], archived)
   assert.deepEqual(pickActiveConversationIds(restored, { [A]: archived.id, [B]: archived.id }), { [A]: current.id, [B]: '' })
+})
+
+
+test('恢复后云同步失败保留重试标记，成功才清除', async () => {
+  const map = new Map([['ai-home.restorePending','1']])
+  const storage = {removeItem:key=>map.delete(key)}
+  const snapshot = {conversations:{a:[{id:'a',messages:[{role:'user',content:'已恢复'}]}]}}
+  await assert.rejects(syncRestoredSnapshot(storage,snapshot,async()=>new Response('',{status:503})),/503/)
+  assert.equal(map.get('ai-home.restorePending'),'1')
+  await assert.rejects(syncRestoredSnapshot(storage,snapshot,async()=>{throw new Error('offline')}),/offline/)
+  assert.equal(map.get('ai-home.restorePending'),'1')
+  await syncRestoredSnapshot(storage,snapshot,async sent=>{assert.equal(sent,snapshot);return new Response('',{status:200})})
+  assert.equal(map.has('ai-home.restorePending'),false)
 })

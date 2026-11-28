@@ -136,3 +136,10 @@ export function pickActiveMessagesFromSnapshot(convs, activeIds) {
   }
   return result
 }
+
+// 恢复后的本地快照只有确认上传成功后才能清掉待同步标记；失败或网络中断保留标记以便下次重试。
+export async function syncRestoredSnapshot(storage, snapshot, send) {
+  const response = await send(snapshot)
+  if (!response.ok) throw new Error('HTTP ' + response.status)
+  storage.removeItem('ai-home.restorePending')
+}

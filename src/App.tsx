@@ -61,7 +61,7 @@ import { assetIdsOfMessages, collectReferencedAssetIds, releasedAssetIds } from 
 import { messageWithVision, historyVisionMessageIndexes, historicalMessageWithoutVision } from './visionAttachments.mjs'
 // 会话内消息搜索（微信式）：纯字符串匹配 + 上一条/下一条循环 + messageId 定位。
 // 云端恢复决策（数据安全）：启动动作判定、覆盖前本地备份、快照→视图提取。
-import { restoreConversationLists, RECOVERY_BACKUP_KEY, decideCloudLoadAction, classifyCloudLoadError, shouldBackupBeforeApply, buildRecoveryBackup, pickActiveConversationIds, pickActiveMessagesFromSnapshot } from './cloudRecovery.mjs'
+import { syncRestoredSnapshot, restoreConversationLists, RECOVERY_BACKUP_KEY, decideCloudLoadAction, classifyCloudLoadError, shouldBackupBeforeApply, buildRecoveryBackup, pickActiveConversationIds, pickActiveMessagesFromSnapshot } from './cloudRecovery.mjs'
 // 模型请求诊断（黑匣子）：只旁路观察最终 payload，绝不改请求、绝不记录凭证。
 // 资源库绑定层：设置区一次性添加模型/MCP/世界书，聊天窗口按助手选择由哪个使用。
 import { createToolExecutionBudget } from './toolExecutionBudget.mjs'
@@ -817,13 +817,11 @@ export default function App() {
   const loadCloudState = useCallback(async () => {
     // 刚恢复过备份：先把恢复后的本地快照推到服务器，避免被旧云端快照盖回去。
     if (localStorage.getItem('ai-home.restorePending') === '1') {
-      localStorage.removeItem('ai-home.restorePending')
       try {
-        const saved = await apiFetch('/api/state', {
+        await syncRestoredSnapshot(localStorage, latestSnapshot.current || getSnapshot(), state => apiFetch('/api/state', {
           method: 'PUT', credentials: 'include', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ state: latestSnapshot.current || getSnapshot() }),
-        })
-        if (!saved.ok) throw new Error('HTTP ' + saved.status)
+          body: JSON.stringify({ state }),
+        }))
         setCloudReady(true)
         setCloudStatus('saved')
       } catch {
