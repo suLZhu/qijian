@@ -6,6 +6,7 @@ import { apiFetch, isLocalMode } from './apiBase.mjs'
 import { applyBackupIndexed } from './backupIndexed.mjs'
 import { buildBackupPayload } from './backupService.mjs'
 import { executeBackupRestore } from './backupRestore.mjs'
+import { prepareBackupAttachments } from './backupAttachments.mjs'
 import { confirmDialog } from './uiDialog'
 import {
   BACKUP_DIR_LABEL, BACKUP_KINDS, backupKind, backupFileName, kindFromFileName,
@@ -110,17 +111,19 @@ export function BackupCenter({ people, vendors, setVendors, setModelProfiles }: 
       danger: true,
     })
     if (!ok) return
+    const restoreLocalMode = isLocalMode()
+    const prepared = await prepareBackupAttachments(kindId, payload.data?.indexed, payload.data?.server, restoreLocalMode)
     await executeBackupRestore({
       storage: localStorage,
       local,
-      markPending: !isLocalMode() && Object.keys(local).length > 0,
-      applyIndexed: () => applyBackupIndexed(kindId, payload.data?.indexed),
+      markPending: !restoreLocalMode && Object.keys(local).length > 0,
+      applyIndexed: () => applyBackupIndexed(kindId, prepared.indexed),
       syncServer: async () => {
-        if (isLocalMode() || !payload.data?.server) return
-        const server = payload.data.server
+        if (restoreLocalMode) return
+        const server = payload.data?.server || {}
         const keys = kind.serverKeys ? server.keys : undefined
         const memory = kind.serverMemory ? server.memory : undefined
-        const attachments = (kindId === 'full' || kindId === 'chat') ? server.attachments : undefined
+        const attachments = prepared.serverAttachments
         if (attachments !== undefined) {
           const capability = await apiFetch('/api/backups/attachments', {credentials:'include'})
           const data = await capability.json().catch(() => ({}))
