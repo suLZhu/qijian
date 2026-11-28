@@ -331,3 +331,29 @@ test('本机聊天分类恢复先更新后端快照，旧快照不会盖回',asy
   assert.equal((await (await localHandle('/api/state')).json()).state.conversations.a[0].id,'new')
   assert.equal(localStorage.getItem('ai-home.restorePending'),null)
 })
+
+test('本机 MCP 使用自定义请求头、修改后重连，普通列表不泄漏凭据',async t=>{
+  const catalog='ai-home.local.mcp', bindings='ai-home.local.mcpBindings'
+  const oldCatalog=localStorage.getItem(catalog),oldBindings=localStorage.getItem(bindings)
+  t.after(()=>{if(oldCatalog===null)localStorage.removeItem(catalog);else localStorage.setItem(catalog,oldCatalog);if(oldBindings===null)localStorage.removeItem(bindings);else localStorage.setItem(bindings,oldBindings)})
+  const calls=[]
+  stubFetch(t,async(_url,init)=>{
+    const payload=JSON.parse(init.body),headers=new Headers(init.headers)
+    calls.push({method:payload.method,workspace:headers.get('x-workspace'),authorization:headers.get('authorization')})
+    if(payload.method==='notifications/initialized')return new Response(null,{status:204})
+    const result=payload.method==='initialize'?{protocolVersion:'2025-03-26'}:payload.method==='tools/list'?{tools:[{name:'ping',inputSchema:{type:'object'}}]}:{content:[{type:'text',text:'pong'}]}
+    return Response.json({jsonrpc:'2.0',id:payload.id,result},{headers:{'mcp-session-id':'s1'}})
+  })
+  const person='assistant-yanweixi'
+  const created=await body('/api/mcp',{method:'POST',body:JSON.stringify({name:'测试',url:'https://example.org/mcp',token:'secret-token',headers:{'X-Workspace':'garden'}})})
+  assert.equal(created.status,201);const id=created.data.connection.id
+  assert.equal(JSON.stringify(created.data).includes('secret-token'),false);assert.equal(JSON.stringify(created.data).includes('garden'),false)
+  assert.equal((await body('/api/mcp/bindings',{method:'PUT',body:JSON.stringify({person,connectionIds:[id]})})).status,200)
+  const result=await body('/api/mcp/'+id+'/call',{method:'POST',body:JSON.stringify({person,name:'ping'})})
+  assert.equal(result.status,200);assert.equal(calls.every(c=>c.workspace==='garden'&&c.authorization==='Bearer secret-token'),true)
+  const list=await getJSON('/api/mcp');assert.equal(JSON.stringify(list.data).includes('secret-token'),false);assert.equal(JSON.stringify(list.data).includes('garden'),false)
+  const before=calls.length
+  assert.equal((await body('/api/mcp/'+id,{method:'PUT',body:JSON.stringify({headers:{'X-Workspace':'new'}})})).status,200)
+  assert.equal((await body('/api/mcp/'+id+'/tools',{method:'POST',body:JSON.stringify({person})})).status,200)
+  assert.equal(calls.slice(before).some(c=>c.method==='initialize'&&c.workspace==='new'),true)
+})

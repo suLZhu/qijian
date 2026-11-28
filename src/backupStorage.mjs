@@ -12,8 +12,8 @@ export function backupStorageMode(payload, kind) {
   const mode = payload?.data?.storageMode
   if (mode === 'local' || mode === 'server') return mode
   const server = payload?.data?.server
-  if (server && ['keys','memory','attachments'].some(key=>Object.hasOwn(server,key))) return 'server'
-  if (['full','memory','models'].includes(kind)) return 'local'
+  if (server && ['keys','memory','attachments','mcp'].some(key=>Object.hasOwn(server,key))) return 'server'
+  if (['full','memory','models','mcp'].includes(kind)) return 'local'
   return ''
 }
 export function prepareBackupStorage(payload, kind, local, targetLocal) {

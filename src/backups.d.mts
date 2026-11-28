@@ -1,7 +1,7 @@
 export const BACKUP_APP: string
 export const BACKUP_VERSION: number
 export const BACKUP_DIR_LABEL: string
-export type BackupKind = { id: string; label: string; prefix: string; desc: string; keys?: string[]; all?: boolean; serverKeys?: boolean; serverMemory?: boolean }
+export type BackupKind = { id: string; label: string; prefix: string; desc: string; keys?: string[]; all?: boolean; serverKeys?: boolean; serverMemory?: boolean; serverMcp?: boolean }
 export const BACKUP_KINDS: BackupKind[]
 export function backupKind(id: string): BackupKind | null
 export function collectBackupLocal(storage: Storage, kindId: string): Record<string, string>

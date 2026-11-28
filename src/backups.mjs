@@ -9,8 +9,8 @@ export const BACKUP_KINDS = [
   { id: 'memory', label: '记忆', prefix: '记忆', desc: '助手记住的事，含候选/已归档', keys: ['ai-home.local.memoryRecords', 'ai-home.memoryAuto', 'ai-home.memoryModels'], keyPrefixes: ['ai-home.memoryAuto.', 'ai-home.memoryModels.'], serverMemory: true },
   { id: 'chat', label: '聊天记录', prefix: '聊天', desc: '全部会话与消息', keys: ['ai-home.conversations', 'ai-home.messages', 'ai-home.activeConversationIds'] },
   { id: 'world', label: '世界书', prefix: '世界书', desc: '世界书条目 / 助手世界书内容', keys: ['ai-home.worldEntries', 'ai-home.worldbook'] },
-  { id: 'mcp', label: 'MCP', prefix: 'MCP', desc: 'MCP 连接 / 本地服务配置', keys: ['ai-home.mcpConnections', 'ai-home.local.mcp'] },
-  { id: 'full', label: '整体数据', prefix: '整体', desc: '以上全部 + 世界书 / 主题 / 偏好', all: true, serverKeys: true, serverMemory: true },
+  { id: 'mcp', label: 'MCP', prefix: 'MCP', desc: 'MCP 连接 / 本地服务配置', keys: ['ai-home.mcpConnections', 'ai-home.local.mcp', 'ai-home.local.mcpBindings'], serverMcp: true },
+  { id: 'full', label: '整体数据', prefix: '整体', desc: '以上全部 + 世界书 / 主题 / 偏好', all: true, serverKeys: true, serverMemory: true, serverMcp: true },
 ]
 
 export function backupKind(id) {

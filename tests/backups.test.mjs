@@ -34,6 +34,7 @@ const storage = fakeStorage({
   'ai-home.worldbook': '{}',
   'ai-home.mcpConnections': '{}',
   'ai-home.local.mcp': '{}',
+  'ai-home.local.mcpBindings': '{}',
   'ai-home.sessionToken': 'secret',
   'ai-home.restorePending': '1',
   'other.key': 'x',
@@ -92,7 +93,7 @@ test('世界书、MCP 单独备份，互不覆盖聊天和模型配置', () => {
   const world = collectBackupLocal(storage, 'world')
   const mcp = collectBackupLocal(storage, 'mcp')
   assert.deepEqual(Object.keys(world).sort(), ['ai-home.worldEntries', 'ai-home.worldbook'])
-  assert.deepEqual(Object.keys(mcp).sort(), ['ai-home.local.mcp', 'ai-home.mcpConnections'])
+  assert.deepEqual(Object.keys(mcp).sort(), ['ai-home.local.mcp', 'ai-home.local.mcpBindings', 'ai-home.mcpConnections'])
   assert.equal(backupFileName('world', new Date(2026, 10, 16)).startsWith('栖间-世界书-'), true)
   assert.equal(kindFromFileName('栖间-MCP-2026-11-16-211900.json'), 'mcp')
   const full = makeBackupEnvelope('full', {...world,...mcp,'ai-home.messages':'{}'})

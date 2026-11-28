@@ -50,3 +50,12 @@ test('旧服务器未提供已有向量时拒绝生成不完整的记忆备份',
   const fetchApi=async url=>url.startsWith('/api/memory/records?')?Response.json({records:[{id:'x',person:'assistant-first',hasEmbedding:true}]}):Response.json({keys:{}})
   await assert.rejects(buildBackupPayload('memory',['assistant-first'],{storage:storage({}),localMode:false,fetchApi}),/记忆向量/)
 })
+
+
+test('MCP 分类备份保存服务器服务与助手绑定，旧服务器不能伪装成功',async()=>{
+  const mcp={version:1,services:[{id:'id'}],bindings:[{person:'a'}]}
+  const options={storage:storage({}),localMode:false,fetchApi:async url=>url==='/api/backups/mcp'?Response.json(mcp):new Response('',{status:404})}
+  const payload=await buildBackupPayload('mcp',[],options)
+  assert.deepEqual(payload.data.server.mcp,mcp)
+  await assert.rejects(buildBackupPayload('mcp',[],{...options,fetchApi:async()=>new Response('',{status:404})}),/不支持 MCP/)
+})

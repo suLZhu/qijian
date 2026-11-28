@@ -44,6 +44,13 @@ export async function buildBackupPayload(kindId, people, options = {}) {
     if (!data?.keys || typeof data.keys !== 'object' || Array.isArray(data.keys)) throw new Error('服务器 API Key 数据无效，备份未保存')
     server.keys = data.keys
   }
+  if (!localMode && kind.serverMcp) {
+    const response = await fetchApi('/api/backups/mcp', {credentials:'include'})
+    if (!response.ok) throw new Error('服务器不支持 MCP 完整备份，请更新服务器后重试')
+    const mcp = await response.json()
+    if (mcp?.version !== 1 || !Array.isArray(mcp.services) || !Array.isArray(mcp.bindings)) throw new Error('服务器 MCP 备份数据无效')
+    server.mcp = mcp
+  }
   if (!localMode && kind.serverMemory) {
     const memory = {}
     await Promise.all((people || []).map(async person => {

@@ -57,6 +57,8 @@ import { readKeyCandidates, isRetryableKeyStatus } from './vendors.mjs'
 import { subscriptionOperations } from './subscriptionOperations.mjs'
 import { runRouteChat } from './chatRouteRunner.mjs'
 import { ensureMcpSchema, listMcpServices, boundMcpIds, replaceMcpBindings, boundMcpService, deleteMcpService } from './server/mcpStore.mjs'
+import { exportMcpBackup, restoreMcpBackup } from './server/mcpBackup.mjs'
+import { normalizeMcpHeaders } from './mcpCredentials.mjs'
 
 const password = process.env.AI_HOME_PASSWORD
 if (!password || password.length < 16) {
@@ -422,13 +424,18 @@ const apiServer = createServer(async (req, res) => {
     } catch (error) { return send(res, error.status || 400, { error: error.message || '保存 API Key 失败' }) }
   }
 
+  if (url.pathname === '/api/backups/mcp' && req.method === 'GET') {
+    try { return send(res, 200, exportMcpBackup(db, readMcpCredentials)) }
+    catch { return send(res, 500, {error:'MCP 凭据无法读取，备份未保存'}) }
+  }
+
   if (url.pathname === '/api/backups/attachments' && req.method === 'GET') {
     return send(res, 200, { version: 1, attachments: listBackupAttachments(db) })
   }
 
   if (url.pathname === '/api/backups/restore' && req.method === 'POST') {
     try {
-      const { keys = {}, memory = {}, attachments = [] } = await readBody(req, 64 * 1024 * 1024)
+      const { keys = {}, memory = {}, attachments = [], mcp } = await readBody(req, 64 * 1024 * 1024)
       const isMap = value => value && typeof value === 'object' && !Array.isArray(value)
       if (!isMap(keys) || !isMap(memory)) throw new Error('备份数据格式无效')
       db.exec('BEGIN')
@@ -445,8 +452,10 @@ const apiServer = createServer(async (req, res) => {
           }
         }
         const restoredAttachments = restoreBackupAttachments(db, attachments)
+        const restoredMcp = mcp === undefined ? null : restoreMcpBackup(db, mcp, {encrypt:encryptSecret,validateUrl:validateRemoteUrl,validPerson:isValidAssistantId})
         db.exec('COMMIT')
-        return send(res, 200, { ok: true, attachmentsRestored: restoredAttachments })
+        if (restoredMcp) for (const id of restoredMcp) void mcpConnectionPool.drop(id)
+        return send(res, 200, { ok: true, attachmentsRestored: restoredAttachments, ...(restoredMcp ? {mcpRestored:restoredMcp.length} : {}) })
       } catch (error) {
         db.exec('ROLLBACK')
         throw error
@@ -760,9 +769,7 @@ const apiServer = createServer(async (req, res) => {
       if (transportType !== 'httpStream') return send(res, 400, { error: '当前版本仅支持 Streamable HTTP 连接' })
       const token = String(body.token || '').trim()
       if (token.length > 8192) return send(res, 400, { error: 'Token 长度超出限制' })
-      const customHeaders = body.headers && typeof body.headers === 'object' && !Array.isArray(body.headers) ? body.headers : {}
-      if (Object.keys(customHeaders).length > 30) return send(res, 400, { error: '自定义请求头最多 30 项' })
-      for (const [key, value] of Object.entries(customHeaders)) { if (!/^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/.test(key) || typeof value !== 'string' || value.length > 2048 || /[\r\n]/.test(value)) return send(res, 400, { error: '自定义请求头格式无效' }) }
+      const customHeaders = normalizeMcpHeaders(body.headers)
       if (!name) return send(res, 400, { error: '请填写服务名称' })
       const id = randomUUID(), updatedAt = new Date().toISOString()
       db.prepare('INSERT INTO mcp_connections (id,name,url,transport,enabled,token_enc,updated_at) VALUES (?,?,?,?,1,?,?)').run(id, name, remote.toString(), transportType, encryptSecret(JSON.stringify({ token, headers: customHeaders })), updatedAt)
@@ -788,10 +795,12 @@ const apiServer = createServer(async (req, res) => {
       const token = body.token === undefined ? null : String(body.token || '').trim()
       if (token !== null && token.length > 8192) return send(res, 400, { error: 'Token 长度超出限制' })
       const updatedAt = new Date().toISOString()
-      if (token === null) {
+      if (token === null && body.headers === undefined) {
         db.prepare('UPDATE mcp_connections SET name=?, url=?, enabled=?, updated_at=? WHERE id=?').run(name, remote.toString(), enabled, updatedAt, mcpMatch[1])
       } else {
-        db.prepare('UPDATE mcp_connections SET name=?, url=?, enabled=?, token_enc=?, updated_at=? WHERE id=?').run(name, remote.toString(), enabled, encryptSecret(JSON.stringify({ ...readMcpCredentials(row), token })), updatedAt, mcpMatch[1])
+        const current = readMcpCredentials(row)
+        const headers = body.headers === undefined ? normalizeMcpHeaders(current.headers) : normalizeMcpHeaders(body.headers)
+        db.prepare('UPDATE mcp_connections SET name=?, url=?, enabled=?, token_enc=?, updated_at=? WHERE id=?').run(name, remote.toString(), enabled, encryptSecret(JSON.stringify({token:token === null ? current.token : token,headers})), updatedAt, mcpMatch[1])
       }
       void mcpConnectionPool.drop(mcpMatch[1])
       const next = db.prepare('SELECT * FROM mcp_connections WHERE id=?').get(mcpMatch[1])

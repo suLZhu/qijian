@@ -8,6 +8,7 @@ import { buildBackupPayload } from './backupService.mjs'
 import { executeBackupRestore, needsRestoredSnapshotSync } from './backupRestore.mjs'
 import { prepareBackupAttachments } from './backupAttachments.mjs'
 import { prepareBackupStorage } from './backupStorage.mjs'
+import { prepareBackupMcp } from './backupMcp.mjs'
 import { confirmDialog } from './uiDialog'
 import {
   BACKUP_DIR_LABEL, BACKUP_KINDS, backupKind, backupFileName, kindFromFileName,
@@ -99,7 +100,7 @@ export function BackupCenter({ people, vendors, setVendors, setModelProfiles }: 
     const kind = backupKind(kindId)
     if (!kind) throw new Error('未知的恢复类型')
     const restoreLocalMode = isLocalMode()
-    const converted = prepareBackupStorage(payload, kindId, localKeysForRestore(payload, kindId), restoreLocalMode)
+    const converted = prepareBackupMcp(prepareBackupStorage(payload, kindId, localKeysForRestore(payload, kindId), restoreLocalMode), kindId, restoreLocalMode)
     const local = converted.local
     const summary = summarizeBackup(payload)
     const details = [
@@ -109,7 +110,7 @@ export function BackupCenter({ people, vendors, setVendors, setModelProfiles }: 
     ].filter(Boolean).join(' · ') || '空内容'
     const ok = await confirmDialog({
       title: '恢复' + kind.label,
-      message: '用「' + sourceName + '」覆盖当前' + kind.label + '？\n包含：' + details + (restoreLocalMode ? '' : '\n服务器上的对应数据也会被写回。') + (converted.crossMode ? '\n跨模式恢复会保留当前连接模式，并迁移记忆和图片。' : ''),
+      message: '用「' + sourceName + '」覆盖当前' + kind.label + '？\n包含：' + details + (restoreLocalMode ? '' : '\n服务器上的对应数据也会被写回。') + (converted.crossMode ? '\n跨模式恢复会保留当前连接模式，并迁移记忆、图片和 MCP 配置。' : ''),
       confirmLabel: '恢复',
       danger: true,
     })
@@ -125,22 +126,28 @@ export function BackupCenter({ people, vendors, setVendors, setModelProfiles }: 
         const server = converted.server
         const keys = kind.serverKeys ? server.keys : undefined
         const memory = kind.serverMemory ? server.memory : undefined
+        const mcp = kind.serverMcp ? server.mcp : undefined
         const attachments = prepared.serverAttachments
         if (attachments !== undefined) {
           const capability = await apiFetch('/api/backups/attachments', {credentials:'include'})
           const data = await capability.json().catch(() => ({}))
           if (!capability.ok || data.version !== 1) throw new Error('服务器不支持附件恢复，请更新服务器')
         }
-        if (keys !== undefined || memory !== undefined || attachments !== undefined) {
+        if (mcp !== undefined) {
+          const capability = await apiFetch('/api/backups/mcp', {credentials:'include'})
+          const data = await capability.json().catch(() => ({}))
+          if (!capability.ok || data.version !== 1) throw new Error('服务器不支持 MCP 恢复，请更新服务器')
+        }
+        if (keys !== undefined || memory !== undefined || attachments !== undefined || mcp !== undefined) {
           let response: Response
           try {
             response = await apiFetch('/api/backups/restore', {
               method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ keys, memory, attachments }),
+              body: JSON.stringify({ keys, memory, attachments, mcp }),
             })
           } catch { throw new Error('服务器恢复结果未确认，服务器可能已更改，请检查；本机数据将回滚') }
           const result = await response.json().catch(() => ({}))
-          if (!response.ok || (attachments !== undefined && result.attachmentsRestored !== attachments.length)) throw new Error('服务器恢复未确认，请检查服务器状态；本机数据已回滚')
+          if (!response.ok || (attachments !== undefined && result.attachmentsRestored !== attachments.length) || (mcp !== undefined && result.mcpRestored !== mcp.services.length)) throw new Error('服务器恢复未确认，请检查服务器状态；本机数据已回滚')
         }
       },
     })

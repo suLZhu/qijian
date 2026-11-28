@@ -341,3 +341,25 @@ test('记忆跨本机与服务器恢复保留助手、生命周期、原 ID 和�
   const restored=await (await localHandle('/api/memory/records?person='+person)).json()
   assert.equal(restored.records[0].id,id);assert.equal(restored.records[0].lifecycle,'active');assert.deepEqual(restored.records[0].embedding,[0.25,-0.5])
 })
+
+test('服务器 MCP 备份恢复保留凭据、请求头和助手绑定并保证事务回滚',async()=>{
+  const headers={Authorization:'Bearer '+(await login()).body.token,'Content-Type':'application/json'}
+  const request=(path,method='GET',body)=>fetch(BASE+path,{method,headers,...(body===undefined?{}:{body:JSON.stringify(body)})})
+  assert.equal((await fetch(BASE+'/api/backups/mcp')).status,401)
+  const created=await request('/api/mcp','POST',{name:'备份测试',url:'https://example.org/mcp',token:'test-mcp-secret',headers:{'X-Workspace':'garden-secret'}})
+  assert.equal(created.status,201);const id=(await created.json()).connection.id,person='assistant-yanweixi'
+  assert.equal((await request('/api/mcp/bindings','PUT',{person,connectionIds:[id]})).status,200)
+  const snapshot=await (await request('/api/backups/mcp')).json()
+  assert.equal(snapshot.services.find(x=>x.id===id).credentials.headers['X-Workspace'],'garden-secret')
+  assert.equal((await request('/api/mcp/'+id,'DELETE')).status,200)
+  const broken=structuredClone(snapshot);broken.services.find(x=>x.id===id).credentials.headers['X-Bad']='bad\nheader'
+  assert.equal((await request('/api/backups/restore','POST',{mcp:broken})).status,400)
+  assert.equal((await (await request('/api/mcp')).json()).connections.some(x=>x.id===id),false)
+  const restored=await request('/api/backups/restore','POST',{mcp:snapshot})
+  assert.equal(restored.status,200);assert.equal((await restored.json()).mcpRestored,snapshot.services.length)
+  assert.ok((await (await request('/api/mcp/bindings?person='+person)).json()).connectionIds.includes(id))
+  const publicList=JSON.stringify(await (await request('/api/mcp')).json())
+  assert.equal(publicList.includes('test-mcp-secret'),false);assert.equal(publicList.includes('garden-secret'),false)
+  const db=new DatabaseSync(join(dbDir,'test.sqlite'),{readOnly:true})
+  try {const row=db.prepare('SELECT token_enc FROM mcp_connections WHERE id=?').get(id);const [iv,tag,ciphertext]=row.token_enc.split(':').map(value=>Buffer.from(value,'hex'));const cipher=createDecipheriv('aes-256-gcm',Buffer.from(SECRET,'hex'),iv);cipher.setAuthTag(tag);const credential=JSON.parse(Buffer.concat([cipher.update(ciphertext),cipher.final()]).toString());assert.deepEqual(credential,{token:'test-mcp-secret',headers:{'X-Workspace':'garden-secret'}})} finally {db.close()}
+})

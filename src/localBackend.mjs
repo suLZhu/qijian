@@ -1,3 +1,4 @@
+import { normalizeMcpHeaders } from './mcpCredentials.mjs'
 import { startLocalAgentRun, listLocalAgentRuns, getLocalAgentRun, cancelLocalAgentRun, subscribeLocalAgentEvents, isLocalAgentBusy } from './localAgentRuns.mjs'
 import { createMcpConnectionPool } from './server/mcpConnectionPool.mjs'
 // 本地模式后端垫片（LocalBackend）：未配置服务器地址时，浏览器/WebView 内
@@ -416,32 +417,33 @@ function mcpParse(text) {
   return null
 }
 
-async function mcpRpc(url, token, payload, sessionId) {
-  const headers = { 'Content-Type': 'application/json', Accept: 'application/json, text/event-stream' }
-  if (token) headers.Authorization = 'Bearer ' + token
-  if (sessionId) headers['mcp-session-id'] = sessionId
+async function mcpRpc(url, token, payload, sessionId, customHeaders = {}) {
+  const headers = new Headers({ 'Content-Type': 'application/json', Accept: 'application/json, text/event-stream' })
+  if (token) headers.set('Authorization', 'Bearer ' + token)
+  for (const [key,value] of Object.entries(normalizeMcpHeaders(customHeaders))) headers.set(key,value)
+  if (sessionId) headers.set('mcp-session-id', sessionId)
   const res = await mcpHttp(url, headers, JSON.stringify(payload))
   if (res.status < 200 || res.status >= 300) throw new Error('MCP HTTP '+res.status)
   const sid = (res.headers && (res.headers['mcp-session-id'] || res.headers['Mcp-Session-Id'])) || ''
   return { res, sid, data: mcpParse(res.body) }
 }
 
-async function mcpOpen(url, token) {
-  const init = await mcpRpc(url, token, { jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-03-26', capabilities: {}, clientInfo: { name: 'ai-home', version: '0.1.0' } } })
+async function mcpOpen(url, token, customHeaders) {
+  const init = await mcpRpc(url, token, { jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-03-26', capabilities: {}, clientInfo: { name: 'ai-home', version: '0.1.0' } } }, undefined, customHeaders)
   if (init.data && init.data.error) throw new Error(init.data.error.message || 'MCP 初始化失败')
   if (!init.data?.result) throw new Error('MCP 初始化响应无效')
   const sid = init.sid
-  await mcpRpc(url, token, { jsonrpc: '2.0', method: 'notifications/initialized' }, sid)
+  await mcpRpc(url, token, { jsonrpc: '2.0', method: 'notifications/initialized' }, sid, customHeaders)
   return sid
 }
 
 const localMcpPool = createMcpConnectionPool({
-  createClient: async ({url, token}) => {
-    const sid = await mcpOpen(url, token)
+  createClient: async ({url, token, headers}) => {
+    const sid = await mcpOpen(url, token, headers)
     let nextId = 2
     return {client: {
       async rpc(method, params) {
-        const out = await mcpRpc(url, token, {jsonrpc:'2.0', id:nextId++, method, params}, sid)
+        const out = await mcpRpc(url, token, {jsonrpc:'2.0', id:nextId++, method, params}, sid, headers)
         if (out.data?.error) throw new Error(out.data.error.message || 'MCP 请求失败')
         if (!out.data || !Object.hasOwn(out.data,'result')) throw new Error('MCP 响应无效')
         return out.data.result
@@ -450,8 +452,8 @@ const localMcpPool = createMcpConnectionPool({
     }}
   }
 })
-async function mcpTools(url, token, id = 'test:'+url) {
-  return localMcpPool.use(id, JSON.stringify([url,token]), {url,token}, async client => {
+async function mcpTools(url, token, id = 'test:'+url, headers = {}) {
+  return localMcpPool.use(id, JSON.stringify([url,token,headers]), {url,token,headers}, async client => {
     const result = await client.rpc('tools/list', {})
     if (!Array.isArray(result?.tools)) throw new Error('MCP 工具列表无效')
     return result.tools
@@ -1051,7 +1053,7 @@ export async function localHandle(path, init) {
         const b = await readBody(init)
         const url = String(b.url || '').trim()
         if (!/^https:\/\//i.test(url)) return json(400, { ok: false, error: '远程 MCP 必须使用 HTTPS' })
-        const tools = await mcpTools(url, String(b.token || '').trim())
+        const tools = await mcpTools(url, String(b.token || '').trim(), undefined, normalizeMcpHeaders(b.headers))
         return json(200, { ok: true, count: tools.length })
       } catch (e) { return json(502, { ok: false, error: e.message || '连接失败' }) }
     }
@@ -1088,7 +1090,7 @@ export async function localHandle(path, init) {
       return catalog
     }
     if (p === '/api/mcp' && method === 'GET') {
-      return json(200, { connections: readMcpCatalog().map(({ token: _token, ...row }) => row) })
+      return json(200, { connections: readMcpCatalog().map(({ token: _token, headers: _headers, ...row }) => row) })
     }
     if (p === '/api/mcp/bindings' && method === 'GET') {
       const person = q.get('person') || ''
@@ -1116,10 +1118,13 @@ export async function localHandle(path, init) {
       if (b.transport && b.transport !== 'httpStream') return json(400, { error: '仅支持 Streamable HTTP' })
       const token = String(b.token || '').trim()
       if (token.length > 8192) return json(400, { error: 'Token 长度超出限制' })
+      let headers
+      try { headers = normalizeMcpHeaders(b.headers) } catch (error) { return json(400, {error:error.message}) }
       const all = readMcpCatalog()
-      const record = { id: uuid(), name, url: remote, transport: 'httpStream', enabled: true, token, updated_at: nowISO() }
-      try { writeJSON(K.mcp, [record, ...all].slice(0, 200)) } catch { return json(500, { error: '本地服务保存失败' }) }
-      const { token: _token, ...connection } = record
+      if (all.length >= 200) return json(507, {error:'本机 MCP 服务已达容量上限，未新增服务'})
+      const record = { id: uuid(), name, url: remote, transport: 'httpStream', enabled: true, token, headers, updated_at: nowISO() }
+      try { writeJSON(K.mcp, [record, ...all]) } catch { return json(500, { error: '本地服务保存失败' }) }
+      const { token: _token, headers: _headers, ...connection } = record
       return json(201, { connection })
     }
     const mcpMatch = p.match(/^\/api\/mcp\/([a-f0-9-]+)(?:\/(tools|call))?$/)
@@ -1143,9 +1148,11 @@ export async function localHandle(path, init) {
       if (!name || !/^https?:\/\//i.test(url)) return json(400, { error: '服务名称或地址无效' })
       const token = b.token === undefined ? all[i].token : String(b.token || '').trim()
       if (token.length > 8192) return json(400, { error: 'Token 长度超出限制' })
-      all[i] = { ...all[i], name, url, token, enabled: b.enabled === undefined ? all[i].enabled !== false : !!b.enabled, updated_at: nowISO() }
+      let headers
+      try { headers = b.headers === undefined ? normalizeMcpHeaders(all[i].headers) : normalizeMcpHeaders(b.headers) } catch (error) { return json(400, {error:error.message}) }
+      all[i] = { ...all[i], name, url, token, headers, enabled: b.enabled === undefined ? all[i].enabled !== false : !!b.enabled, updated_at: nowISO() }
       try { writeJSON(K.mcp, all) } catch { return json(500, { error: '本地更新失败' }) }
-      const { token: _token, ...connection } = all[i]
+      const { token: _token, headers: _headers, ...connection } = all[i]
       return json(200, { connection })
     }
     if (mcpMatch && method === 'POST' && ['tools', 'call'].includes(mcpMatch[2])) {
@@ -1157,12 +1164,12 @@ export async function localHandle(path, init) {
         const boundIds = readJSON(K.mcpBindings, {})[person] || []
         const row = boundIds.includes(mcpMatch[1]) ? catalog.find(c => c.id === mcpMatch[1] && c.enabled !== false) : null
         if (!row) return json(404, { error: '此 MCP 没有绑定到当前人物' })
-        const tools = await mcpTools(row.url, row.token, row.id)
+        const tools = await mcpTools(row.url, row.token, row.id, row.headers)
         if (mcpMatch[2] === 'tools') return json(200, { tools: tools.map((t) => ({ name: t.name, description: t.description || '', inputSchema: t.inputSchema })) })
         const name = String(b.name || '')
         if (!name) return json(400, { error: '工具名称无效' })
         if (!tools.some((t) => t.name === name)) return json(403, { error: '该工具不属于当前人物绑定的 MCP 服务' })
-        const result = await localMcpPool.use(row.id, JSON.stringify([row.url,row.token]), {url:row.url,token:row.token}, client => client.rpc('tools/call', {name, arguments: b.arguments && typeof b.arguments === 'object' ? b.arguments : {}}))
+        const result = await localMcpPool.use(row.id, JSON.stringify([row.url,row.token,row.headers || {}]), {url:row.url,token:row.token,headers:row.headers || {}}, client => client.rpc('tools/call', {name, arguments: b.arguments && typeof b.arguments === 'object' ? b.arguments : {}}))
         return json(200, { result })
       } catch (e) { return json(502, { error: e.message || 'MCP 调用失败' }) }
     }
