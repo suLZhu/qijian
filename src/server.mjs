@@ -10,7 +10,7 @@ import { DatabaseSync } from 'node:sqlite'
 import { mkdirSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import { initMemoryIndex, rebuildMemoryIndex, searchMemoryIndex } from './memoryIndex.mjs'
-import { initAttachments, saveAttachment, getAttachment, deleteAttachment, ATTACH_MAX_BODY } from './server/attachments.mjs'
+import { initAttachments, saveAttachment, getAttachment, deleteAttachment, listBackupAttachments, restoreBackupAttachments, ATTACH_MAX_BODY } from './server/attachments.mjs'
 import { initInbox, addInboxMessage, addTaskResult, listInbox, markInboxRead } from './inbox.mjs'
 import { createRollingBackup } from './server/backup.mjs'
 import { initToolLogs, createToolLog, finishToolLog, listToolLogs } from './toolLog.mjs'
@@ -422,9 +422,13 @@ const apiServer = createServer(async (req, res) => {
     } catch (error) { return send(res, error.status || 400, { error: error.message || '保存 API Key 失败' }) }
   }
 
+  if (url.pathname === '/api/backups/attachments' && req.method === 'GET') {
+    return send(res, 200, { version: 1, attachments: listBackupAttachments(db) })
+  }
+
   if (url.pathname === '/api/backups/restore' && req.method === 'POST') {
     try {
-      const { keys = {}, memory = {} } = await readBody(req)
+      const { keys = {}, memory = {}, attachments = [] } = await readBody(req, 64 * 1024 * 1024)
       const isMap = value => value && typeof value === 'object' && !Array.isArray(value)
       if (!isMap(keys) || !isMap(memory)) throw new Error('备份数据格式无效')
       db.exec('BEGIN')
@@ -440,12 +444,13 @@ const apiServer = createServer(async (req, res) => {
             if (importMemoryRecords(db, person, batch).imported !== batch.length) throw new Error('备份包含无效记忆')
           }
         }
+        const restoredAttachments = restoreBackupAttachments(db, attachments)
         db.exec('COMMIT')
+        return send(res, 200, { ok: true, attachmentsRestored: restoredAttachments })
       } catch (error) {
         db.exec('ROLLBACK')
         throw error
       }
-      return send(res, 200, { ok: true })
     } catch (error) { return send(res, error.status || 400, { error: error.message || '服务器恢复失败' }) }
   }
 

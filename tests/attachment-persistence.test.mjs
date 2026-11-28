@@ -5,7 +5,7 @@ import assert from 'node:assert/strict'
 import { DatabaseSync } from 'node:sqlite'
 import {
   initAttachments, saveAttachment, getAttachment, deleteAttachment,
-  decodeBase64Image, ATTACH_MAX_BODY,
+  decodeBase64Image, ATTACH_MAX_BODY, listBackupAttachments, restoreBackupAttachments,
 } from '../src/server/attachments.mjs'
 import {
   isStablePreview, classifyPreview, needsUpload,
@@ -196,4 +196,30 @@ test('存储失败：非法/超限 base64 被明确拒绝而不是存脏数据',
   assert.throws(() => decodeBase64Image(huge), /超出单次上传上限/)
   // 失败后库里没有半成品
   assert.equal(getAttachment(db, '55555555-5555-4555-8555-555555555555'), null)
+})
+
+
+test('服务器附件备份保留原 ID 和字节，重复恢复不创建重复记录', () => {
+  const source=makeDb(), target=makeDb()
+  try {
+    const saved=saveAttachment(source,{name:'原图.png',mime:'image/png',data:PNG_B64})
+    const meta=listBackupAttachments(source)[0]
+    const record={...meta,data:getAttachment(source,saved.id).data.toString('base64')}
+    assert.equal(restoreBackupAttachments(target,[record]),1)
+    assert.equal(restoreBackupAttachments(target,[record]),1)
+    assert.equal(getAttachment(target,saved.id).data.toString('base64'),PNG_B64)
+    assert.equal(listBackupAttachments(target).length,1)
+    assert.throws(()=>restoreBackupAttachments(target,[{...record,data:'YWJj'}]),/校验失败/)
+    assert.equal(getAttachment(target,saved.id).data.toString('base64'),PNG_B64)
+  } finally {source.close();target.close()}
+})
+
+test('服务器附件备份校验失败不写入任何条目', () => {
+  const source=makeDb(), target=makeDb()
+  try {
+    const saved=saveAttachment(source,{name:'原图.png',mime:'image/png',data:PNG_B64})
+    const record={...listBackupAttachments(source)[0],data:getAttachment(source,saved.id).data.toString('base64')}
+    assert.throws(()=>restoreBackupAttachments(target,[record,{...record,id:'11111111-1111-4111-8111-111111111111',sha256:'0'.repeat(64)}]),/校验失败/)
+    assert.equal(listBackupAttachments(target).length,0)
+  } finally {source.close();target.close()}
 })

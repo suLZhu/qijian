@@ -5,6 +5,7 @@ import './BackupCenter.css'
 import { apiFetch, isLocalMode } from './apiBase.mjs'
 import { applyBackupIndexed } from './backupIndexed.mjs'
 import { buildBackupPayload } from './backupService.mjs'
+import { executeBackupRestore } from './backupRestore.mjs'
 import { confirmDialog } from './uiDialog'
 import {
   BACKUP_DIR_LABEL, BACKUP_KINDS, backupKind, backupFileName, kindFromFileName,
@@ -109,42 +110,35 @@ export function BackupCenter({ people, vendors, setVendors, setModelProfiles }: 
       danger: true,
     })
     if (!ok) return
-    const rollbackIndexed = await applyBackupIndexed(kindId, payload.data?.indexed)
-    try {
-    if (!isLocalMode() && payload.data?.server) {
-      const server = payload.data.server
-      const keys = kind.serverKeys ? server.keys : undefined
-      const memory = kind.serverMemory ? server.memory : undefined
-      if (keys !== undefined || memory !== undefined) {
-        const response = await apiFetch('/api/backups/restore', {
-          method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ keys, memory }),
-        })
-        if (!response.ok) throw new Error('服务器恢复未完成，本地数据尚未覆盖，请检查服务器版本和备份文件')
-      }
-    }
-    const previous = Object.fromEntries(Object.keys(local).map(key => [key, localStorage.getItem(key)]))
-    try {
-      for (const [key, value] of Object.entries(local)) {
-        if (typeof value === 'string') localStorage.setItem(key, value)
-      }
-    } catch (error) {
-      let rollbackFailed = false
-      for (const [key, value] of Object.entries(previous)) {
-        try {
-          if (value === null) localStorage.removeItem(key)
-          else localStorage.setItem(key, value)
-        } catch { rollbackFailed = true }
-      }
-      throw new Error(rollbackFailed ? '本地恢复失败，部分原数据未能回滚，请保留备份并停止继续恢复' : '本地空间不足或写入失败，已回滚本地修改；服务器写入情况需另行核查')
-    }
-    } catch (error) {
-      try { await rollbackIndexed() } catch { throw new Error('恢复失败且附件或主题素材回滚失败，请保留备份并停止恢复') }
-      throw error
-    }
-    // A local-only worldbook/MCP restore also needs cloud-write priority.
-    // Otherwise startup may immediately replace it with an older snapshot.
-    if (!isLocalMode() && Object.keys(local).length) localStorage.setItem('ai-home.restorePending', '1')
+    await executeBackupRestore({
+      storage: localStorage,
+      local,
+      markPending: !isLocalMode() && Object.keys(local).length > 0,
+      applyIndexed: () => applyBackupIndexed(kindId, payload.data?.indexed),
+      syncServer: async () => {
+        if (isLocalMode() || !payload.data?.server) return
+        const server = payload.data.server
+        const keys = kind.serverKeys ? server.keys : undefined
+        const memory = kind.serverMemory ? server.memory : undefined
+        const attachments = (kindId === 'full' || kindId === 'chat') ? server.attachments : undefined
+        if (attachments !== undefined) {
+          const capability = await apiFetch('/api/backups/attachments', {credentials:'include'})
+          const data = await capability.json().catch(() => ({}))
+          if (!capability.ok || data.version !== 1) throw new Error('服务器不支持附件恢复，请更新服务器')
+        }
+        if (keys !== undefined || memory !== undefined || attachments !== undefined) {
+          let response: Response
+          try {
+            response = await apiFetch('/api/backups/restore', {
+              method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ keys, memory, attachments }),
+            })
+          } catch { throw new Error('服务器恢复结果未确认，服务器可能已更改，请检查；本机数据将回滚') }
+          const result = await response.json().catch(() => ({}))
+          if (!response.ok || (attachments !== undefined && result.attachmentsRestored !== attachments.length)) throw new Error('服务器恢复未确认，请检查服务器状态；本机数据已回滚')
+        }
+      },
+    })
     // 恢复需要整页刷新才能让所有 useState 从新的 localStorage / 快照重新初始化。
     // 刷新前把用户当前所在的设置页记到 sessionStorage，避免每次恢复都被默认首页接管。
     try {
@@ -255,7 +249,6 @@ export function BackupCenter({ people, vendors, setVendors, setModelProfiles }: 
     {!native && <p className="backup-hint">当前环境没有本机存储桥：备份会走浏览器下载；恢复请用各分类右侧的「恢复」选文件。</p>}
     {error && <p className="mcp-error" role="alert">{error}</p>}
     {message && <p className="mcp-notice" role="status">{message}</p>}
-    {!isLocalMode() && <p className="backup-warning">当前服务器模式下，备份不包含保存在服务器上的附件文件，请同时备份服务器附件目录。</p>}
     <p className="backup-warning">模型 / MCP / 整体备份可能包含 API Key、MCP 令牌等敏感配置，请只留在自己的设备上，不要把文件发给别人。</p>
   </section>
 }

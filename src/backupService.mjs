@@ -3,6 +3,32 @@ import {backupKind, collectBackupLocal, makeBackupEnvelope, backupFileName} from
 import {collectBackupIndexed} from './backupIndexed.mjs'
 import {backupFilesAvailable, saveBackupFile, readBackupFile} from './nativeSystem.mjs'
 
+const MAX_SERVER_ATTACHMENT_BYTES = 36 * 1024 * 1024
+async function collectServerAttachments(fetchApi) {
+  const response = await fetchApi('/api/backups/attachments', {credentials:'include'})
+  if (!response.ok) throw new Error('服务器不支持附件备份，请更新服务器后重试')
+  const list = await response.json()
+  if (list?.version !== 1 || !Array.isArray(list.attachments)) throw new Error('服务器附件列表无效')
+  let total = 0
+  const records = []
+  for (const item of list.attachments) {
+    if (!item || !/^[0-9a-f-]{36}$/i.test(item.id) || !Number.isSafeInteger(item.size) || item.size <= 0 || !/^[0-9a-f]{64}$/.test(item.sha256 || '')) throw new Error('服务器附件信息无效')
+    total += item.size
+    if (total > MAX_SERVER_ATTACHMENT_BYTES) throw new Error('服务器附件超过单次备份上限，请先备份服务器数据库')
+    const file = await fetchApi('/api/attachments/' + encodeURIComponent(item.id), {credentials:'include'})
+    if (!file.ok) throw new Error('服务器附件读取失败，备份未保存')
+    const bytes = new Uint8Array(await file.arrayBuffer())
+    if (bytes.length !== item.size) throw new Error('服务器附件长度不一致，备份未保存')
+    if (!globalThis.crypto?.subtle) throw new Error('当前环境无法校验服务器附件，请使用安全连接')
+    const hash = [...new Uint8Array(await crypto.subtle.digest('SHA-256', bytes))].map(x=>x.toString(16).padStart(2,'0')).join('')
+    if (hash !== item.sha256) throw new Error('服务器附件校验失败，备份未保存')
+    let binary = ''
+    for (let i = 0; i < bytes.length; i += 8192) binary += String.fromCharCode(...bytes.subarray(i, i + 8192))
+    records.push({...item, data:btoa(binary)})
+  }
+  return records
+}
+
 // 统一手动备份与更新前备份的数据收集，读取失败即终止，不生成缺项的成功备份。
 export async function buildBackupPayload(kindId, people, options = {}) {
   const kind = backupKind(kindId)
@@ -35,6 +61,8 @@ export async function buildBackupPayload(kindId, people, options = {}) {
     }))
     server.memory = memory
   }
+  if (!localMode && (kindId === 'full' || kindId === 'chat')) server.attachments = await collectServerAttachments(fetchApi)
+  if (new TextEncoder().encode(JSON.stringify(server)).length > 60 * 1024 * 1024) throw new Error('服务器数据超过单次恢复上限，请先备份服务器数据库')
   const payload = makeBackupEnvelope(kindId, collectBackupLocal(storage, kindId), server)
   if (kindId === 'full' || kindId === 'chat') payload.data.indexed = await (options.collectIndexed || collectBackupIndexed)(kindId)
   return payload

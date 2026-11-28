@@ -1,0 +1,1 @@
+export function executeBackupRestore(input: {storage:Storage; local:Record<string,string>; applyIndexed:()=>Promise<()=>Promise<void>>; syncServer:()=>Promise<void>; markPending:boolean}):Promise<void>

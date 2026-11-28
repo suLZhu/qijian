@@ -2,7 +2,7 @@
 export const BACKUP_APP = 'qijian'
 export const BACKUP_VERSION = 1
 export const BACKUP_DIR_LABEL = '下载/栖间/'
-const EXCLUDED_LOCAL_KEYS = new Set(['ai-home.sessionToken'])
+const EXCLUDED_LOCAL_KEYS = new Set(['ai-home.sessionToken', 'ai-home.restorePending'])
 
 export const BACKUP_KINDS = [
   { id: 'models', label: '模型配置', prefix: '模型', desc: '供应商 / 模型 / 绑定 / API Key', keys: ['ai-home.vendors', 'ai-home.modelProfiles', 'ai-home.bindings', 'ai-home.modelConfig', 'ai-home.subscriptions', 'ai-home.apiKey'], serverKeys: true },

@@ -288,3 +288,23 @@ test('恢复事务遇到无效记忆时撤回已写入的 Key 和记忆', async 
   assert.equal((await readKeys())[person], 'restore-test-key')
   assert.equal((await readRecords()).some(item => item.id === record.id), true)
 })
+
+test('服务器附件备份恢复：鉴权、原 ID、字节校验和事务回滚', async () => {
+  const headers = { Authorization: 'Bearer ' + (await login()).body.token, 'Content-Type': 'application/json' }
+  const img='iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=='
+  assert.equal((await fetch(BASE+'/api/backups/attachments')).status,401)
+  const upload=await fetch(BASE+'/api/attachments',{method:'POST',headers,body:JSON.stringify({name:'测试.png',mime:'image/png',data:img})})
+  assert.equal(upload.status,201)
+  const {id}=await upload.json()
+  const list=await (await fetch(BASE+'/api/backups/attachments',{headers})).json()
+  const record={...list.attachments.find(x=>x.id===id),data:img}
+  const keysBefore=(await (await fetch(BASE+'/api/keys',{headers})).json()).keys
+  const bad=await fetch(BASE+'/api/backups/restore',{method:'POST',headers,body:JSON.stringify({keys:{'assistant-yanweixi':'should-rollback'},attachments:[{...record,sha256:'0'.repeat(64)}]})})
+  assert.equal(bad.status,400)
+  assert.deepEqual((await (await fetch(BASE+'/api/keys',{headers})).json()).keys,keysBefore)
+  assert.equal((await fetch(BASE+'/api/attachments/'+id,{method:'DELETE',headers})).status,200)
+  const restored=await fetch(BASE+'/api/backups/restore',{method:'POST',headers,body:JSON.stringify({attachments:[record]})})
+  assert.equal(restored.status,200)
+  assert.equal((await restored.json()).attachmentsRestored,1)
+  assert.equal(Buffer.from(await (await fetch(BASE+'/api/attachments/'+id,{headers})).arrayBuffer()).toString('base64'),img)
+})

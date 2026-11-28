@@ -34,6 +34,7 @@ const storage = fakeStorage({
   'ai-home.mcpConnections': '{}',
   'ai-home.local.mcp': '{}',
   'ai-home.sessionToken': 'secret',
+  'ai-home.restorePending': '1',
   'other.key': 'x',
 })
 
@@ -51,6 +52,7 @@ test('分类收集只拿自己的键，整体收集拿全部 ai-home.* 但排除
   const full = collectBackupLocal(storage, 'full')
   assert.ok(full['ai-home.worldEntries'])
   assert.equal(full['ai-home.sessionToken'], undefined, '不把登录令牌写进备份')
+  assert.equal(full['ai-home.restorePending'], undefined, '不把临时恢复标志写进备份')
   assert.equal(full['other.key'], undefined)
 })
 

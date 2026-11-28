@@ -64,3 +64,34 @@ export function getAttachment(db, id) {
 export function deleteAttachment(db, id) {
   return db.prepare('DELETE FROM attachments WHERE id=?').run(String(id || '')).changes > 0
 }
+
+// 备份保留原始 ID：聊天记录引用该 ID，不能按内容去重后改写。
+export function listBackupAttachments(db) {
+  return db.prepare('SELECT id,name,mime,size,sha256,created_at FROM attachments ORDER BY id').all()
+}
+
+export function restoreBackupAttachments(db, records) {
+  if (!Array.isArray(records) || records.length > 100000) throw new Error('备份附件格式无效')
+  const seen = new Set()
+  const rows = records.map(record => {
+    if (!record || !/^[0-9a-f-]{36}$/i.test(record.id) || seen.has(record.id)) throw new Error('备份附件编号无效或重复')
+    seen.add(record.id)
+    const name = String(record.name || '').trim(), mime = String(record.mime || '')
+    if (!name || name.length > 200 || !/^image\/[a-z0-9.+-]+$/i.test(mime)) throw new Error('备份附件名称或类型无效')
+    const bytes = decodeBase64Image(record.data)
+    const hash = createHash('sha256').update(bytes).digest('hex')
+    if (hash !== record.sha256 || bytes.length !== record.size) throw new Error('备份附件校验失败')
+    const createdAt = String(record.created_at || '')
+    if (!Number.isFinite(Date.parse(createdAt))) throw new Error('备份附件时间无效')
+    const existing = getAttachment(db, record.id)
+    if (existing && existing.sha256 !== hash) throw new Error('备份附件与现有附件编号冲突')
+    return {id:record.id,name,mime,size:bytes.length,sha256:hash,data:bytes,createdAt}
+  })
+  const insert = db.prepare('INSERT OR IGNORE INTO attachments (id,name,mime,size,sha256,data,created_at) VALUES (?,?,?,?,?,?,?)')
+  db.exec('SAVEPOINT restore_attachments')
+  try {
+    for (const row of rows) insert.run(row.id,row.name,row.mime,row.size,row.sha256,row.data,row.createdAt)
+    db.exec('RELEASE restore_attachments')
+  } catch (error) { db.exec('ROLLBACK TO restore_attachments; RELEASE restore_attachments'); throw error }
+  return rows.length
+}

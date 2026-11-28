@@ -1,3 +1,4 @@
+import {createHash} from 'node:crypto'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import {buildBackupPayload, savePreUpdateBackup} from '../src/backupService.mjs'
@@ -25,4 +26,22 @@ test('更新前备份必须成功写入并读回校验，名称不会覆盖普�
   await assert.rejects(savePreUpdateBackup(['a'],{...opts,available:()=>false}),/不可用/)
   await assert.rejects(savePreUpdateBackup(['a'],{...opts,requiredState:{conversations:{a:[1]}}}),/最新聊天尚未保存/)
   await assert.rejects(savePreUpdateBackup(['a'],{...opts,verify:()=>false}),/数据发生变化/)
+})
+
+
+test('云端备份包含经过校验的服务器图片原始 ID 和内容',async()=>{
+  const bytes=Buffer.from('server-image'), id='11111111-1111-4111-8111-111111111111'
+  const metadata={id,name:'image.png',mime:'image/png',size:bytes.length,sha256:createHash('sha256').update(bytes).digest('hex'),created_at:'2026-01-01T00:00:00Z'}
+  const fetchApi=async url=>{if(url==='/api/backups/attachments')return Response.json({version:1,attachments:[metadata]});if(url==='/api/attachments/'+id)return new Response(bytes);throw Error(url)}
+  const payload=await buildBackupPayload('chat',[],{storage:storage({}),localMode:false,fetchApi,collectIndexed:async()=>({attachments:[]})})
+  assert.equal(payload.data.server.attachments[0].id,id)
+  assert.equal(payload.data.server.attachments[0].data,bytes.toString('base64'))
+})
+
+test('服务器附件损坏或服务器过旧时拒绝生成不完整备份',async()=>{
+  const id='11111111-1111-4111-8111-111111111111', bytes=Buffer.from('corrupt')
+  const meta={id,name:'a.png',mime:'image/png',size:bytes.length,sha256:'0'.repeat(64),created_at:'2026-01-01T00:00:00Z'}
+  const opts={storage:storage({}),localMode:false,collectIndexed:async()=>({attachments:[]}),fetchApi:async url=>url==='/api/backups/attachments'?Response.json({version:1,attachments:[meta]}):new Response(bytes)}
+  await assert.rejects(buildBackupPayload('chat',[],opts),/校验失败/)
+  await assert.rejects(buildBackupPayload('chat',[],{...opts,fetchApi:async()=>new Response('',{status:404})}),/不支持附件备份/)
 })
