@@ -1,0 +1,17 @@
+<!doctype html><html><body><div id="app"></div><pre id="result">RUNNING</pre><script type="module">
+import React from 'react'; import {createRoot} from 'react-dom/client';
+import {useMemoryRecords} from '/src/memoryGovernance.ts'; import {setApiBase} from '/src/apiBase.mjs';
+const delay=ms=>new Promise(r=>setTimeout(r,ms)); let completeA;
+setApiBase('https://example.test');
+globalThis.fetch=(url)=>{const person=new URL(url).searchParams.get('person'); if(person==='assistant-a')return new Promise(resolve=>{completeA=resolve}); return Promise.resolve(Response.json({records:[{id:'b',person:'assistant-b',title:'B'}]}))};
+function Probe({person}){const {records}=useMemoryRecords(person);return React.createElement('span',null,records.map(x=>x.title).join(','))}
+try{
+ const root=createRoot(document.querySelector('#app'));root.render(React.createElement(Probe,{person:'assistant-a'}));
+ for(let i=0;i<50&&!completeA;i++)await delay(10); if(!completeA)throw Error('A request not started');
+ root.render(React.createElement(Probe,{person:'assistant-b'}));await delay(200);
+ if(document.querySelector('#app').textContent!=='B')throw Error('B not visible');
+ completeA(Response.json({records:[{id:'a',person:'assistant-a',title:'A'}]}));await delay(200);
+ if(document.querySelector('#app').textContent!=='B')throw Error('stale A overwrote B');
+ document.querySelector('#result').textContent='PASS';root.unmount();
+}catch(e){document.querySelector('#result').textContent='FAIL '+(e.stack||e)}
+</script></body></html>

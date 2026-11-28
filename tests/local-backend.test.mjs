@@ -287,3 +287,17 @@ test('旧 MCP 升级按凭据及启用状态保留服务，同名服务可以独
   assert.deepEqual(await ids('B'), ['bb'])
   assert.deepEqual(await ids('A'), [])
 })
+
+
+test('本机记忆列表按状态分页，更新时间相同时顺序稳定', async t => {
+  const key = 'ai-home.local.memoryRecords', previous = localStorage.getItem(key)
+  t.after(()=>{ if(previous===null)localStorage.removeItem(key);else localStorage.setItem(key,previous) })
+  const person='assistant-memory-page'
+  const records=Array.from({length:125},(_,i)=>({id:String(i).padStart(3,'0'),person,lifecycle:'active',title:String(i),content:'内容',updatedAt:'2026-01-01T00:00:00Z'}))
+  localStorage.setItem(key,JSON.stringify(records))
+  const first=await getJSON('/api/memory/records?person='+person+'&limit=100&offset=0')
+  const second=await getJSON('/api/memory/records?person='+person+'&limit=100&offset=100')
+  assert.equal(first.data.records.length,100);assert.equal(second.data.records.length,25)
+  assert.equal(new Set([...first.data.records,...second.data.records].map(x=>x.id)).size,125)
+  assert.equal((await getJSON('/api/memory/records?person='+person+'&lifecycle=invalid')).status,400)
+})

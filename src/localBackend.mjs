@@ -745,9 +745,16 @@ export async function localHandle(path, init) {
       const person = q.get('person') || ''
       if (!person) return json(400, { error: '无效人物' })
       const lifecycle = q.get('lifecycle') || ''
+      if (lifecycle && !['candidate','active','archived','rejected'].includes(lifecycle)) return json(400, { error: '记忆状态无效' })
+      const days = Math.min(3650, Math.max(0, Number(q.get('days')) || 0))
+      const since = days ? new Date(Date.now() - days * 86400000).toISOString().slice(0, 10) : ''
+      const limit = Math.min(1000, Math.max(1, Math.trunc(Number(q.get('limit')) || 100)))
+      const offset = Math.min(1000000, Math.max(0, Math.trunc(Number(q.get('offset')) || 0)))
       const all = readJSON(K.memoryRecords, [])
-      const records = all.filter(r => r && r.person === person && (!lifecycle || r.lifecycle === lifecycle)).slice(0, 100)
-      return json(200, { records })
+      const records = all.filter(r => r && r.person === person && (!lifecycle || r.lifecycle === lifecycle))
+        .sort((a,b) => String(b.updatedAt || '').localeCompare(String(a.updatedAt || '')) || String(b.id || '').localeCompare(String(a.id || '')))
+        .slice(offset, offset + limit)
+      return json(200, { records: since ? records.filter(r => String(r.occurredAt || '') >= since) : records, days })
     }
     if (p === '/api/memory/records' && method === 'POST') {
       const b = await readBody(init)

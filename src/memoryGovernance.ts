@@ -31,6 +31,7 @@ export const SCOPE_LABEL: Record<MemoryScope, string> = {
 }
 
 import { apiFetch } from './apiBase.mjs'
+import { fetchAllMemoryRecords } from './memoryPages.mjs'
 
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
   const response = await apiFetch(url, { credentials: 'include', ...init })
@@ -40,10 +41,7 @@ async function request<T>(url: string, init?: RequestInit): Promise<T> {
 }
 
 export function fetchMemoryRecords(person: string, lifecycle?: MemoryLifecycle) {
-  const params = new URLSearchParams({ person })
-  if (lifecycle) params.set('lifecycle', lifecycle)
-  return request<{ records: MemoryRecord[] }>('/api/memory/records?' + params.toString())
-    .then(d => (Array.isArray(d.records) ? d.records : []))
+  return fetchAllMemoryRecords(person, lifecycle)
 }
 
 export function transitionMemoryRecord(id: string, lifecycle: MemoryLifecycle) {
@@ -66,26 +64,33 @@ export function createMemoryRecord(person: string, input: { title: string; conte
 // light interval keeps the panel honest without hammering the API.
 export function useMemoryRecords(person: string) {
   const [records, setRecords] = useState<MemoryRecord[]>([])
+  const [recordsPerson, setRecordsPerson] = useState(person)
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(true)
   const aliveRef = useRef(true)
+  const requestSequence = useRef(0)
 
   const refresh = useCallback(async () => {
+    const sequence = ++requestSequence.current
     try {
       const list = await fetchMemoryRecords(person)
-      if (!aliveRef.current) return
+      if (!aliveRef.current || sequence !== requestSequence.current) return
       setRecords(list)
+      setRecordsPerson(person)
       setError('')
     } catch (e) {
-      if (!aliveRef.current) return
+      if (!aliveRef.current || sequence !== requestSequence.current) return
+      setRecords(old => old.every(record => record.person === person) ? old : [])
+      setRecordsPerson(person)
       setError(e instanceof Error ? e.message : '读取记忆记录失败')
-    } finally { if (aliveRef.current) setLoading(false) }
+    } finally { if (aliveRef.current && sequence === requestSequence.current) setLoading(false) }
   }, [person])
 
   useEffect(() => {
+    let cancelled = false
     aliveRef.current = true
-    queueMicrotask(() => { if (aliveRef.current) void refresh() })
-    return () => { aliveRef.current = false }
+    queueMicrotask(() => { if (!cancelled) void refresh() })
+    return () => { cancelled = true; aliveRef.current = false; requestSequence.current++ }
   }, [refresh])
 
   useEffect(() => {
@@ -93,7 +98,7 @@ export function useMemoryRecords(person: string) {
     return () => window.clearInterval(timer)
   }, [refresh])
 
-  return { records, error, loading, refresh }
+  return { records: recordsPerson === person ? records : [], error: recordsPerson === person ? error : '', loading, refresh }
 }
 
 // ── 自动整理 ────────────────────────────────────────────────
@@ -145,23 +150,26 @@ export function useAutoOrganize(person: string) {
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(true)
   const aliveRef = useRef(true)
+  const requestSequence = useRef(0)
 
   const refresh = useCallback(async () => {
+    const sequence = ++requestSequence.current
     try {
       const next = await fetchAutoOrganize(person)
-      if (!aliveRef.current) return
+      if (!aliveRef.current || sequence !== requestSequence.current) return
       setStatus(next)
       setError('')
     } catch (e) {
-      if (!aliveRef.current) return
+      if (!aliveRef.current || sequence !== requestSequence.current) return
       setError(e instanceof Error ? e.message : '读取自动整理状态失败')
-    } finally { if (aliveRef.current) setLoading(false) }
+    } finally { if (aliveRef.current && sequence === requestSequence.current) setLoading(false) }
   }, [person])
 
   useEffect(() => {
+    let cancelled = false
     aliveRef.current = true
-    queueMicrotask(() => { if (aliveRef.current) void refresh() })
-    return () => { aliveRef.current = false }
+    queueMicrotask(() => { if (!cancelled) void refresh() })
+    return () => { cancelled = true; aliveRef.current = false; requestSequence.current++ }
   }, [refresh])
 
   useEffect(() => {
@@ -174,5 +182,5 @@ export function useAutoOrganize(person: string) {
     setStatus(old => old ? { ...old, ...patch } : old)
   }, [])
 
-  return { status, error, loading, refresh, apply }
+  return { status: status?.person === person ? status : null, error, loading, refresh, apply }
 }
