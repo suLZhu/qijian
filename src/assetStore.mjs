@@ -25,13 +25,7 @@ function readLegacy(fallback) {
 
 export async function loadCustomAssets(fallback) {
   try {
-    const db = await openDb()
-    const value = await new Promise((resolve, reject) => {
-      const tx = db.transaction(STORE, 'readonly')
-      const req = tx.objectStore(STORE).get(ASSETS_KEY)
-      req.onsuccess = () => resolve(req.result)
-      req.onerror = () => reject(req.error)
-    })
+    const value = await readStoredCustomAssets()
     if (value && typeof value === 'object') return { ...fallback, ...value }
   } catch { /* 无 IDB 或读取失败：回退 localStorage 旧数据 */ }
   return readLegacy(fallback)
@@ -47,4 +41,25 @@ export async function saveCustomAssets(assets) {
     tx.onabort = () => reject(tx.error)
   })
   try { if (typeof localStorage !== 'undefined') localStorage.removeItem(LEGACY_KEY) } catch { /* 清理失败不影响保存 */ }
+}
+
+// 严格读取及写入：备份不能把读取失败误当作没有自定义素材。
+export async function readStoredCustomAssets() {
+  const db = await openDb()
+  return await new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE, 'readonly'), req = tx.objectStore(STORE).get(ASSETS_KEY)
+    req.onsuccess = () => resolve(req.result ?? null)
+    req.onerror = () => reject(req.error || new Error('主题素材读取失败'))
+  })
+}
+export async function writeStoredCustomAssets(value) {
+  if (value !== null && (typeof value !== 'object' || Array.isArray(value))) throw new Error('主题素材备份无效')
+  const db = await openDb()
+  await new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE, 'readwrite'), store = tx.objectStore(STORE)
+    if (value === null) store.delete(ASSETS_KEY); else store.put(value, ASSETS_KEY)
+    tx.oncomplete = () => resolve()
+    tx.onerror = () => reject(tx.error || new Error('主题素材恢复失败'))
+    tx.onabort = () => reject(tx.error || new Error('主题素材恢复失败'))
+  })
 }

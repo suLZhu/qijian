@@ -116,6 +116,8 @@ function openAttDb() {
   return attDbPromise
 }
 
+function putAttachment(store, record) { return store.keyPath === null ? store.put(record, record.id) : store.put(record) }
+
 function attTx(mode, run) {
   return openAttDb().then(db => new Promise((resolve, reject) => {
     const tx = db.transaction(ATT_STORE, mode)
@@ -126,6 +128,39 @@ function attTx(mode, run) {
     tx.onerror = () => reject(tx.error)
     tx.onabort = () => reject(tx.error || new Error('附件事务中止'))
   }))
+}
+
+// 备份复用附件库本身；读取失败向调用方报告，不能生成缺附件的成功备份。
+export async function exportLocalAttachments() {
+  return await attTx('readonly', store => store.getAll())
+}
+
+// 原子合并：只改备份提供的 id，返回这些 id 的旧值供后续操作失败时回滚。
+export async function applyLocalAttachments(records) {
+  if (!Array.isArray(records) || records.some(r => !r || !/^[0-9a-f-]{36}$/i.test(r.id) || typeof r.data !== 'string' || r.data.length > 32 * 1024 * 1024 || typeof r.mime !== 'string')) throw new Error('附件备份数据无效')
+  if (new Set(records.map(r => r.id)).size !== records.length) throw new Error('附件备份包含重复编号')
+  const db = await openAttDb()
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(ATT_STORE, 'readwrite'), store = tx.objectStore(ATT_STORE), previous = []
+    for (const record of records) {
+      const get = store.get(record.id)
+      get.onsuccess = () => { previous.push({id:record.id, value:get.result ?? null}); putAttachment(store, record) }
+    }
+    tx.oncomplete = () => resolve(previous)
+    tx.onerror = () => reject(tx.error || new Error('附件恢复失败'))
+    tx.onabort = () => reject(tx.error || new Error('附件恢复失败'))
+  })
+}
+
+export async function rollbackLocalAttachments(previous) {
+  const db = await openAttDb()
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(ATT_STORE, 'readwrite'), store = tx.objectStore(ATT_STORE)
+    for (const item of previous) item.value === null ? store.delete(item.id) : putAttachment(store, item.value)
+    tx.oncomplete = () => resolve()
+    tx.onerror = () => reject(tx.error || new Error('附件回滚失败'))
+    tx.onabort = () => reject(tx.error || new Error('附件回滚失败'))
+  })
 }
 
 function b64ToBytes(b64) {
@@ -1403,7 +1438,7 @@ export async function localHandle(path, init) {
       const id = uuid()
       const record = { id, name, mime, data, createdAt: nowISO() }
       try {
-        await attTx('readwrite', s => s.put(record))
+        await attTx('readwrite', s => putAttachment(s, record))
       } catch (error) { return json(500, { error: '附件保存失败：' + (error && error.message) }) }
       const url = makeAttUrl(record)
       if (url) attUrls.set(id, url)

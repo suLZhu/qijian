@@ -12,3 +12,8 @@ export declare function warmupLocalAttachments(): Promise<void>
 // assetUrl() 在本地模式下用它把 /api/attachments/<id> 稳定引用换成
 // objectURL；未注册（不存在/未预热）时原样返回。
 export declare function localAttachmentUrl(preview: unknown): string
+
+export type BackupAttachment = {id:string; data:string; mime:string; [key:string]:unknown}
+export function exportLocalAttachments(): Promise<BackupAttachment[]>
+export function applyLocalAttachments(records: BackupAttachment[]): Promise<Array<{id:string;value:BackupAttachment|null}>>
+export function rollbackLocalAttachments(previous: Array<{id:string;value:BackupAttachment|null}>): Promise<void>

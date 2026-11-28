@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from 'react'
 import './BackupCenter.css'
 import { apiFetch, isLocalMode } from './apiBase.mjs'
+import { collectBackupIndexed, applyBackupIndexed } from './backupIndexed.mjs'
 import { confirmDialog } from './uiDialog'
 import {
   BACKUP_DIR_LABEL, BACKUP_KINDS, backupKind, backupFileName, kindFromFileName,
@@ -99,6 +100,7 @@ export function BackupCenter({ people, vendors, setVendors, setModelProfiles }: 
       const local = collectBackupLocal(localStorage, kindId)
       const server = await buildServer(kindId)
       const payload = makeBackupEnvelope(kindId, local, server)
+      if (kindId === 'full' || kindId === 'chat') payload.data.indexed = await collectBackupIndexed(kindId)
       const content = JSON.stringify(payload, null, 2)
       const name = backupFileName(kindId)
       if (native) {
@@ -140,6 +142,8 @@ export function BackupCenter({ people, vendors, setVendors, setModelProfiles }: 
       danger: true,
     })
     if (!ok) return
+    const rollbackIndexed = await applyBackupIndexed(kindId, payload.data?.indexed)
+    try {
     if (!isLocalMode() && payload.data?.server) {
       const server = payload.data.server
       const keys = kind.serverKeys ? server.keys : undefined
@@ -166,6 +170,10 @@ export function BackupCenter({ people, vendors, setVendors, setModelProfiles }: 
         } catch { rollbackFailed = true }
       }
       throw new Error(rollbackFailed ? '本地恢复失败，部分原数据未能回滚，请保留备份并停止继续恢复' : '本地空间不足或写入失败，已回滚本地修改；服务器写入情况需另行核查')
+    }
+    } catch (error) {
+      try { await rollbackIndexed() } catch { throw new Error('恢复失败且附件或主题素材回滚失败，请保留备份并停止恢复') }
+      throw error
     }
     // A local-only worldbook/MCP restore also needs cloud-write priority.
     // Otherwise startup may immediately replace it with an older snapshot.
@@ -280,6 +288,7 @@ export function BackupCenter({ people, vendors, setVendors, setModelProfiles }: 
     {!native && <p className="backup-hint">当前环境没有本机存储桥：备份会走浏览器下载；恢复请用各分类右侧的「恢复」选文件。</p>}
     {error && <p className="mcp-error" role="alert">{error}</p>}
     {message && <p className="mcp-notice" role="status">{message}</p>}
+    {!isLocalMode() && <p className="backup-warning">当前服务器模式下，备份不包含保存在服务器上的附件文件，请同时备份服务器附件目录。</p>}
     <p className="backup-warning">模型 / MCP / 整体备份可能包含 API Key、MCP 令牌等敏感配置，请只留在自己的设备上，不要把文件发给别人。</p>
   </section>
 }

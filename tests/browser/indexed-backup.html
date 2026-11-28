@@ -1,0 +1,23 @@
+<!doctype html><html><body><pre id="result">RUNNING</pre><script type="module">
+import {localHandle, exportLocalAttachments, applyLocalAttachments, rollbackLocalAttachments} from '/src/localBackend.mjs';
+import {writeStoredCustomAssets, readStoredCustomAssets} from '/src/assetStore.mjs';
+import {collectBackupIndexed, applyBackupIndexed} from '/src/backupIndexed.mjs';
+const assert=(v,m)=>{if(!v)throw Error(m)};
+try {
+ const response=await localHandle('/api/attachments',{method:'POST',body:JSON.stringify({name:'a.txt',mime:'text/plain',data:'aGVsbG8='})});
+ assert(response.ok,'upload '+await response.clone().text()); const item=await response.json();
+ assert((await exportLocalAttachments()).some(a=>a.id===item.id&&a.data==='aGVsbG8='),'attachment export');
+ await writeStoredCustomAssets({background:'test'});
+ const backup=await collectBackupIndexed('full');
+ assert(backup.attachments.length===1&&backup.customAssets.background==='test','collect');
+ const changed={...backup.attachments[0],data:'d29ybGQ='}; const previous=await applyLocalAttachments([changed]);
+ assert((await exportLocalAttachments())[0].data==='d29ybGQ=','apply');
+ await rollbackLocalAttachments(previous);
+ assert((await exportLocalAttachments())[0].data==='aGVsbG8=','rollback');
+ const undo=await applyBackupIndexed('full',{attachments:[changed],customAssets:{background:'new'}});
+ assert((await readStoredCustomAssets()).background==='new','asset apply'); await undo();
+ assert((await readStoredCustomAssets()).background==='test','asset rollback');
+ assert((await exportLocalAttachments())[0].data==='aGVsbG8=','attachment rollback');
+ document.querySelector('#result').textContent='PASS';
+} catch(e) { document.querySelector('#result').textContent='FAIL '+(e.stack||e); }
+</script></body></html>
