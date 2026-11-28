@@ -44,6 +44,13 @@ export async function buildBackupPayload(kindId, people, options = {}) {
     if (!data?.keys || typeof data.keys !== 'object' || Array.isArray(data.keys)) throw new Error('服务器 API Key 数据无效，备份未保存')
     server.keys = data.keys
   }
+  if (!localMode && kindId === 'full') {
+    const response = await fetchApi('/api/backups/records', {credentials:'include'})
+    if (!response.ok) throw new Error('服务器不支持任务、账本和日记备份，请更新服务器后重试')
+    const records = await response.json()
+    if (records?.version !== 1 || !records.tables || ['scheduled_tasks','ledger_entries','ledger_operations','diary_entries'].some(key => !Array.isArray(records.tables[key]))) throw new Error('服务器记录备份数据无效')
+    server.records = records
+  }
   if (!localMode && kind.serverMcp) {
     const response = await fetchApi('/api/backups/mcp', {credentials:'include'})
     if (!response.ok) throw new Error('服务器不支持 MCP 完整备份，请更新服务器后重试')

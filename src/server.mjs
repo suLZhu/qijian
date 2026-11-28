@@ -59,6 +59,7 @@ import { runRouteChat } from './chatRouteRunner.mjs'
 import { ensureMcpSchema, listMcpServices, boundMcpIds, replaceMcpBindings, boundMcpService, deleteMcpService } from './server/mcpStore.mjs'
 import { exportMcpBackup, restoreMcpBackup } from './server/mcpBackup.mjs'
 import { normalizeMcpHeaders } from './mcpCredentials.mjs'
+import { exportRecordBackup, restoreRecordBackup } from './server/recordBackup.mjs'
 
 const password = process.env.AI_HOME_PASSWORD
 if (!password || password.length < 16) {
@@ -424,6 +425,11 @@ const apiServer = createServer(async (req, res) => {
     } catch (error) { return send(res, error.status || 400, { error: error.message || '保存 API Key 失败' }) }
   }
 
+  if (url.pathname === '/api/backups/records' && req.method === 'GET') {
+    try { return send(res, 200, exportRecordBackup(db)) }
+    catch { return send(res, 500, {error:'服务器记录读取失败，备份未保存'}) }
+  }
+
   if (url.pathname === '/api/backups/mcp' && req.method === 'GET') {
     try { return send(res, 200, exportMcpBackup(db, readMcpCredentials)) }
     catch { return send(res, 500, {error:'MCP 凭据无法读取，备份未保存'}) }
@@ -435,7 +441,7 @@ const apiServer = createServer(async (req, res) => {
 
   if (url.pathname === '/api/backups/restore' && req.method === 'POST') {
     try {
-      const { keys = {}, memory = {}, attachments = [], mcp } = await readBody(req, 64 * 1024 * 1024)
+      const { keys = {}, memory = {}, attachments = [], mcp, records } = await readBody(req, 64 * 1024 * 1024)
       const isMap = value => value && typeof value === 'object' && !Array.isArray(value)
       if (!isMap(keys) || !isMap(memory)) throw new Error('备份数据格式无效')
       db.exec('BEGIN')
@@ -453,9 +459,10 @@ const apiServer = createServer(async (req, res) => {
         }
         const restoredAttachments = restoreBackupAttachments(db, attachments)
         const restoredMcp = mcp === undefined ? null : restoreMcpBackup(db, mcp, {encrypt:encryptSecret,validateUrl:validateRemoteUrl,validPerson:isValidAssistantId})
+        const restoredRecords = records === undefined ? null : restoreRecordBackup(db, records)
         db.exec('COMMIT')
         if (restoredMcp) for (const id of restoredMcp) void mcpConnectionPool.drop(id)
-        return send(res, 200, { ok: true, attachmentsRestored: restoredAttachments, ...(restoredMcp ? {mcpRestored:restoredMcp.length} : {}) })
+        return send(res, 200, { ok: true, attachmentsRestored: restoredAttachments, ...(restoredMcp ? {mcpRestored:restoredMcp.length} : {}), ...(restoredRecords !== null ? {recordsRestored:restoredRecords} : {}) })
       } catch (error) {
         db.exec('ROLLBACK')
         throw error

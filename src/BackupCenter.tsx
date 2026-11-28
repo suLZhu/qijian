@@ -102,6 +102,11 @@ export function BackupCenter({ people, vendors, setVendors, setModelProfiles }: 
     const restoreLocalMode = isLocalMode()
     const converted = prepareBackupMcp(prepareBackupStorage(payload, kindId, localKeysForRestore(payload, kindId), restoreLocalMode), kindId, restoreLocalMode)
     const local = converted.local
+    if (restoreLocalMode && converted.crossMode && converted.server.records !== undefined) {
+      const records = converted.server.records
+      if (records?.version !== 1 || !records.tables || ['scheduled_tasks','ledger_entries','ledger_operations','diary_entries'].some(key => !Array.isArray(records.tables[key]))) throw new Error('服务器记录备份数据无效')
+      if (Object.values(records.tables).some((rows: any) => rows.length)) throw new Error('此备份包含服务器任务、账本或日记，本机模式尚不支持迁移；请在服务器模式恢复')
+    }
     const summary = summarizeBackup(payload)
     const details = [
       Object.keys(local).length ? Object.keys(local).length + ' 项本地设置' : '',
@@ -127,6 +132,7 @@ export function BackupCenter({ people, vendors, setVendors, setModelProfiles }: 
         const keys = kind.serverKeys ? server.keys : undefined
         const memory = kind.serverMemory ? server.memory : undefined
         const mcp = kind.serverMcp ? server.mcp : undefined
+        const records = kindId === 'full' ? server.records : undefined
         const attachments = prepared.serverAttachments
         if (attachments !== undefined) {
           const capability = await apiFetch('/api/backups/attachments', {credentials:'include'})
@@ -138,16 +144,21 @@ export function BackupCenter({ people, vendors, setVendors, setModelProfiles }: 
           const data = await capability.json().catch(() => ({}))
           if (!capability.ok || data.version !== 1) throw new Error('服务器不支持 MCP 恢复，请更新服务器')
         }
-        if (keys !== undefined || memory !== undefined || attachments !== undefined || mcp !== undefined) {
+        if (records !== undefined) {
+          const capability = await apiFetch('/api/backups/records', {credentials:'include'})
+          const data = await capability.json().catch(() => ({}))
+          if (!capability.ok || data.version !== 1) throw new Error('服务器不支持任务、账本和日记恢复，请更新服务器')
+        }
+        if (keys !== undefined || memory !== undefined || attachments !== undefined || mcp !== undefined || records !== undefined) {
           let response: Response
           try {
             response = await apiFetch('/api/backups/restore', {
               method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ keys, memory, attachments, mcp }),
+              body: JSON.stringify({ keys, memory, attachments, mcp, records }),
             })
           } catch { throw new Error('服务器恢复结果未确认，服务器可能已更改，请检查；本机数据将回滚') }
           const result = await response.json().catch(() => ({}))
-          if (!response.ok || (attachments !== undefined && result.attachmentsRestored !== attachments.length) || (mcp !== undefined && result.mcpRestored !== mcp.services.length)) throw new Error('服务器恢复未确认，请检查服务器状态；本机数据已回滚')
+          if (!response.ok || (attachments !== undefined && result.attachmentsRestored !== attachments.length) || (mcp !== undefined && result.mcpRestored !== mcp.services.length) || (records !== undefined && result.recordsRestored !== Object.values(records.tables).reduce((n: number, rows: any) => n + rows.length, 0))) throw new Error('服务器恢复未确认，请检查服务器状态；本机数据已回滚')
         }
       },
     })

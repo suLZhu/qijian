@@ -363,3 +363,40 @@ test('服务器 MCP 备份恢复保留凭据、请求头和助手绑定并保证
   const db=new DatabaseSync(join(dbDir,'test.sqlite'),{readOnly:true})
   try {const row=db.prepare('SELECT token_enc FROM mcp_connections WHERE id=?').get(id);const [iv,tag,ciphertext]=row.token_enc.split(':').map(value=>Buffer.from(value,'hex'));const cipher=createDecipheriv('aes-256-gcm',Buffer.from(SECRET,'hex'),iv);cipher.setAuthTag(tag);const credential=JSON.parse(Buffer.concat([cipher.update(ciphertext),cipher.final()]).toString());assert.deepEqual(credential,{token:'test-mcp-secret',headers:{'X-Workspace':'garden-secret'}})} finally {db.close()}
 })
+
+test('服务器任务、账本和日记备份可恢复，坏记录使整次事务回滚',async()=>{
+  const headers={Authorization:'Bearer '+(await login()).body.token,'Content-Type':'application/json'}
+  const request=(path,method='GET',body)=>fetch(BASE+path,{method,headers,...(body===undefined?{}:{body:JSON.stringify(body)})})
+  assert.equal((await fetch(BASE+'/api/backups/records')).status,401)
+  const database=new DatabaseSync(join(dbDir,'test.sqlite'))
+  const task='cbaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',ledger='cbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',diary='cccccccc-cccc-4ccc-8ccc-cccccccccccc'
+  try {
+    database.prepare("INSERT INTO scheduled_tasks(id,person,title,prompt,run_at,created_at,updated_at) VALUES (?,?,?,?,?,?,?)").run(task,'assistant-yanweixi','测试任务','提醒','2030-01-01','2026-01-01','2026-01-01')
+    database.prepare("INSERT INTO ledger_entries VALUES (?,?,?,?,?,?,?,?,?)").run(ledger,'expense',1234,'CNY','食物','测试','2026-01-01','user','2026-01-01')
+    database.prepare("INSERT INTO ledger_operations VALUES (?,?,?,?)").run('test-op',ledger,'user','2026-01-01')
+    database.prepare("INSERT INTO diary_entries VALUES (?,?,?,?,?,?,?,?,?)").run(diary,'user','日记','locked','cipher','salt','iv','tag','2026-01-01')
+    const snapshot=await (await request('/api/backups/records')).json()
+    assert.ok(snapshot.tables.scheduled_tasks.some(x=>x.id===task))
+    database.prepare('DELETE FROM scheduled_tasks WHERE id=?').run(task)
+    database.prepare('DELETE FROM ledger_entries WHERE id=?').run(ledger)
+    database.prepare('DELETE FROM ledger_operations WHERE request_id=?').run('test-op')
+    database.prepare('DELETE FROM diary_entries WHERE id=?').run(diary)
+    const invalid=structuredClone(snapshot)
+    invalid.tables.diary_entries.find(x=>x.id===diary).visibility='invalid'
+    assert.equal((await request('/api/backups/restore','POST',{records:invalid})).status,400)
+    assert.equal(database.prepare('SELECT id FROM scheduled_tasks WHERE id=?').get(task),undefined)
+    const restored=await request('/api/backups/restore','POST',{records:snapshot})
+    assert.equal(restored.status,200)
+    assert.equal((await restored.json()).recordsRestored,Object.values(snapshot.tables).reduce((n,x)=>n+x.length,0))
+    assert.equal(database.prepare('SELECT title FROM scheduled_tasks WHERE id=?').get(task).title,'测试任务')
+    assert.equal(database.prepare('SELECT amount_cents FROM ledger_entries WHERE id=?').get(ledger).amount_cents,1234)
+    assert.equal(database.prepare('SELECT entry_id FROM ledger_operations WHERE request_id=?').get('test-op').entry_id,ledger)
+    assert.equal(database.prepare('SELECT body FROM diary_entries WHERE id=?').get(diary).body,'cipher')
+  } finally {
+    database.prepare('DELETE FROM scheduled_tasks WHERE id=?').run(task)
+    database.prepare('DELETE FROM ledger_entries WHERE id=?').run(ledger)
+    database.prepare('DELETE FROM ledger_operations WHERE request_id=?').run('test-op')
+    database.prepare('DELETE FROM diary_entries WHERE id=?').run(diary)
+    database.close()
+  }
+})
