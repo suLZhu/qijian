@@ -61,7 +61,7 @@ import { assetIdsOfMessages, collectReferencedAssetIds, releasedAssetIds } from 
 import { messageWithVision, historyVisionMessageIndexes, historicalMessageWithoutVision } from './visionAttachments.mjs'
 // 会话内消息搜索（微信式）：纯字符串匹配 + 上一条/下一条循环 + messageId 定位。
 // 云端恢复决策（数据安全）：启动动作判定、覆盖前本地备份、快照→视图提取。
-import { syncRestoredSnapshot, restoreConversationLists, RECOVERY_BACKUP_KEY, decideCloudLoadAction, classifyCloudLoadError, shouldBackupBeforeApply, buildRecoveryBackup, pickActiveConversationIds, pickActiveMessagesFromSnapshot } from './cloudRecovery.mjs'
+import { backupBeforeCloudApply, syncRestoredSnapshot, restoreConversationLists, decideCloudLoadAction, classifyCloudLoadError, pickActiveConversationIds, pickActiveMessagesFromSnapshot } from './cloudRecovery.mjs'
 // 模型请求诊断（黑匣子）：只旁路观察最终 payload，绝不改请求、绝不记录凭证。
 // 资源库绑定层：设置区一次性添加模型/MCP/世界书，聊天窗口按助手选择由哪个使用。
 import { createToolExecutionBudget } from './toolExecutionBudget.mjs'
@@ -772,20 +772,12 @@ export default function App() {
   const latestSnapshot = useRef<any>(null)
   useEffect(() => { latestSnapshot.current = getSnapshot() }, [getSnapshot])
   const applySnapshot = useCallback((data: any) => {
+    const convs = (data.conversations || data.messages) ? restoreConversationLists(data, conversationsRef.current) as Record<Person,Conversation[]> : null
+    if (convs) backupBeforeCloudApply(localStorage, conversationsRef.current, activeConversationIdsRef.current, convs)
     if (data.themePrefs && typeof data.themePrefs==='object' && ['lavender','paper','forest','night'].includes(data.themePrefs.theme)) setThemePrefs({...DEFAULT_THEME,...data.themePrefs})
     const restoredNames = Array.isArray(data.assistants)&&data.assistants.length?applyDefaultDisplayNames(data.assistants):[]
     if (restoredNames.length) setAssistants(restoredNames)
-    if (data.conversations || data.messages) {
-      const convs = restoreConversationLists(data, conversationsRef.current) as Record<Person,Conversation[]>
-      // 数据安全（云端优先恢复的冲突保护）：本快照即将覆盖本地会话。若本地持有
-      // 云端没有的内容（典型：上次会话末尾云保存失败，本地新、云端旧），先把本地
-      // 整体备份到 localStorage——产品行为仍是云端优先，但本地不会静默消失。
-      if (shouldBackupBeforeApply(conversationsRef.current, convs)) {
-        try {
-          localStorage.setItem(RECOVERY_BACKUP_KEY, JSON.stringify(buildRecoveryBackup(conversationsRef.current, activeConversationIdsRef.current)))
-          console.warn('[ai-home] 云端快照覆盖前已备份本地聊天到 ' + RECOVERY_BACKUP_KEY)
-        } catch { /* 备份失败不阻断恢复流程 */ }
-      }
+    if (convs) {
       setConversations(convs)
       const ids={...activeConversationIdsRef.current, ...data.activeConversationIds}
       setActiveConversationIds(pickActiveConversationIds(convs, ids) as Record<Person,string>)
@@ -888,6 +880,8 @@ export default function App() {
       void fallBackToLocal(FALLBACK_LOCAL_NOTICE)
       return
     }
+    setCloudReady(false)
+    if (error instanceof Error && error.message.includes('本地聊天备份失败')) setFallbackNotice(error.message)
     setAuthStatus('signedIn')
     setCloudStatus('error')
   }, [fallBackToLocal])

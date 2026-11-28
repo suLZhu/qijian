@@ -4,7 +4,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import {
-  syncRestoredSnapshot, restoreConversationLists, RECOVERY_BACKUP_KEY, classifyCloudLoadError, conversationsHaveData,
+  backupBeforeCloudApply, syncRestoredSnapshot, restoreConversationLists, RECOVERY_BACKUP_KEY, classifyCloudLoadError, conversationsHaveData,
   countConversationMessages, decideCloudLoadAction, shouldBackupBeforeApply,
   buildRecoveryBackup, pickActiveConversationIds, pickActiveMessagesFromSnapshot,
 } from '../src/cloudRecovery.mjs'
@@ -189,7 +189,7 @@ test('shouldBackupBeforeApply：本地空不备份；本地持有云端没有的
   assert.equal(shouldBackupBeforeApply(null, cloud), false)
   assert.equal(shouldBackupBeforeApply(local.conversations, local.conversations), false, '两边一致 → 不备份')
   assert.equal(shouldBackupBeforeApply(local.conversations, {}), true, '云端空且本地有数据 → 备份')
-  assert.equal(shouldBackupBeforeApply(local.conversations, cloud), false, '云端更丰富（正常恢复方向）→ 不备份')
+  assert.equal(shouldBackupBeforeApply(local.conversations, cloud), true, '云端更多也不能丢失本地独有会话')
   // 本地消息比云端更多（上次会话末尾保存失败的窗口）→ 必须备份
   const localMore = { [A]: [conv('c1', [msg('user', '1'), msg('assistant', '2'), msg('user', '3'), msg('assistant', '4'), msg('user', '5')])], [B]: [] }
   assert.equal(shouldBackupBeforeApply(localMore, cloud), true)
@@ -263,4 +263,15 @@ test('恢复后云同步失败保留重试标记，成功才清除', async () =>
   assert.equal(map.get('ai-home.restorePending'),'1')
   await syncRestoredSnapshot(storage,snapshot,async sent=>{assert.equal(sent,snapshot);return new Response('',{status:200})})
   assert.equal(map.has('ai-home.restorePending'),false)
+})
+
+
+test('云端消息更多仍保护本地改写，备份失败时不允许覆盖', () => {
+  const local = {a:[conv('one',[{id:'1',role:'user',content:'本地修改'}])]}
+  const cloud = {a:[conv('one',[{id:'1',role:'user',content:'旧内容'},{id:'2',role:'assistant',content:'新消息'}])]}
+  assert.equal(shouldBackupBeforeApply(local,cloud),true)
+  assert.throws(()=>backupBeforeCloudApply({setItem(){throw Error('quota')}},local,{},cloud),/停止覆盖/)
+  let saved
+  assert.equal(backupBeforeCloudApply({setItem(k,v){saved=JSON.parse(v)}},local,{},cloud),true)
+  assert.equal(saved.conversations.a[0].messages[0].content,'本地修改')
 })

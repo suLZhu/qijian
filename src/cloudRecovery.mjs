@@ -58,31 +58,28 @@ export function decideCloudLoadAction({ error, cloudState, _localHasData }) {
 // 「本地消息更多」或「存在云端没有的会话」都算持有——宁可多备份，不静默丢。
 export function shouldBackupBeforeApply(localConvs, cloudConvs) {
   if (!conversationsHaveData(localConvs)) return false
-  const localTotal = countConversationMessages(localConvs)
-  // 云端无数据（或非对象）→ 本地有数据就是持有：备份后再上传。
-  if (!conversationsHaveData(cloudConvs)) return true
-  const cloudTotal = countConversationMessages(cloudConvs)
-  // 主信号：本地消息比云端多 = 上次会话末尾有未落云的内容，必须先备份。
-  if (localTotal > cloudTotal) return true
-  // 次信号（仅在本地总量不落后时检查）：本地存在云端完全没有的「有消息会话」。
-  // 云端明显更丰富时（正常恢复方向）不触发，避免每次加载都写一次冗余备份。
-  if (localTotal < cloudTotal) return false
-  const cloudIds = new Set()
-  for (const key of Object.keys(cloudConvs)) {
-    const list = cloudConvs[key]
-    if (Array.isArray(list)) for (const c of list) if (c && c.id) cloudIds.add(key + ' ' + c.id)
-  }
-  for (const key of Object.keys(localConvs)) {
-    const list = localConvs[key]
-    if (!Array.isArray(list)) continue
-    for (const c of list) {
-      // 孤儿会话判定要排除「与云端某会话同 id」的——即便内容不同也不视为持有，
-      // 那属于云端已接管的同一会话（内容更新方向是云端优先，不属本地独有）。
-      if (!c || !c.id || cloudIds.has(key + ' ' + c.id)) continue
-      if (Array.isArray(c.messages) && c.messages.length > 0) return true
+  for (const [person, localList] of Object.entries(localConvs || {})) {
+    const cloudList = Array.isArray(cloudConvs?.[person]) ? cloudConvs[person] : []
+    for (const conversation of Array.isArray(localList) ? localList : []) {
+      if (!Array.isArray(conversation?.messages) || !conversation.messages.length) continue
+      const counterpart = cloudList.find(c => c && c.id === conversation.id)
+      if (!counterpart || !Array.isArray(counterpart.messages)) return true
+      const cloudById = new Map(counterpart.messages.filter(m => m?.id).map(m => [m.id, m]))
+      for (const message of conversation.messages) {
+        if (!message?.id) return true
+        const remote = cloudById.get(message.id)
+        if (!remote || JSON.stringify(message) !== JSON.stringify(remote)) return true
+      }
     }
   }
   return false
+}
+
+export function backupBeforeCloudApply(storage, localConvs, localActiveIds, cloudConvs) {
+  if (!shouldBackupBeforeApply(localConvs, cloudConvs)) return false
+  try { storage.setItem(RECOVERY_BACKUP_KEY, JSON.stringify(buildRecoveryBackup(localConvs, localActiveIds))) }
+  catch { throw new Error('本地聊天备份失败，已停止覆盖；请先释放空间后重试') }
+  return true
 }
 
 // 打包本地备份（整体快照，不做裁剪）：恢复工具/人工取回时数据完整。
