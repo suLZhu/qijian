@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import {executeBackupRestore} from '../src/backupRestore.mjs'
+import {executeBackupRestore, needsRestoredSnapshotSync} from '../src/backupRestore.mjs'
 
 function fixture() {
   const map=new Map([['ai-home.messages','old']]); let indexed='old', calls=0, fail=false
@@ -21,4 +21,12 @@ test('全部成功后才保留恢复数据和同步标记',async()=>{
   const f=fixture()
   await executeBackupRestore({storage:f.storage,local:{'ai-home.messages':'new'},markPending:true,applyIndexed:f.indexed,syncServer:f.server})
   assert.equal(f.map.get('ai-home.messages'),'new');assert.equal(f.state(),'new');assert.equal(f.calls(),1);assert.equal(f.map.get('ai-home.restorePending'),'1')
+})
+
+
+test('部分和跨模式恢复保留优先同步标记，避免旧快照覆盖',()=>{
+  assert.equal(needsRestoredSnapshotSync({'ai-home.conversations':'{}'},'chat',true,false),true)
+  assert.equal(needsRestoredSnapshotSync({'ai-home.conversations':'{}'},'full',true,true),true)
+  assert.equal(needsRestoredSnapshotSync({'ai-home.local.state':'{}'},'full',true,false),false)
+  assert.equal(needsRestoredSnapshotSync({},'full',true,true),false)
 })

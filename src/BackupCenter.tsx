@@ -5,8 +5,9 @@ import './BackupCenter.css'
 import { apiFetch, isLocalMode } from './apiBase.mjs'
 import { applyBackupIndexed } from './backupIndexed.mjs'
 import { buildBackupPayload } from './backupService.mjs'
-import { executeBackupRestore } from './backupRestore.mjs'
+import { executeBackupRestore, needsRestoredSnapshotSync } from './backupRestore.mjs'
 import { prepareBackupAttachments } from './backupAttachments.mjs'
+import { prepareBackupStorage } from './backupStorage.mjs'
 import { confirmDialog } from './uiDialog'
 import {
   BACKUP_DIR_LABEL, BACKUP_KINDS, backupKind, backupFileName, kindFromFileName,
@@ -97,7 +98,9 @@ export function BackupCenter({ people, vendors, setVendors, setModelProfiles }: 
   async function applyRestore(payload: any, kindId: string, sourceName: string) {
     const kind = backupKind(kindId)
     if (!kind) throw new Error('未知的恢复类型')
-    const local = localKeysForRestore(payload, kindId)
+    const restoreLocalMode = isLocalMode()
+    const converted = prepareBackupStorage(payload, kindId, localKeysForRestore(payload, kindId), restoreLocalMode)
+    const local = converted.local
     const summary = summarizeBackup(payload)
     const details = [
       Object.keys(local).length ? Object.keys(local).length + ' 项本地设置' : '',
@@ -106,21 +109,20 @@ export function BackupCenter({ people, vendors, setVendors, setModelProfiles }: 
     ].filter(Boolean).join(' · ') || '空内容'
     const ok = await confirmDialog({
       title: '恢复' + kind.label,
-      message: '用「' + sourceName + '」覆盖当前' + kind.label + '？\n包含：' + details + (isLocalMode() ? '' : '\n服务器上的对应数据也会被写回。'),
+      message: '用「' + sourceName + '」覆盖当前' + kind.label + '？\n包含：' + details + (restoreLocalMode ? '' : '\n服务器上的对应数据也会被写回。') + (converted.crossMode ? '\n跨模式恢复会保留当前连接模式，并迁移记忆和图片。' : ''),
       confirmLabel: '恢复',
       danger: true,
     })
     if (!ok) return
-    const restoreLocalMode = isLocalMode()
-    const prepared = await prepareBackupAttachments(kindId, payload.data?.indexed, payload.data?.server, restoreLocalMode)
+    const prepared = await prepareBackupAttachments(kindId, payload.data?.indexed, converted.server, restoreLocalMode)
     await executeBackupRestore({
       storage: localStorage,
       local,
-      markPending: !restoreLocalMode && Object.keys(local).length > 0,
+      markPending: needsRestoredSnapshotSync(local, kindId, restoreLocalMode, converted.crossMode),
       applyIndexed: () => applyBackupIndexed(kindId, prepared.indexed),
       syncServer: async () => {
         if (restoreLocalMode) return
-        const server = payload.data?.server || {}
+        const server = converted.server
         const keys = kind.serverKeys ? server.keys : undefined
         const memory = kind.serverMemory ? server.memory : undefined
         const attachments = prepared.serverAttachments

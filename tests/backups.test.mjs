@@ -2,7 +2,8 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { DatabaseSync } from 'node:sqlite'
-import { initMemoryStore, SQLiteMemoryProvider } from '../src/server/agent/MemoryStore.mjs'
+import { initMemoryStore, SQLiteMemoryProvider, importMemoryRecords } from '../src/server/agent/MemoryStore.mjs'
+import { decodeVector } from '../src/server/agent/memoryVectors.mjs'
 import {
   BACKUP_KINDS, collectBackupLocal, localKeysForRestore, backupFileName, kindFromFileName,
   parseBackup, makeBackupEnvelope, summarizeBackup,
@@ -130,4 +131,19 @@ test('记忆分类备份和恢复包含各助手的整理和模型配置', () =>
   const payload = makeBackupEnvelope('memory', {...local, 'ai-home.vendors':'[]'})
   assert.deepEqual(localKeysForRestore(payload, 'memory'), local)
   assert.deepEqual(localKeysForRestore(makeBackupEnvelope('full', {...local,'ai-home.vendors':'[]'}), 'memory'), local)
+})
+
+
+test('记忆备份恢复保留向量和模型，拒绝覆盖其他助手的同编号', () => {
+  const db=new DatabaseSync(':memory:')
+  try {
+    initMemoryStore(db)
+    const row={id:'11111111-1111-4111-8111-111111111111',title:'茶',content:'喜欢喝茶',embedding:[0.25,-0.5],embedModel:'embed-a',lifecycle:'active'}
+    assert.equal(importMemoryRecords(db,'assistant-first',[row]).imported,1)
+    const saved=db.prepare('SELECT embedding,embed_model,person FROM memory_records WHERE id=?').get(row.id)
+    assert.deepEqual(decodeVector(saved.embedding),[0.25,-0.5]);assert.equal(saved.embed_model,'embed-a')
+    assert.throws(()=>importMemoryRecords(db,'assistant-other',[row]),/其他助手/)
+    assert.equal(db.prepare('SELECT person FROM memory_records WHERE id=?').get(row.id).person,'assistant-first')
+    assert.throws(()=>importMemoryRecords(db,'assistant-first',[{...row,embedding:[null]}]),/向量格式/)
+  } finally {db.close()}
 })

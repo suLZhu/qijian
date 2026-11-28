@@ -766,6 +766,8 @@ export async function localHandle(path, init) {
       const all = readJSON(K.memoryRecords, [])
       const duplicate = all.find(r => r && r.person === person && r.title === title && r.content === content)
       if (duplicate) return json(200, { record: duplicate, duplicate: true })
+      if (all.length >= 2000) return json(507, { error: '本机记忆已达到容量上限，未保存新记忆，请先备份并处理旧记忆' })
+      if (b.embedding !== undefined && (!Array.isArray(b.embedding) || !b.embedding.length || b.embedding.length > 4096 || !b.embedding.every(Number.isFinite))) return json(400, { error: '记忆向量格式无效' })
       const ts = nowISO()
       // 本地自动整理会以 candidate（或直接 active）+ createdBy:'model' 写入，语义与服务端一致。
       const lifecycle = b.lifecycle === 'candidate' ? 'candidate' : 'active'
@@ -782,9 +784,9 @@ export async function localHandle(path, init) {
         createdBy, recallCount: 0, createdAt: ts, updatedAt: ts,
       }
       // 向量模型给的 embedding 存在本机记录上，供聊天召回时做余弦排序。
-      if (Array.isArray(b.embedding) && b.embedding.length) record.embedding = b.embedding.slice(0, 4096)
+      if (Array.isArray(b.embedding) && b.embedding.length) { record.embedding = b.embedding.slice(0, 4096); record.embedModel = String(b.embedModel || '').slice(0,160) }
       all.unshift(record)
-      try { writeJSON(K.memoryRecords, all.slice(0, 2000)) } catch { return json(500, { error: '本地存储写入失败' }) }
+      try { writeJSON(K.memoryRecords, all) } catch { return json(500, { error: '本地存储写入失败' }) }
       return json(201, { record, duplicate: false })
     }
     const memRec = p.match(/^\/api\/memory\/records\/([0-9a-f-]{36})$/)
@@ -801,7 +803,8 @@ export async function localHandle(path, init) {
       if (typeof b.content === 'string' && b.content.trim()) record.content = b.content.trim().slice(0, 4000)
       if (typeof b.keywords === 'string') record.keywords = b.keywords.slice(0, 500)
       if (typeof b.category === 'string' && b.category.trim()) record.category = b.category.trim().slice(0, 40)
-      if (Array.isArray(b.embedding) && b.embedding.length) record.embedding = b.embedding.slice(0, 4096)
+      if (b.embedding !== undefined && (!Array.isArray(b.embedding) || !b.embedding.length || b.embedding.length > 4096 || !b.embedding.every(Number.isFinite))) return json(400, { error: '记忆向量格式无效' })
+      if (Array.isArray(b.embedding) && b.embedding.length) { record.embedding = b.embedding.slice(0, 4096); record.embedModel = String(b.embedModel || '').slice(0,160) }
       record.updatedAt = nowISO()
       try { writeJSON(K.memoryRecords, all) } catch { return json(500, { error: '本地存储写入失败' }) }
       return json(200, { record })

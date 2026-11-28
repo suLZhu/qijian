@@ -6,6 +6,7 @@ function fixture() {
   let attachments = [{id:'old'}], assets = {background:'old'}
   const ops = {
     exportLocalAttachments: async () => attachments,
+    normalizeAttachments: async value => value,
     readStoredCustomAssets: async () => assets,
     writeStoredCustomAssets: async value => { assets = value },
     applyLocalAttachments: async value => { const old = attachments; attachments = value; return old },

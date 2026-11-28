@@ -1158,7 +1158,13 @@ const apiServer = createServer(async (req, res) => {
     const since = days ? new Date(Date.now() - days * 86400000).toISOString().slice(0, 10) : ''
     const limit = Math.min(1000, Math.max(1, Number(url.searchParams.get('limit')) || 100))
     const offset = Math.min(1000000, Math.max(0, Math.trunc(Number(url.searchParams.get('offset')) || 0)))
-    const records = memoryProvider.list({ person, lifecycle, limit, offset })
+    let records = memoryProvider.list({ person, lifecycle, limit, offset })
+    if (url.searchParams.get('includeEmbedding') === '1') {
+      try {
+        const vector = db.prepare('SELECT embedding FROM memory_records WHERE id=? AND person=?')
+        records = records.map(record => ({...record, embedding: decodeVector(vector.get(record.id, person)?.embedding)}))
+      } catch { return send(res, 500, {error:'记忆向量读取失败'}) }
+    }
     return send(res, 200, { records: since ? records.filter(record => String(record.occurredAt || '') >= since) : records, days })
   }
   if (url.pathname === '/api/memory/records' && req.method === 'POST') {

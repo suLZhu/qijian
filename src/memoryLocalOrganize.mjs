@@ -305,7 +305,7 @@ export async function runLocalOrganize({ person, messages, requestChat, cfg, emb
         ...proposal,
         lifecycle: cfg.autoConfirm ? 'active' : 'candidate',
         createdBy: 'model',
-        ...(embedding ? { embedding } : {}),
+        ...(embedding ? { embedding, embedModel: embedTarget.model } : {}),
       }),
     })
     const data = await saved.json().catch(() => ({}))

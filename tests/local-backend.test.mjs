@@ -6,6 +6,8 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { localHandle, localAttachmentUrl, warmupLocalAttachments } from '../src/localBackend.mjs'
 import { fetchMemoryRecordsWithin } from '../src/memoryPages.mjs'
+import { executeBackupRestore, needsRestoredSnapshotSync } from '../src/backupRestore.mjs'
+import { syncRestoredSnapshot } from '../src/cloudRecovery.mjs'
 
 function memStorage() {
   const m = new Map()
@@ -303,4 +305,29 @@ test('本机记忆列表按状态分页，更新时间相同时顺序稳定', as
   const recalled = await fetchMemoryRecordsWithin(person,'active',{fetchApi:localHandle,timeoutMs:900})
   assert.equal(recalled.length,125);assert.ok(recalled.some(row=>row.id==='000'))
   assert.equal((await getJSON('/api/memory/records?person='+person+'&lifecycle=invalid')).status,400)
+})
+
+
+test('本机记忆达到容量上限时拒绝新增，不静默删除旧记忆',async t=>{
+  const key='ai-home.local.memoryRecords', previous=localStorage.getItem(key)
+  t.after(()=>{if(previous===null)localStorage.removeItem(key);else localStorage.setItem(key,previous)})
+  const all=Array.from({length:2000},(_,i)=>({id:String(i),person:'assistant-memory-page',title:'旧'+i,content:'原内容'}))
+  localStorage.setItem(key,JSON.stringify(all))
+  const result=await body('/api/memory/records',{method:'POST',body:JSON.stringify({person:'assistant-memory-page',title:'新增',content:'新内容'})})
+  assert.equal(result.status,507);assert.deepEqual(JSON.parse(localStorage.getItem(key)),all)
+})
+
+
+test('本机聊天分类恢复先更新后端快照，旧快照不会盖回',async t=>{
+  const keys=['ai-home.conversations','ai-home.restorePending','ai-home.local.state','ai-home.local.stateUpdatedAt']
+  const old=Object.fromEntries(keys.map(k=>[k,localStorage.getItem(k)]))
+  t.after(()=>{for(const k of keys)old[k]===null?localStorage.removeItem(k):localStorage.setItem(k,old[k])})
+  await localHandle('/api/state',{method:'PUT',body:JSON.stringify({state:{conversations:{a:[{id:'old'}]}}})})
+  const restored={a:[{id:'new',messages:[]}]}
+  const local={'ai-home.conversations':JSON.stringify(restored)}
+  await executeBackupRestore({storage:localStorage,local,markPending:needsRestoredSnapshotSync(local,'chat',true,false),applyIndexed:async()=>async()=>{},syncServer:async()=>{}})
+  assert.equal(localStorage.getItem('ai-home.restorePending'),'1')
+  await syncRestoredSnapshot(localStorage,{conversations:restored},state=>localHandle('/api/state',{method:'PUT',body:JSON.stringify({state})}))
+  assert.equal((await (await localHandle('/api/state')).json()).state.conversations.a[0].id,'new')
+  assert.equal(localStorage.getItem('ai-home.restorePending'),null)
 })

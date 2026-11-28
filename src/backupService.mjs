@@ -50,10 +50,11 @@ export async function buildBackupPayload(kindId, people, options = {}) {
       const records = []
       for (let offset = 0; ; offset += 500) {
         if (offset > 1000000) throw new Error('记忆数量超出备份上限')
-        const response = await fetchApi('/api/memory/records?person=' + encodeURIComponent(person) + '&limit=500&offset=' + offset, {credentials:'include'})
+        const response = await fetchApi('/api/memory/records?person=' + encodeURIComponent(person) + '&includeEmbedding=1&limit=500&offset=' + offset, {credentials:'include'})
         if (!response.ok) throw new Error('助手记忆读取失败，备份未保存')
         const data = await response.json()
         if (!Array.isArray(data?.records)) throw new Error('助手记忆数据无效，备份未保存')
+        if (data.records.some(record => record?.hasEmbedding && (!Array.isArray(record.embedding) || !record.embedding.length || record.embedding.length > 4096 || !record.embedding.every(Number.isFinite)))) throw new Error('服务器未提供有效的记忆向量，请更新服务器后备份')
         records.push(...data.records)
         if (data.records.length < 500) break
       }
@@ -64,6 +65,7 @@ export async function buildBackupPayload(kindId, people, options = {}) {
   if (!localMode && (kindId === 'full' || kindId === 'chat')) server.attachments = await collectServerAttachments(fetchApi)
   if (new TextEncoder().encode(JSON.stringify(server)).length > 60 * 1024 * 1024) throw new Error('服务器数据超过单次恢复上限，请先备份服务器数据库')
   const payload = makeBackupEnvelope(kindId, collectBackupLocal(storage, kindId), server)
+  payload.data.storageMode = localMode ? 'local' : 'server'
   if (kindId === 'full' || kindId === 'chat') payload.data.indexed = await (options.collectIndexed || collectBackupIndexed)(kindId)
   return payload
 }

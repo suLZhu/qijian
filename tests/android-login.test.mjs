@@ -308,3 +308,36 @@ test('服务器附件备份恢复：鉴权、原 ID、字节校验和事务回�
   assert.equal((await restored.json()).attachmentsRestored,1)
   assert.equal(Buffer.from(await (await fetch(BASE+'/api/attachments/'+id,{headers})).arrayBuffer()).toString('base64'),img)
 })
+
+
+test('服务器备份读取与恢复保留记忆向量',async()=>{
+  const person='assistant-yanweixi',id='aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
+  const headers={Authorization:'Bearer '+(await login()).body.token,'Content-Type':'application/json'}
+  const record={id,title:'向量测试',content:'测试内容',person,lifecycle:'active',embedding:[0.25,-0.5],embedModel:'embed-test'}
+  const put=await fetch(BASE+'/api/backups/restore',{method:'POST',headers,body:JSON.stringify({memory:{[person]:[record]}})})
+  assert.equal(put.status,200)
+  const list=await (await fetch(BASE+'/api/memory/records?person='+person+'&includeEmbedding=1',{headers})).json()
+  const saved=list.records.find(row=>row.id===id)
+  assert.deepEqual(saved.embedding,[0.25,-0.5]);assert.equal(saved.embedModel,'embed-test')
+})
+
+test('记忆跨本机与服务器恢复保留助手、生命周期、原 ID 和向量',async t=>{
+  const {prepareBackupStorage}=await import('../src/backupStorage.mjs')
+  const {localHandle}=await import('../src/localBackend.mjs')
+  const person='assistant-crosscheck',id='bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb'
+  const row={id,person,title:'测试记忆',content:'跨模式恢复',scope:'private',lifecycle:'active',createdBy:'user',embedding:[0.25,-0.5],embedModel:'test-vector',createdAt:'2026-01-01T00:00:00Z',updatedAt:'2026-01-01T00:00:00Z'}
+  const local={'ai-home.local.memoryRecords':JSON.stringify([row])}
+  const toServer=prepareBackupStorage({data:{storageMode:'local',server:{}}},'memory',local,false)
+  const headers={Authorization:'Bearer '+(await login()).body.token,'Content-Type':'application/json'}
+  const response=await fetch(BASE+'/api/backups/restore',{method:'POST',headers,body:JSON.stringify({memory:toServer.server.memory})})
+  assert.equal(response.status,200)
+  const read=await (await fetch(BASE+'/api/memory/records?person='+person+'&includeEmbedding=1',{headers})).json()
+  const saved=read.records.find(x=>x.id===id)
+  assert.deepEqual(saved.embedding,[0.25,-0.5]);assert.equal(saved.lifecycle,'active')
+  const toLocal=prepareBackupStorage({data:{storageMode:'server',server:{memory:{[person]:[saved]}}}},'memory',{},true)
+  const key='ai-home.local.memoryRecords',old=localStorage.getItem(key)
+  t.after(()=>{if(old===null)localStorage.removeItem(key);else localStorage.setItem(key,old)})
+  localStorage.setItem(key,toLocal.local[key])
+  const restored=await (await localHandle('/api/memory/records?person='+person)).json()
+  assert.equal(restored.records[0].id,id);assert.equal(restored.records[0].lifecycle,'active');assert.deepEqual(restored.records[0].embedding,[0.25,-0.5])
+})

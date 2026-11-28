@@ -1399,9 +1399,10 @@ export default function App() {
     let recalledContext = ''
     if (text.length >= 2 && options.agent?.allowMemorySearch !== false) {
       // 记忆相关请求是增强项，不得拖住普通聊天：并行发起，超过软超时就跳过。
+      const memoryModelConfig = readMemoryModels(target)
       const [recallResponse, memoryRecords] = await Promise.all([
         fetchWithSoftTimeout('/api/memory/search?person='+encodeURIComponent(target)+'&q='+encodeURIComponent(text.slice(0,160))+'&exclude='+encodeURIComponent(sendConversationId||''), { credentials:'include' }, 900, abortController.signal).catch(()=>null),
-        fetchMemoryRecordsWithin(target, 'active', {signal:abortController.signal, timeoutMs:900}).catch(()=>null),
+        fetchMemoryRecordsWithin(target, 'active', {signal:abortController.signal, timeoutMs:900, includeEmbedding:!!memoryModelConfig.embed.model}).catch(()=>null),
       ])
       if (recallResponse?.ok) {
         try {
@@ -1414,10 +1415,9 @@ export default function App() {
         try {
           const list = memoryRecords as { title: string; content: string; keywords?: string; embedding?: number[] }[]
           if (list.length) {
-            const mm = readMemoryModels(target)
-            const embedTarget = mm.embed.model ? embeddingTarget(vendors, mm.embed) : null
+            const embedTarget = memoryModelConfig.embed.model ? embeddingTarget(vendors, memoryModelConfig.embed) : null
             const queryVector = embedTarget ? await settleWithin(embedText(embedTarget, text.slice(0, 500)).catch(()=>null), 700, null) : null
-            const scored = rankMemoryRecords(list, text, queryVector, cosine)
+            const scored = rankMemoryRecords(list, text, queryVector, cosine, memoryModelConfig.embed.model)
             if (scored.length) {
               const memoryParts = scored.map(item => '· ' + clipContextText(item.record.title,120) + '\n' + clipContextText(item.record.content,1000))
               const block = '【记忆库召回（长期记忆，按相关性挑选）】\n' + takeWithinBudget(memoryParts,5000,1200).join('\n\n')

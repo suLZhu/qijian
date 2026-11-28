@@ -20,6 +20,7 @@
 // an instr()-based clause for Chinese substrings; only `active` records are
 // indexed, so candidates and tombstones can never leak into a prompt.
 import { randomUUID } from 'node:crypto'
+import { encodeVector } from './memoryVectors.mjs'
 
 export const MEMORY_LIFECYCLES = ['candidate', 'active', 'archived', 'rejected']
 export const MEMORY_SCOPES = ['world', 'private', 'ops']
@@ -126,6 +127,8 @@ export function importMemoryRecords(db, person, records) {
       source_conversation_id=excluded.source_conversation_id, source_run_id=excluded.source_run_id,
       source_message_ids=excluded.source_message_ids, created_by=excluded.created_by, recall_count=excluded.recall_count,
       created_at=excluded.created_at, updated_at=excluded.updated_at, occurred_at=excluded.occurred_at`)
+  const existingOwner = db.prepare('SELECT person FROM memory_records WHERE id=?')
+  const setVector = db.prepare('UPDATE memory_records SET embedding=?, embed_model=? WHERE id=?')
   const validDate = (value, fallback) => {
     const text = String(value || '')
     return Number.isFinite(Date.parse(text)) ? new Date(text).toISOString() : fallback
@@ -139,6 +142,9 @@ export function importMemoryRecords(db, person, records) {
       const content = String(raw.content || '').trim().slice(0, 4000)
       if (!title || !content) continue
       const id = String(raw.id || '').trim().slice(0, 80) || crypto.randomUUID()
+      const owner = existingOwner.get(id)
+      if (owner && owner.person !== person) throw new Error('记忆编号属于其他助手，不能覆盖')
+      if (raw.embedding !== undefined && raw.embedding !== null && (!Array.isArray(raw.embedding) || !raw.embedding.length || raw.embedding.length > 4096 || !raw.embedding.every(Number.isFinite))) throw new Error('记忆向量格式无效')
       const scope = MEMORY_SCOPES.includes(raw.scope) ? raw.scope : 'private'
       const lifecycle = MEMORY_LIFECYCLES.includes(raw.lifecycle) ? raw.lifecycle : 'candidate'
       const keywords = String(raw.keywords || '').trim().slice(0, 500)
@@ -152,6 +158,7 @@ export function importMemoryRecords(db, person, records) {
       upsert.run(id, person, scope, lifecycle, title, content, keywords, category,
         String(raw.sourceConversationId || '').slice(0, 120), String(raw.sourceRunId || '').slice(0, 160),
         sourceMessageIds, createdBy, recallCount, createdAt, updatedAt, occurredAt)
+      if (Array.isArray(raw.embedding)) setVector.run(encodeVector(raw.embedding), String(raw.embedModel || '').slice(0, 160), id)
       reindex(db, { id, person, lifecycle, title, content, keywords })
       imported++
     }

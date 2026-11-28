@@ -28,3 +28,11 @@ test('旧备份或非聊天分类不会更改附件',async()=>{
   assert.equal((await prepareBackupAttachments('full',undefined,undefined,true)).indexed,undefined)
   assert.equal((await prepareBackupAttachments('models',{attachments:[local]},null,false)).serverAttachments,undefined)
 })
+
+
+test('本机附件支持非图片旧文件，迁往服务器时安全拒绝',async()=>{
+  const legacy={...local,name:'note.txt',mime:'text/plain'}
+  const backed=await prepareBackupAttachments('chat',{attachments:[legacy]},null,true)
+  assert.equal(backed.indexed.attachments[0].sha256,remote.sha256)
+  await assert.rejects(prepareBackupAttachments('chat',{attachments:[legacy]},null,false),/格式无效/)
+})

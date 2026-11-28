@@ -1,11 +1,15 @@
 // 备份和恢复 IndexedDB 中的本地附件、主题素材。旧备份没有该字段时不修改现有数据。
 import { exportLocalAttachments, applyLocalAttachments, rollbackLocalAttachments } from './localBackend.mjs'
 import { readStoredCustomAssets, writeStoredCustomAssets } from './assetStore.mjs'
+import { prepareBackupAttachments } from './backupAttachments.mjs'
 
 const defaults = {exportLocalAttachments, applyLocalAttachments, rollbackLocalAttachments, readStoredCustomAssets, writeStoredCustomAssets}
 export async function collectBackupIndexed(kind, ops = defaults) {
   const data = {}
-  if (kind === 'full' || kind === 'chat') data.attachments = await ops.exportLocalAttachments()
+  if (kind === 'full' || kind === 'chat') {
+    const attachments = await ops.exportLocalAttachments()
+    data.attachments = ops.normalizeAttachments ? await ops.normalizeAttachments(attachments) : (await prepareBackupAttachments('chat', {attachments}, null, true)).indexed.attachments
+  }
   if (kind === 'full') data.customAssets = await ops.readStoredCustomAssets()
   return data
 }

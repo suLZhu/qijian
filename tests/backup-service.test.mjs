@@ -45,3 +45,8 @@ test('服务器附件损坏或服务器过旧时拒绝生成不完整备份',asy
   await assert.rejects(buildBackupPayload('chat',[],opts),/校验失败/)
   await assert.rejects(buildBackupPayload('chat',[],{...opts,fetchApi:async()=>new Response('',{status:404})}),/不支持附件备份/)
 })
+
+test('旧服务器未提供已有向量时拒绝生成不完整的记忆备份',async()=>{
+  const fetchApi=async url=>url.startsWith('/api/memory/records?')?Response.json({records:[{id:'x',person:'assistant-first',hasEmbedding:true}]}):Response.json({keys:{}})
+  await assert.rejects(buildBackupPayload('memory',['assistant-first'],{storage:storage({}),localMode:false,fetchApi}),/记忆向量/)
+})

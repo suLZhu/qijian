@@ -18,3 +18,9 @@ export async function executeBackupRestore({storage, local, applyIndexed, syncSe
     throw error
   }
 }
+
+// 部分恢复及跨模式恢复要先把恢复后的状态写入目标后端，避免旧快照重新盖回。
+export function needsRestoredSnapshotSync(local, kind, localMode, crossMode) {
+  if (!Object.keys(local).length) return false
+  return !localMode || kind !== 'full' || crossMode || Object.hasOwn(local, 'ai-home.conversations')
+}

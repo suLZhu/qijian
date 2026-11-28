@@ -1,11 +1,12 @@
 import {apiFetch} from './apiBase.mjs'
 
 // 两种后端统一分页，失败时保留旧视图并显示错误，不能把前一百条伪装成全部记忆。
-export async function fetchAllMemoryRecords(person, lifecycle, fetchApi = apiFetch) {
+export async function fetchAllMemoryRecords(person, lifecycle, fetchApi = apiFetch, options = {}) {
   const records = [], seen = new Set(), pageSize = 500
   for (let offset = 0; offset < 100000; offset += pageSize) {
     const params = new URLSearchParams({person,limit:String(pageSize),offset:String(offset)})
     if (lifecycle) params.set('lifecycle',lifecycle)
+    if (options.includeEmbedding) params.set('includeEmbedding','1')
     const response = await fetchApi('/api/memory/records?' + params, {credentials:'include'})
     const data = await response.json().catch(()=>({}))
     if (!response.ok) throw new Error(data.error || '读取记忆失败（HTTP ' + response.status + '）')
@@ -22,7 +23,7 @@ export async function fetchAllMemoryRecords(person, lifecycle, fetchApi = apiFet
 }
 
 // 聊天召回整个分页过程共用一个软时限，超时或停止生成后取消后续请求。
-export async function fetchMemoryRecordsWithin(person, lifecycle, {signal, timeoutMs = 900, fetchApi = apiFetch} = {}) {
+export async function fetchMemoryRecordsWithin(person, lifecycle, {signal, timeoutMs = 900, fetchApi = apiFetch, includeEmbedding = false} = {}) {
   if (signal?.aborted) throw new Error('记忆检索已取消')
   const controller = new AbortController()
   let timer, onAbort
@@ -37,7 +38,7 @@ export async function fetchMemoryRecordsWithin(person, lifecycle, {signal, timeo
       fetchAllMemoryRecords(person, lifecycle, (url,init) => {
         if (controller.signal.aborted) throw new Error('记忆检索已取消')
         return fetchApi(url,{...init,signal:controller.signal})
-      }),
+      }, {includeEmbedding}),
       stop,
     ])
   } finally {
@@ -47,7 +48,7 @@ export async function fetchMemoryRecordsWithin(person, lifecycle, {signal, timeo
 }
 
 // 按查询与关键词、标题和正文的关联度排序；向量可用时同样参与排序。
-export function rankMemoryRecords(records, query, queryVector, cosine) {
+export function rankMemoryRecords(records, query, queryVector, cosine, queryModel = '') {
   const text = String(query || '').trim().toLowerCase().slice(0, 500)
   const words = text.split(/[\s，。！？、,.!?；;：:（）()]+/).filter(x=>x.length >= 2).slice(0, 8)
   const terms = [...new Set(words.flatMap(word => {
@@ -61,7 +62,7 @@ export function rankMemoryRecords(records, query, queryVector, cosine) {
     const content=(String(record.title || '')+'\n'+String(record.content || '')+'\n'+String(record.keywords || '')).toLowerCase()
     const keywordScore=keywords.filter(keyword=>text.includes(keyword)).length
     const textScore=terms.filter(term=>content.includes(term)).length * 0.5
-    const vectorScore=queryVector && Array.isArray(record.embedding) && typeof cosine === 'function' ? cosine(queryVector,record.embedding) : 0
+    const vectorScore=queryVector && Array.isArray(record.embedding) && (!record.embedModel || record.embedModel === queryModel) && typeof cosine === 'function' ? cosine(queryVector,record.embedding) : 0
     return {record,score:vectorScore*2+keywordScore+textScore}
   }).filter(item=>item.score>0.15).sort((a,b)=>b.score-a.score).slice(0,4)
 }

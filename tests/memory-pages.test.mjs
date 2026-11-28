@@ -37,3 +37,10 @@ test('召回无关键词的相关标题正文，忽略无关记忆',()=>{
   const result=rankMemoryRecords(rows,'我最近想喝茉莉花茶',null,()=>0)
   assert.equal(result.length,1);assert.equal(result[0].record.title,'茶饮偏好')
 })
+
+
+test('向量召回只比较相同模型的向量',()=>{
+  const rows=[{title:'同模型',content:'内容',embedModel:'m1',embedding:[1,0]},{title:'不同模型',content:'其他',embedModel:'m2',embedding:[1,0]}]
+  const result=rankMemoryRecords(rows,'无关查询',[1,0],()=>1,'m1')
+  assert.deepEqual(result.map(x=>x.record.title),['同模型'])
+})

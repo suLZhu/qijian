@@ -7,7 +7,7 @@ export async function prepareBackupAttachments(kind, indexed, server, localMode)
   const records = new Map()
   let total = 0
   for (const item of [...(localItems || []), ...(remoteItems || [])]) {
-    if (!item || !/^[0-9a-f-]{36}$/i.test(item.id) || typeof item.data !== 'string' || !item.data || item.data.length > (localMode ? 32 : 20) * 1024 * 1024 || !/^[A-Za-z0-9+/]+={0,2}$/.test(item.data) || item.data.length % 4 !== 0 || !/^image\/[a-z0-9.+-]+$/i.test(item.mime || '') || typeof item.name !== 'string' || !item.name.trim() || item.name.length > 200) throw new Error('图片附件备份格式无效')
+    if (!item || !/^[0-9a-f-]{36}$/i.test(item.id) || typeof item.data !== 'string' || !item.data || item.data.length > (localMode ? 32 : 20) * 1024 * 1024 || !/^[A-Za-z0-9+/]+={0,2}$/.test(item.data) || item.data.length % 4 !== 0 || !(localMode ? /^[a-z0-9.+-]+\/[a-z0-9.+-]+$/i : /^image\/[a-z0-9.+-]+$/i).test(item.mime || '') || item.mime.length > 120 || typeof item.name !== 'string' || !item.name.trim() || item.name.length > 200) throw new Error('图片附件备份格式无效')
     let binary
     try { binary = atob(item.data) } catch { throw new Error('图片附件数据无效') }
     const bytes = Uint8Array.from(binary, c => c.charCodeAt(0))
