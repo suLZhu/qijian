@@ -41,6 +41,7 @@ import { DEFAULT_BEAUTIFY_PACK } from './beautify'
 import { BUILTIN_THEME_PACKS } from './builtinThemePacks.mjs'
 const PersonAppearance = lazy(() => import('./PersonAppearance').then(module => ({ default: module.PersonAppearance })))
 import { reportToolCallStart, reportToolCallEnd, classifyToolError, type ToolCallSource } from './toolCalls'
+import { authorizeChatTool } from './chatToolPolicy.mjs'
 import { decideTaskConsumption, parseTaskEnvelope } from './taskResult.mjs'
 import { normalizeTimeZone, buildTimeContext } from './timeContext.mjs'
 // 生成态待发送队列：纯函数状态机 + 本机持久化（当前生成成功后按 scope 自动补发，非定时缓发）。
@@ -1694,6 +1695,8 @@ export default function App() {
             if(!webTool&&!widgetTool&&!roomTool&&!themeTool&&!workspaceTool&&!conversationTool&&call.function.name!=='ledger_add_entry'&&!localWorldbookTool&&!scheduledTaskTool&&(!route||route.person!==target)) throw new Error('工具没有绑定到当前人物，已拒绝调用。')
             if(!argsParsed)throw new Error('模型生成的工具参数不是合法 JSON。')
             if(!args||typeof args!=='object'||Array.isArray(args))throw new Error('工具参数必须是 JSON 对象。')
+            await authorizeChatTool({ person:target, tool:route?route.name:call.function.name, signal:abortController.signal, fetchPolicy:apiFetch,
+              confirm:tool=>confirmDialog({title:'工具调用确认',message:'允许本次调用「'+tool+'」吗？',confirmLabel:'允许'}) })
             const toolLabel=route?route.name:(webTool?'联网 / 内置浏览器':widgetTool?'房间小组件':workspaceTool?'本机工作区':conversationTool?'回顾更早的对话':call.function.name==='ledger_add_entry'?'共享记账单':scheduledTaskTool?'定时任务':'本地工具')
             updateActiveConversationMessages(target,prev=>prev.map(m=>m.id===assistantMessageId?{...m,content:(answer?answer+'\n\n':'')+'正在调用工具：'+toolLabel+'…'}:m),sendConversationId)
             if(webTool){
