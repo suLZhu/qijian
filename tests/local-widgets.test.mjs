@@ -34,3 +34,14 @@ test('本地创建 → 列表 → 追加 → 删除', async () => {
   const after = await (await localHandle('/api/widgets?person=' + PERSON, { method: 'GET' })).json()
   assert.equal(after.widgets.length, 0)
 })
+
+test('记账和清单组件超过上限时拒绝更新，不丢弃已有项目',async()=>{
+  for (const [type,key,entry] of [['ledger','entries',{amount:1,note:'已有'}],['checklist','items',{text:'已有'}]]) {
+    const created=await (await localHandle('/api/widgets',{method:'POST',body:JSON.stringify({person:PERSON,type,config:{[key]:Array.from({length:200},()=>entry)}})})).json()
+    const id=created.widget.id
+    const response=await localHandle('/api/widgets/'+id,{method:'PATCH',body:JSON.stringify({person:PERSON,config:{[key]:[...created.widget.config[key],entry]}})})
+    assert.equal(response.status,400);assert.match((await response.json()).error,/上限/)
+    const list=await (await localHandle('/api/widgets?person='+PERSON)).json()
+    assert.deepEqual(list.widgets.find(x=>x.id===id).config,created.widget.config)
+  }
+})

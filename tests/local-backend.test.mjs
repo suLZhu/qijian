@@ -357,3 +357,19 @@ test('本机 MCP 使用自定义请求头、修改后重连，普通列表不泄
   assert.equal((await body('/api/mcp/'+id+'/tools',{method:'POST',body:JSON.stringify({person})})).status,200)
   assert.equal(calls.slice(before).some(c=>c.method==='initialize'&&c.workspace==='new'),true)
 })
+
+test('本机账目与日记达到容量上限不会静默删除旧记录', async t => {
+  const ledgerKey='ai-home.local.ledger', diaryKey='ai-home.local.diary'
+  const oldLedger=localStorage.getItem(ledgerKey), oldDiary=localStorage.getItem(diaryKey)
+  t.after(()=>{for(const [key,value] of [[ledgerKey,oldLedger],[diaryKey,oldDiary]]) value===null?localStorage.removeItem(key):localStorage.setItem(key,value)})
+  const ledger=Array.from({length:5000},(_,i)=>({id:String(i),requestId:'request-id-'+i}))
+  const diaries=Array.from({length:1000},(_,i)=>({id:String(i),owner:'user',title:'旧日记',visibility:'public',body:'内容',created_at:'2026-01-01'}))
+  localStorage.setItem(ledgerKey,JSON.stringify(ledger));localStorage.setItem(diaryKey,JSON.stringify(diaries))
+  const duplicate=await body('/api/ledger',{method:'POST',body:JSON.stringify({kind:'expense',amount:1,date:'2026-01-01',requestId:'request-id-0'})})
+  assert.equal(duplicate.status,200);assert.equal(duplicate.data.duplicate,true)
+  const over=await body('/api/ledger',{method:'POST',body:JSON.stringify({kind:'expense',amount:1,date:'2026-01-01',requestId:'new-request-id-123'})})
+  assert.equal(over.status,507);assert.deepEqual(JSON.parse(localStorage.getItem(ledgerKey)),ledger)
+  const rejected=await body('/api/diary',{method:'POST',body:JSON.stringify({owner:'user',title:'新日记',content:'新内容',visibility:'public'})})
+  assert.equal(rejected.status,507);assert.deepEqual(JSON.parse(localStorage.getItem(diaryKey)),diaries)
+  assert.equal((await getJSON('/api/diary')).data.entries.length,1000)
+})

@@ -34,7 +34,8 @@ export function normalizeConfig(type, raw) {
     return { html, data, summary: String(config.summary == null ? '' : config.summary).slice(0, 80) }
   }
   if (type === 'ledger') {
-    const entries = (Array.isArray(config.entries) ? config.entries : []).slice(-200).map(entry => ({
+    if (Array.isArray(config.entries) && config.entries.length > 200) throw Object.assign(new Error('记账组件已达 200 条上限，未保存新记录'), {status:400})
+    const entries = (Array.isArray(config.entries) ? config.entries : []).map(entry => ({
       id: text(entry?.id, 80) || uid(),
       amount: Math.round(Math.abs(Number(entry?.amount) || 0) * 100) / 100,
       note: text(entry?.note, 120),
@@ -44,7 +45,8 @@ export function normalizeConfig(type, raw) {
     return { currency: text(config.currency, 8) || 'CNY', entries }
   }
   if (type === 'checklist') {
-    const items = (Array.isArray(config.items) ? config.items : []).slice(0, 200).map(item => ({
+    if (Array.isArray(config.items) && config.items.length > 200) throw Object.assign(new Error('清单组件已达 200 项上限，未保存新内容'), {status:400})
+    const items = (Array.isArray(config.items) ? config.items : []).map(item => ({
       id: text(item?.id, 80) || uid(),
       text: text(item?.text, 200),
       done: !!item?.done,

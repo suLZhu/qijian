@@ -917,6 +917,7 @@ export async function localHandle(path, init) {
       const all = readJSON(K.ledger, [])
       const prior = all.find(e => e && e.requestId === requestId)
       if (prior) return json(200, { ok: true, id: prior.id, duplicate: true })
+      if (all.length >= 5000) return json(507, { error: '本机账目已达容量上限，未新增账目，已有记录均已保留' })
       const entry = {
         id: uuid(), kind: b.kind, amount, currency,
         category: String(b.category || '其他').trim().slice(0, 40),
@@ -924,7 +925,7 @@ export async function localHandle(path, init) {
         date, createdBy: String(b.actor || 'user'), createdAt: nowISO(), requestId,
       }
       all.unshift(entry)
-      try { writeJSON(K.ledger, all.slice(0, 5000)) } catch { return json(500, { error: '本地存储写入失败' }) }
+      try { writeJSON(K.ledger, all) } catch { return json(500, { error: '本地存储写入失败' }) }
       return json(201, { ok: true, id: entry.id })
     }
     const ledgerDel = p.match(/^\/api\/ledger\/([0-9a-f-]{36})$/)
@@ -941,7 +942,6 @@ export async function localHandle(path, init) {
       const entries = readJSON(K.diary, [])
         .slice()
         .sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)))
-        .slice(0, 500)
         .map(r => ({
           id: r.id, owner: r.owner, title: r.title, visibility: r.visibility,
           date: String(r.created_at || '').slice(0, 10),
@@ -957,6 +957,8 @@ export async function localHandle(path, init) {
       const title = String(b.title || '').trim()
       const content = String(b.content || '')
       if (!title || title.length > 100 || !content.trim() || content.length > 20000) return json(400, { error: '标题或正文无效' })
+      const all = readJSON(K.diary, [])
+      if (all.length >= 1000) return json(507, { error: '本机日记已达容量上限，未新增日记，已有记录均已保留' })
       const record = { id: uuid(), owner, title, visibility: b.visibility, created_at: nowISO() }
       if (b.visibility === 'locked') {
         const secret = String(b.secret || '')
@@ -968,9 +970,8 @@ export async function localHandle(path, init) {
       } else {
         record.body = content
       }
-      const all = readJSON(K.diary, [])
       all.unshift(record)
-      try { writeJSON(K.diary, all.slice(0, 1000)) } catch { return json(500, { error: '本地存储写入失败' }) }
+      try { writeJSON(K.diary, all) } catch { return json(500, { error: '本地存储写入失败' }) }
       return json(201, { ok: true, id: record.id })
     }
     const diaryRead = p.match(/^\/api\/diary\/([0-9a-f-]{36})\/read$/)
@@ -1493,6 +1494,7 @@ export async function localHandle(path, init) {
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
     const badRequest = error instanceof SyntaxError
-    return json(badRequest ? 400 : 500, { error: badRequest ? '请求无效' : '本地处理失败：' + message })
+    const status = Number.isInteger(error?.status) && error.status >= 400 && error.status <= 599 ? error.status : badRequest ? 400 : 500
+    return json(status, { error: badRequest ? '请求无效' : status < 500 ? message : '本地处理失败：' + message })
   }
 }

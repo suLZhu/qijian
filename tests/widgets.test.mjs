@@ -44,3 +44,12 @@ test('计数器与便签的配置边界', () => {
   assert.equal(normalizeConfig('note', { text: 'a'.repeat(9000) }).text.length, 8000)
   assert.deepEqual(normalizeConfig('ledger', { entries: [{ amount: 0 }, { amount: -3, kind: 'income' }] }).entries.map(e => e.amount), [3])
 })
+
+test('服务器组件超过上限时原数据保持不变',()=>{
+  const db=new DatabaseSync(':memory:');initWidgets(db)
+  try {
+    const widget=createWidget(db,PERSON,{type:'ledger',config:{entries:Array.from({length:200},()=>({amount:1}))}})
+    assert.throws(()=>updateWidget(db,widget.id,PERSON,{config:{entries:[...widget.config.entries,{amount:2}]}}),/上限/)
+    assert.deepEqual(listWidgets(db,PERSON)[0].config,widget.config)
+  } finally {db.close()}
+})
