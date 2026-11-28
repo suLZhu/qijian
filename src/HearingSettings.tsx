@@ -1,6 +1,6 @@
 import {appendDiagLog,buildDiagSnapshot,loadDiagLogs,saveDiagLogs} from './requestDiag.mjs'
 import {recordMediaUsage} from './usageLedger.mjs'
-import {useEffect,useRef,useState} from 'react'
+import {useCallback,useEffect,useRef,useState} from 'react'
 import {recognizeAudio} from './hearingProtocol.mjs'
 import {type Vendor} from './vendors.mjs'
 import {apiFetch,isLocalMode} from './apiBase.mjs'
@@ -17,20 +17,20 @@ export function HearingSettings({vendors,person,onUse}:{vendors:Vendor[];person:
   const alive=useRef(true),[recording,setRecording]=useState(false),[starting,setStarting]=useState(false)
   const sentinel=useRef(false),[sentinelActive,setSentinelActive]=useState(false)
   const [sentinelPhase,setSentinelPhase]=useState<'recording'|'recognizing'|''>('')
-  function release(){
+  const release=useCallback(()=>{
     if(recordTimer.current)clearTimeout(recordTimer.current)
     recordTimer.current=null
     stream.current?.getTracks().forEach(t=>t.stop());stream.current=null
-  }
-  function stopSentinel(){
+  },[])
+  const stopSentinel=useCallback(()=>{
     sentinel.current=false
     active.current?.abort()
     if(recorder.current?.state==='recording')recorder.current.stop()
     release()
     if(alive.current){setSentinelActive(false);setSentinelPhase('');setNotice('实时听觉已停止')}
     void apiFetch('/api/hearing/stop',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({person})}).catch(()=>{})
-  }
-  useEffect(()=>{alive.current=true;if(isLocalMode())void apiFetch('/api/hearing/stop',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({person})}).catch(()=>{});const hidden=()=>{if(document.hidden&&sentinel.current)stopSentinel()};document.addEventListener('visibilitychange',hidden);return ()=>{alive.current=false;document.removeEventListener('visibilitychange',hidden);if(sentinel.current)stopSentinel();active.current?.abort();if(recorder.current?.state==='recording')recorder.current.stop();release()}},[])
+  },[person,release])
+  useEffect(()=>{alive.current=true;if(isLocalMode())void apiFetch('/api/hearing/stop',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({person})}).catch(()=>{});const hidden=()=>{if(document.hidden&&sentinel.current)stopSentinel()};document.addEventListener('visibilitychange',hidden);return ()=>{alive.current=false;document.removeEventListener('visibilitychange',hidden);if(sentinel.current)stopSentinel();active.current?.abort();if(recorder.current?.state==='recording')recorder.current.stop();release()}},[person,stopSentinel,release])
 
   async function startRecording(){
     if(!enabled||starting||recording||busy)return
