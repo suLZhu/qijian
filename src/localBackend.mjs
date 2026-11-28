@@ -1,4 +1,4 @@
-import { startLocalAgentRun, listLocalAgentRuns, getLocalAgentRun, cancelLocalAgentRun } from './localAgentRuns.mjs'
+import { startLocalAgentRun, listLocalAgentRuns, getLocalAgentRun, cancelLocalAgentRun, subscribeLocalAgentEvents } from './localAgentRuns.mjs'
 import { createMcpConnectionPool } from './server/mcpConnectionPool.mjs'
 // 本地模式后端垫片（LocalBackend）：未配置服务器地址时，浏览器/WebView 内
 // 直接应答全部 /api/* 请求，让 App 开箱即用——不依赖任何云端或本机后端进程。
@@ -13,8 +13,7 @@ import { createMcpConnectionPool } from './server/mcpConnectionPool.mjs'
 //   - 附件 /api/attachments      → IndexedDB 存字节 + objectURL 注册表（<img> 直接可用）
 //   - 记账/日记/工具日志/收件箱/记忆治理/MCP 配置/定时任务 → localStorage CRUD
 //   - 定时任务由 App 前台调度器结算（/api/tasks/run），不依赖云端常驻进程
-//   - 服务端专属能力（MCP 执行、后台 Agent 运行）→ 明确的降级错误，
-//     绝不伪装成功；提示用户配置云服务器后使用。
+//   - 本地 Agent 在注册真实执行器前拒绝启动，不伪装成功。
 //
 // 纯 ESM、无框架依赖；apiBase.mjs 在 local 模式下把 apiFetch 路由到这里。
 import { mcpMigrationKey } from './mcpMigration.mjs'
@@ -421,22 +420,19 @@ async function mcpTools(url, token, id = 'test:'+url) {
   })
 }
 
-// ── 服务端专属能力的统一降级错误 ───────────────────────────────────────────
-const DEGRADED = {
-  agent: '本地模式暂不支持后台 Agent 运行（需要后端执行器）。配置云服务器后可用。',
-}
-
-// ── agent 事件流：SSE 心跳保活（本地无事件，仅避免 EventSource 反复重连）──
-function sseKeepAlive() {
+// 本地 SSE 与看板共享同一事件源；关闭流时取消订阅及心跳。
+function localAgentEventStream() {
   let timer = null
+  let unsubscribe = () => {}
+  const encoder = new TextEncoder()
   const stream = new ReadableStream({
     start(controller) {
-      try { controller.enqueue(new TextEncoder().encode(': ping\n\n')) } catch { /* 已关闭 */ }
-      timer = setInterval(() => {
-        try { controller.enqueue(new TextEncoder().encode(': ping\n\n')) } catch { /* 已关闭 */ }
-      }, 25000)
+      const send = text => { try { controller.enqueue(encoder.encode(text)) } catch { /* stream closed */ } }
+      send(': ping\n\n')
+      unsubscribe = subscribeLocalAgentEvents(event => send(`event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`))
+      timer = setInterval(() => send(': ping\n\n'), 25000)
     },
-    cancel() { if (timer) clearInterval(timer) },
+    cancel() { if (timer) clearInterval(timer); unsubscribe() },
   })
   return new Response(stream, {
     status: 200,
@@ -928,7 +924,7 @@ export async function localHandle(path, init) {
       return json(200, { ok: true })
     }
 
-    // ── MCP 配置（本地保存配置；连接与执行需要后端执行器 → 明确降级） ──
+    // ── MCP 配置（本地目录与助手绑定；连接与执行由本地连接池处理） ──
     if (p === '/api/mcp/test' && method === 'POST') {
       try {
         const b = await readBody(init)
@@ -1261,7 +1257,7 @@ export async function localHandle(path, init) {
       const result = cancelLocalAgentRun(agentCancel[1])
       return result ? json(200, result) : json(404, { error: '运行记录不存在' })
     }
-    if (p === '/api/agent/events' && method === 'GET') return sseKeepAlive()
+    if (p === '/api/agent/events' && method === 'GET') return localAgentEventStream()
     if (p === '/api/agent/policies' && method === 'GET') {
       const person = q.get('person') || ''
       if (!person) return json(400, { error: '人物身份无效' })

@@ -60,3 +60,23 @@ test('失败和缺少执行器都不伪造成功', async () => {
   unregister()
   assert.match((await request('/api/agent/runs', { person: 'a', prompt: '任务' })).error, /尚未接入/)
 })
+
+test('本地事件流会推送真实运行事件并在关闭时解除订阅', async () => {
+  values.clear()
+  let finish
+  const unregister = registerLocalAgentExecutor(() => new Promise(resolve => { finish = resolve }))
+  const response = await localHandle('/api/agent/events')
+  const reader = response.body.getReader()
+  try {
+    assert.match(new TextDecoder().decode((await reader.read()).value), /: ping/)
+    const created = await request('/api/agent/runs', { person: 'a', prompt: '事件测试' })
+    const first = new TextDecoder().decode((await reader.read()).value)
+    assert.match(first, /event: run_created/)
+    assert.match(first, new RegExp(created.run.id))
+    await wait()
+    finish({ answer: '完成' })
+    const last = new TextDecoder().decode((await reader.read()).value)
+    assert.match(last, /event: run_finished/)
+    assert.match(last, /succeeded/)
+  } finally { await reader.cancel(); unregister() }
+})
