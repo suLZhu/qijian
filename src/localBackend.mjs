@@ -156,7 +156,10 @@ export async function rollbackLocalAttachments(previous) {
   const db = await openAttDb()
   return new Promise((resolve, reject) => {
     const tx = db.transaction(ATT_STORE, 'readwrite'), store = tx.objectStore(ATT_STORE)
-    for (const item of previous) item.value === null ? store.delete(item.id) : putAttachment(store, item.value)
+    for (const item of previous) {
+      if (item.value === null) store.delete(item.id)
+      else putAttachment(store, item.value)
+    }
     tx.oncomplete = () => resolve()
     tx.onerror = () => reject(tx.error || new Error('附件回滚失败'))
     tx.onabort = () => reject(tx.error || new Error('附件回滚失败'))

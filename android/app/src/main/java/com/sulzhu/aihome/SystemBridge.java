@@ -48,6 +48,7 @@ import org.json.JSONObject;
 final class SystemBridge {
     private static final int REQ_NOTIFICATIONS = 4401;
     private final MainActivity activity;
+    private String pendingUpdateUrl;
     private final java.util.concurrent.ConcurrentHashMap<String, java.util.concurrent.atomic.AtomicBoolean> pendingModelRequests = new java.util.concurrent.ConcurrentHashMap<>();
     private final java.util.concurrent.ConcurrentHashMap<String, java.net.HttpURLConnection> streams = new java.util.concurrent.ConcurrentHashMap<>();
 
@@ -691,13 +692,31 @@ final class SystemBridge {
                 activity.runOnUiThread(() -> new AlertDialog.Builder(activity)
                     .setTitle("发现新版本 " + (name.isEmpty() ? String.valueOf(latest) : name))
                     .setMessage(notes.isEmpty() ? "是否下载并安装？" : notes)
-                    .setPositiveButton("更新", (d, w) -> downloadAndInstall(apkUrl))
+                    .setPositiveButton("更新", (d, w) -> prepareUpdateBackup(apkUrl))
                     .setNegativeButton("稍后", null)
                     .show());
             } catch (Exception e) {
                 activity.runOnUiThread(() -> android.widget.Toast.makeText(ctx(), "检查更新失败：" + e.getMessage(), android.widget.Toast.LENGTH_LONG).show());
             }
         }).start();
+    }
+
+    // 用户确认后先让现有 Web 数据层生成备份；备份失败或前端不可用都不启动下载。
+    private void prepareUpdateBackup(String apkUrl) {
+        synchronized (this) { pendingUpdateUrl = apkUrl; }
+        android.widget.Toast.makeText(ctx(), "正在备份数据，完成后开始更新…", android.widget.Toast.LENGTH_SHORT).show();
+        activity.evalJs("(function(){if(typeof window.__aihomePrepareUpdateBackup==='function'){window.__aihomePrepareUpdateBackup()}else{window.AiHomeSystem.completeUpdateBackup(false,'备份服务尚未准备好，请重启后重试')}})();");
+    }
+
+    @JavascriptInterface
+    public void completeUpdateBackup(boolean ok, String error) {
+        final String url;
+        synchronized (this) { url = pendingUpdateUrl; pendingUpdateUrl = null; }
+        if (url == null) return;
+        activity.runOnUiThread(() -> {
+            if (ok) downloadAndInstall(url);
+            else android.widget.Toast.makeText(ctx(), "备份失败，已取消更新：" + (error == null ? "请重试" : error), android.widget.Toast.LENGTH_LONG).show();
+        });
     }
 
     private void downloadAndInstall(String apkUrl) {

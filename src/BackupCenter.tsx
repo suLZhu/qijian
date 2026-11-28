@@ -3,11 +3,12 @@
 import { useEffect, useRef, useState } from 'react'
 import './BackupCenter.css'
 import { apiFetch, isLocalMode } from './apiBase.mjs'
-import { collectBackupIndexed, applyBackupIndexed } from './backupIndexed.mjs'
+import { applyBackupIndexed } from './backupIndexed.mjs'
+import { buildBackupPayload } from './backupService.mjs'
 import { confirmDialog } from './uiDialog'
 import {
   BACKUP_DIR_LABEL, BACKUP_KINDS, backupKind, backupFileName, kindFromFileName,
-  collectBackupLocal, localKeysForRestore, makeBackupEnvelope, parseBackup, summarizeBackup,
+  localKeysForRestore, parseBackup, summarizeBackup,
 } from './backups.mjs'
 import { backupFilesAvailable, deleteBackupFile, listBackupFiles, readBackupFile, saveBackupFile } from './nativeSystem.mjs'
 import { syncVendorProfiles, type Vendor } from './vendors.mjs'
@@ -58,37 +59,6 @@ export function BackupCenter({ people, vendors, setVendors, setModelProfiles }: 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  async function buildServer(kindId: string) {
-    const kind = backupKind(kindId)
-    const server: { keys?: Record<string, string>; memory?: Record<string, unknown[]> } = {}
-    if (!kind || isLocalMode()) return server
-    if (kind.serverKeys) {
-      const response = await apiFetch('/api/keys', { credentials: 'include' })
-      if (!response.ok) throw new Error('服务器 API Key 读取失败（' + response.status + '），备份未保存')
-      const data = await response.json()
-      if (!data?.keys || typeof data.keys !== 'object') throw new Error('服务器 API Key 数据无效，备份未保存')
-      server.keys = data.keys
-    }
-    if (kind.serverMemory && people.length) {
-      const memory: Record<string, unknown[]> = {}
-      await Promise.all(people.map(async person => {
-        const records: unknown[] = []
-        for (let offset = 0; ; offset += 500) {
-          if (offset > 1000000) throw new Error('记忆数量超出当前备份上限，备份未保存')
-          const response = await apiFetch('/api/memory/records?person=' + encodeURIComponent(person) + '&limit=500&offset=' + offset, { credentials: 'include' })
-          if (!response.ok) throw new Error('助手记忆读取失败（' + response.status + '），备份未保存')
-          const data = await response.json()
-          if (!Array.isArray(data?.records)) throw new Error('助手记忆数据无效，备份未保存')
-          records.push(...data.records)
-          if (data.records.length < 500) break
-        }
-        memory[person] = records
-      }))
-      server.memory = memory
-    }
-    return server
-  }
-
   async function createBackup(kindId: string) {
     if (busy) return
     const kind = backupKind(kindId)
@@ -97,10 +67,7 @@ export function BackupCenter({ people, vendors, setVendors, setModelProfiles }: 
     setError('')
     setMessage('')
     try {
-      const local = collectBackupLocal(localStorage, kindId)
-      const server = await buildServer(kindId)
-      const payload = makeBackupEnvelope(kindId, local, server)
-      if (kindId === 'full' || kindId === 'chat') payload.data.indexed = await collectBackupIndexed(kindId)
+      const payload = await buildBackupPayload(kindId, people)
       const content = JSON.stringify(payload, null, 2)
       const name = backupFileName(kindId)
       if (native) {

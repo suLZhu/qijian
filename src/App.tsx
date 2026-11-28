@@ -20,6 +20,7 @@ const MemoryPanel = lazy(() => import('./MemoryPanel').then(module => ({ default
 import { readMemoryModels, embeddingTarget, embedText, cosine, type MemoryModelSlot } from './memoryModels.mjs'
 import { runLocalOrganize, tidyMemoryLibrary, readLocalAuto } from './memoryLocalOrganize.mjs'
 import { observeAuxiliaryRequest } from './auxiliaryModel.mjs'
+import { savePreUpdateBackup } from './backupService.mjs'
 import { UiDialogHost } from './UiDialogHost'
 import { SystemSetupSheet } from './SystemSetupSheet'
 const BackupCenter = lazy(() => import('./BackupCenter').then(module => ({ default: module.BackupCenter })))
@@ -643,6 +644,21 @@ export default function App() {
   // 不再定时自动收回——用户要在里面翻历史会话、重命名，自动收回会打断操作。
   const [sidebarOpen,setSidebarOpen]=useState(false)
   useEffect(()=>{ (window as any).AiHomeGuide=GUIDE_MARKDOWN; return ()=>{ delete (window as any).AiHomeGuide } },[])
+  useEffect(() => {
+    const prepare = () => {
+      const bridge = (window as any).AiHomeSystem
+      if (!bridge || typeof bridge.completeUpdateBackup !== 'function') return
+      if (Object.values(sendingScopes).some(Boolean)) { bridge.completeUpdateBackup(false, '助手正在生成，请结束后再更新'); return }
+      if (!latestSnapshot.current) { bridge.completeUpdateBackup(false, '应用数据尚未准备好，请稍后重试'); return }
+      const snapshot = latestSnapshot.current
+      void savePreUpdateBackup(assistants.map(a=>a.id), {requiredState:snapshot,verify:()=>latestSnapshot.current===snapshot && Object.keys(sendAbortRef.current).length===0}).then(
+        () => bridge.completeUpdateBackup(true, ''),
+        (error:unknown) => bridge.completeUpdateBackup(false, error instanceof Error ? error.message : '备份失败'),
+      )
+    }
+    ;(window as any).__aihomePrepareUpdateBackup = prepare
+    return () => { if ((window as any).__aihomePrepareUpdateBackup === prepare) delete (window as any).__aihomePrepareUpdateBackup }
+  }, [assistants, sendingScopes])
   useEffect(()=>{ void notifyAppReady() },[])
   useEffect(()=>{
     if(!liveUpdateSupported())return
