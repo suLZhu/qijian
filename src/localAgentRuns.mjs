@@ -36,6 +36,24 @@ export function registerLocalAgentExecutor(handler) {
   execute = handler
   return () => { if (execute === handler) execute = null }
 }
+// Called only by the single Android main WebView after a restart. Never retry a
+// request whose upstream outcome is unknown; retain partial usage and answer.
+export function recoverInterruptedLocalAgentRuns() {
+  const rows = read()
+  const at = new Date().toISOString()
+  const recovered = []
+  const next = rows.map(run => {
+    if (run?.status !== 'running' || active.has(run.id)) return run
+    const interrupted = { ...run, status: 'failed', errorCode: 'INTERRUPTED', errorMessage: '应用上次运行中断，执行结果未知，请检查后手动重试。', updatedAt: at, finishedAt: at }
+    recovered.push(interrupted)
+    return interrupted
+  })
+  if (recovered.length) {
+    write(next)
+    for (const run of recovered) publish('run_finished', run)
+  }
+  return recovered.length
+}
 export function subscribeLocalAgentEvents(listener) {
   listeners.add(listener)
   return () => listeners.delete(listener)

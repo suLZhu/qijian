@@ -133,3 +133,37 @@ test('运行失败或取消后保留供应商已返回的用量，不虚构未�
     assert.deepEqual(localAgentUsageMessages('a')[0].usage, run.usage)
   } finally { unregister() }
 })
+
+test('Android 重启恢复中断记录，保留用量且不自动重跑', async () => {
+  values.clear()
+  const { recoverInterruptedLocalAgentRuns } = await import('../src/localAgentRuns.mjs')
+  values.set('ai-home.local.agentRuns', JSON.stringify([{ id:'old-run', assistantId:'a', status:'running', usage:{ promptTokens:3 }, answer:'部分结果' }]))
+  let calls = 0
+  const unregister = registerLocalAgentExecutor(async () => { calls++; return {answer:'unexpected'} })
+  try {
+    assert.equal(recoverInterruptedLocalAgentRuns(), 1)
+    const [run] = JSON.parse(values.get('ai-home.local.agentRuns'))
+    assert.equal(run.status, 'failed')
+    assert.equal(run.errorCode, 'INTERRUPTED')
+    assert.equal(run.usage.promptTokens, 3)
+    assert.equal(run.answer, '部分结果')
+    assert.equal(calls, 0)
+    assert.equal(recoverInterruptedLocalAgentRuns(), 0)
+  } finally { unregister() }
+})
+
+test('恢复时不误判当前进程中正在执行的运行', async () => {
+  values.clear()
+  const { recoverInterruptedLocalAgentRuns } = await import('../src/localAgentRuns.mjs')
+  let finish
+  const unregister = registerLocalAgentExecutor(() => new Promise(resolve => { finish = resolve }))
+  try {
+    const created = await request('/api/agent/runs', { person:'a', prompt:'任务' })
+    await wait()
+    assert.equal(recoverInterruptedLocalAgentRuns(), 0)
+    assert.equal((await request('/api/agent/runs/' + created.run.id)).run.status, 'running')
+    finish({ answer:'完成' })
+    await wait()
+    assert.equal((await request('/api/agent/runs/' + created.run.id)).run.status, 'succeeded')
+  } finally { unregister() }
+})

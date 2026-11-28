@@ -9,6 +9,7 @@ export type LocalAgentRun = {
 export type LocalAgentEvent = { type: string; at: string; runId: string; assistantId: string; status: string }
 export type LocalAgentResult = { answer: string; usage?: LocalAgentRun['usage']; model?: string; rounds?: number; toolCalls?: number }
 export function registerLocalAgentExecutor(handler: (run: LocalAgentRun, signal: AbortSignal) => Promise<LocalAgentResult>): () => void
+export function recoverInterruptedLocalAgentRuns(): number
 export function subscribeLocalAgentEvents(listener: (event: LocalAgentEvent) => void): () => void
 export function listLocalAgentRuns(person?: string, limit?: number): LocalAgentRun[]
 export function getLocalAgentRun(id: string): LocalAgentRun | null

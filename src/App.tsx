@@ -42,7 +42,7 @@ import { BUILTIN_THEME_PACKS } from './builtinThemePacks.mjs'
 const PersonAppearance = lazy(() => import('./PersonAppearance').then(module => ({ default: module.PersonAppearance })))
 import { reportToolCallStart, reportToolCallEnd, classifyToolError, type ToolCallSource } from './toolCalls'
 import { authorizeChatTool } from './chatToolPolicy.mjs'
-import { registerLocalAgentExecutor, reportLocalAgentUsage, type LocalAgentResult } from './localAgentRuns.mjs'
+import { registerLocalAgentExecutor, reportLocalAgentUsage, recoverInterruptedLocalAgentRuns, type LocalAgentResult } from './localAgentRuns.mjs'
 import { decideTaskConsumption, parseTaskEnvelope } from './taskResult.mjs'
 import { normalizeTimeZone, buildTimeContext } from './timeContext.mjs'
 // 生成态待发送队列：纯函数状态机 + 本机持久化（当前生成成功后按 scope 自动补发，非定时缓发）。
@@ -1962,6 +1962,11 @@ export default function App() {
   // 否则会话、模型配置等都会拿到排队时刻的旧值。
   const sendRef = useRef(send)
   useEffect(() => { sendRef.current = send })
+  useEffect(() => {
+    if (isLocalMode() && systemBridgeAvailable()) {
+      try { recoverInterruptedLocalAgentRuns() } catch { /* 存储不可用时不伪造恢复成功 */ }
+    }
+  }, [])
   useEffect(() => registerLocalAgentExecutor(async (run, signal) => {
     if (!isLocalMode()) throw new Error('当前不是本地模式')
     const conversationId = run.conversationId || activeConversationIdsRef.current[run.assistantId] || ''
