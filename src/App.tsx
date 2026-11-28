@@ -42,8 +42,6 @@ type WorkspaceConfig = {
 import { confirmDialog } from './uiDialog'
 import { CONTEXT_LIMITS, planCompaction, conversationExcerpt, buildSummarySystemMessage, searchHistory, searchMessageList } from './contextCompression.mjs'
 import { IconChat, IconClock, IconMemory, IconSparkles, IconPlus, IconBack, IconChevronRight, IconChevronDown, IconChevronUp, IconClose, IconEdit, IconTrash, IconEye, IconEyeOff, IconArrowUp, IconArrowDown, IconTest, IconSearch, IconMinus, IconWarning, IconMail, IconCheck, IconRefresh, IconGrid, IconMore, IconStar, type IconComponent } from './icons'
-import { DEFAULT_BEAUTIFY_PACK } from './beautify'
-import { BUILTIN_THEME_PACKS } from './builtinThemePacks.mjs'
 const PersonAppearance = lazy(() => import('./PersonAppearance').then(module => ({ default: module.PersonAppearance })))
 import { reportToolCallStart, reportToolCallEnd, classifyToolError, type ToolCallSource } from './toolCalls'
 import { authorizeChatTool } from './chatToolPolicy.mjs'
@@ -107,7 +105,6 @@ import { requestWebCacheClear, registerSystemHandlers, clearConversationNotifica
 import { friendlyHttpError, routeInfoFromError } from './chatHttpError.mjs'
 import { readActiveGenerations, startGeneration, finishGeneration, needsGenerationRecovery, recoverInterruptedMessages } from './generationRecovery.mjs'
 // 像素黑白选框/图标层必须最后导入，才能覆盖各组件自带的彩色样式。
-import './pixel.css'
 // 薄雾 Mist 收尾层：Tokens → Components → Pages 的组件层，最后加载统一视觉。
 import './mist.css'
 // 极简白底基线必须最后加载：先统一结构，再做下一轮主题。
@@ -311,8 +308,6 @@ export default function App() {
   // Android：字体大小交给原生 textZoom（系统字号 × App 倍数），整站文字一起缩放；
   // 桌面浏览器没有原生层时退回 CSS --font-scale，只缩放语义字号。
   useEffect(()=>{ if(nativeTextZoomAvailable()) setAppTextZoom(themePrefs.scale) },[themePrefs.scale])
-  const [beautifyPack]=useState<string>(()=>read('ai-home.beautifyPack',DEFAULT_BEAUTIFY_PACK))
-  useEffect(()=>{ try{localStorage.setItem('ai-home.beautifyPack',JSON.stringify(beautifyPack))}catch{ /* private mode */ } },[beautifyPack])
   // 全面屏状态栏 / 手势条图标明暗跟随主题：夜间主题用亮色图标，浅色主题用深色图标。
   // JS 接口在页面加载早期可能尚未注入，做几次短重试；Web 端不存在该接口，静默跳过。
   useEffect(()=>{
@@ -681,9 +676,9 @@ export default function App() {
     })() },5000)
     return ()=>window.clearTimeout(timer)
   },[])
-  const [activePack,setActivePack]=useState<ThemePack|null>(()=>{const id=getActivePackId();return [...BUILTIN_THEME_PACKS,...loadThemePacks()].find(p=>p.id===id)||null})
+  const [activePack,setActivePack]=useState<ThemePack|null>(()=>{const id=getActivePackId();return loadThemePacks().find(p=>p.id===id)||null})
   useEffect(()=>{ applyPackVars(activePack) },[activePack])
-  useEffect(()=>{ const on=()=>{const id=getActivePackId();setActivePack([...BUILTIN_THEME_PACKS,...loadThemePacks()].find(p=>p.id===id)||null)}; window.addEventListener('aihome:theme-pack',on); return ()=>window.removeEventListener('aihome:theme-pack',on) },[])
+  useEffect(()=>{ const on=()=>{const id=getActivePackId();setActivePack(loadThemePacks().find(p=>p.id===id)||null)}; window.addEventListener('aihome:theme-pack',on); return ()=>window.removeEventListener('aihome:theme-pack',on) },[])
   useEffect(()=>{
     if(!sidebarOpen)return
     const inside=(target:EventTarget|null)=>target instanceof Element&&!!target.closest('.app-sidebar,.sidebar-edge-handle')
@@ -1786,10 +1781,10 @@ export default function App() {
             }else if(themeTool){
               const name=call.function.name
               if(name==='theme_pack_list'){
-                const packs=[...BUILTIN_THEME_PACKS,...loadThemePacks()].map(pk=>({id:pk.id,name:pk.name,author:pk.author,accent:pk.tokens.accent,active:pk.id===getActivePackId()}))
+                const packs=loadThemePacks().map(pk=>({id:pk.id,name:pk.name,author:pk.author,accent:pk.tokens.accent,active:pk.id===getActivePackId()}))
                 resultContent=JSON.stringify({packs,message:packs.length?'':'还没有美化包，可以用 theme_pack_save 创建一个。'})
               }else if(name==='theme_pack_apply'){
-                const packs=[...BUILTIN_THEME_PACKS,...loadThemePacks()]
+                const packs=loadThemePacks()
                 const target=packs.find(pk=>pk.id===String(args.id||''))||packs.find(pk=>pk.name===String(args.name||''))
                 if(!target)throw new Error('找不到这个美化包，先用 theme_pack_list 查看名字。')
                 setStoredActivePack(target.id)

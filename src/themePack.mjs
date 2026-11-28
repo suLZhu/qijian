@@ -182,11 +182,11 @@ export function applyPackVars(pack){
   const vars=packCssVars(pack)
   // React 每次渲染会把主题内联变量写回 .shell，包里的颜色必须用 important 才盖得住，
   // 否则「美化包」只改了背景、颜色仍是被选中的内置主题。
-  const shellEl=globalThis.document?.querySelector('.shell')
+  const shellEl=globalThis.document?.querySelector('.qj-preview')
   for(const [k,v] of Object.entries(vars)){root.style.setProperty(k,v);if(shellEl?.style)shellEl.style.setProperty(k,v,'important')}
   globalThis.document.body?.classList.toggle('has-pack',!!pack)
   // 背景取色是异步的（图片要解码），先铺包自带的 token，取完再覆盖成「跟壁纸走」的配色。
-  if(pack) void applyDerivedPalette(pack)
+  void applyDerivedPalette(pack)
 }
 
 const FONT_STYLE_ID='qijian-pack-font'
@@ -313,7 +313,7 @@ let paletteSeq = 0
 export async function applyDerivedPalette(pack) {
   const seq = ++paletteSeq
   const bg = pack?.background
-  if (!bg) return null
+  if (!bg) { globalThis.document?.body?.classList.remove('pack-dark'); return null }
   let rgb = null
   if (bg.color) rgb = colorToRgb(bg.color)
   else if (bg.image) rgb = await imageAverageRgb(bg.image)
@@ -321,7 +321,7 @@ export async function applyDerivedPalette(pack) {
   const palette = paletteFromRgb(rgb[0], rgb[1], rgb[2])
   const root = globalThis.document?.documentElement
   if (!root) return null
-  const shell = globalThis.document.querySelector('.shell')
+  const shell = globalThis.document.querySelector('.qj-preview')
   for (const [k, v] of Object.entries(palette)) if (k !== 'mode') {
     root.style.setProperty(k, v)
     // React 每次渲染都会把主题变量以内联样式写回 .shell，这里用 important 优先级盖住它。

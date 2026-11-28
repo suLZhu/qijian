@@ -95,16 +95,6 @@ function migratePersonValues(db) {
       db.prepare('DELETE FROM mcp_bindings WHERE person=?').run(name)
     }
   }
-  if (tableSql(db, 'ledger_entries')) {
-    for (const [name, id] of Object.entries(LEGACY_NAME_TO_ID)) {
-      db.prepare('UPDATE ledger_entries SET created_by=? WHERE created_by=?').run(id, name)
-    }
-  }
-  if (tableSql(db, 'diary_entries')) {
-    for (const [name, id] of Object.entries(LEGACY_NAME_TO_ID)) {
-      db.prepare('UPDATE diary_entries SET owner=? WHERE owner=?').run(id, name)
-    }
-  }
   // FTS recall index: person is an UNINDEXED column, plain UPDATE works.
   if (tableSql(db, 'conversation_recall')) {
     for (const [name, id] of Object.entries(LEGACY_NAME_TO_ID)) {

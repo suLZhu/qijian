@@ -1,9 +1,6 @@
 // 固定列名而非执行备份中携带的 SQL；由外层事务统一提交或回滚。
 const TABLES = {
   scheduled_tasks: ['id','person','title','prompt','run_at','recurrence','status','last_run_at','created_at','updated_at','created_by','temporary','conversation_id','interval_minutes'],
-  ledger_entries: ['id','kind','amount_cents','currency','category','note','entry_date','created_by','created_at'],
-  ledger_operations: ['request_id','entry_id','actor','created_at'],
-  diary_entries: ['id','owner','title','visibility','body','salt','iv','tag','created_at'],
 }
 export function exportRecordBackup(db) {
   const tables = {}

@@ -104,8 +104,8 @@ export function BackupCenter({ people, vendors, setVendors, setModelProfiles }: 
     const local = converted.local
     if (restoreLocalMode && converted.crossMode && converted.server.records !== undefined) {
       const records = converted.server.records
-      if (records?.version !== 1 || !records.tables || ['scheduled_tasks','ledger_entries','ledger_operations','diary_entries'].some(key => !Array.isArray(records.tables[key]))) throw new Error('服务器记录备份数据无效')
-      if (Object.values(records.tables).some((rows: any) => rows.length)) throw new Error('此备份包含服务器任务、账本或日记，本机模式尚不支持迁移；请在服务器模式恢复')
+      if (records?.version !== 1 || !records.tables || ['scheduled_tasks'].some(key => !Array.isArray(records.tables[key]))) throw new Error('服务器记录备份数据无效')
+      if (Object.values(records.tables).some((rows: any) => rows.length)) throw new Error('此备份包含服务器任务，本机模式尚不支持迁移；请在服务器模式恢复')
     }
     const summary = summarizeBackup(payload)
     const details = [
@@ -147,7 +147,7 @@ export function BackupCenter({ people, vendors, setVendors, setModelProfiles }: 
         if (records !== undefined) {
           const capability = await apiFetch('/api/backups/records', {credentials:'include'})
           const data = await capability.json().catch(() => ({}))
-          if (!capability.ok || data.version !== 1) throw new Error('服务器不支持任务、账本和日记恢复，请更新服务器')
+          if (!capability.ok || data.version !== 1) throw new Error('服务器不支持任务恢复，请更新服务器')
         }
         if (keys !== undefined || memory !== undefined || attachments !== undefined || mcp !== undefined || records !== undefined) {
           let response: Response

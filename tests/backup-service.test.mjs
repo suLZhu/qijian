@@ -60,8 +60,8 @@ test('MCP 分类备份保存服务器服务与助手绑定，旧服务器不能�
   await assert.rejects(buildBackupPayload('mcp',[],{...options,fetchApi:async()=>new Response('',{status:404})}),/不支持 MCP/)
 })
 
-test('服务器整体备份包含任务、账本和日记，旧服务器不产生缺项备份',async()=>{
-  const tables={scheduled_tasks:[{id:'task'}],ledger_entries:[{id:'ledger'}],ledger_operations:[],diary_entries:[{id:'diary'}]}
+test('服务器整体备份包含任务，旧服务器不产生缺项备份',async()=>{
+  const tables={scheduled_tasks:[{id:'task'}]}
   const fetchApi=async url=>{
     if(url==='/api/keys') return Response.json({keys:{}})
     if(url==='/api/backups/records') return Response.json({version:1,tables})
@@ -72,5 +72,5 @@ test('服务器整体备份包含任务、账本和日记，旧服务器不产�
   const options={storage:storage({}),localMode:false,fetchApi,collectIndexed:async()=>({attachments:[]})}
   const payload=await buildBackupPayload('full',[],options)
   assert.deepEqual(payload.data.server.records.tables,tables)
-  await assert.rejects(buildBackupPayload('full',[],{...options,fetchApi:async url=>url==='/api/backups/records'?new Response('',{status:404}):fetchApi(url)}),/不支持任务、账本和日记备份/)
+  await assert.rejects(buildBackupPayload('full',[],{...options,fetchApi:async url=>url==='/api/backups/records'?new Response('',{status:404}):fetchApi(url)}),/不支持任务备份/)
 })

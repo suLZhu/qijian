@@ -825,8 +825,7 @@ details[open]>summary .fold-chevron{transform:rotate(90deg)}
 .chat-header-subline{display:block;width:100%;padding:5px 12px 6px;border:0;border-bottom:1px solid var(--line,#e3ddd3);border-radius:0;background:transparent;box-shadow:none;text-align:center;font-size:10px;letter-spacing:.02em;color:var(--muted,#8a8378);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:pointer}
 .chat-header-subline:hover,.chat-header-subline.tool-active{color:var(--accent,#8b593b);background:rgba(139,89,59,.05)}
 .chat-header-subline span{font-weight:600}
-/* 像素风美化包的 `.beautify-pixel *{border-radius:0!important}` 与单类选择器同权重、
-   但加载更晚；这里用更高权重把新组件的圆角拿回来（只作用于 Kelivo 风格组件）。*/
+/* 组件圆角与容器样式 */
 .shell .kelivo-settings .kelivo-search,
 .shell .kelivo-settings .kelivo-list{border-radius:12px!important}
 .shell .kelivo-settings .kelivo-row-icon{border-radius:7px!important}
@@ -857,9 +856,7 @@ details[open]>summary .fold-chevron{transform:rotate(90deg)}
 /* 历史会话展开后不再套一层卡片：外层 details 已经是容器。 */
 .room-history .room-session-switch{margin:10px 0 12px;padding:0;border:0;background:transparent}
 .room-history-new{width:100%;margin-top:4px;padding:8px;border:1px dashed #d8cebf;border-radius:9px;background:transparent;font-size:12px;color:#7d6f5d}
-/* 像素风美化包在 pixel.css:157 点名给会话卡加了 2px 墨线 + 硬投影，
-   这里把房间页的两块容器统一回浅框，避免一屏两套视觉语言。 */
-.beautify-pixel .room-screen .room-session-switch{border:1px solid #e2d9cc!important;box-shadow:none!important}
+/* 组件圆角与容器样式 */
 .room-chat-entry{display:flex;align-items:center;gap:11px;width:100%;margin:0 0 10px;padding:12px 14px;border:1px solid #cfc0aa;border-radius:14px;background:#f6efe3;text-align:left;color:var(--ink,#403b35)}
 .room-chat-entry:hover{background:#efe6d6;border-color:#a99a84}
 .room-chat-entry-mark{flex-shrink:0;width:36px;height:36px;display:grid;place-items:center;border:1px solid #ddd0bd;border-radius:10px;background:#fffaf1;font-size:17px}
@@ -1131,8 +1128,7 @@ details[open]>summary .fold-chevron{transform:rotate(90deg)}
 .pool-label{flex:1;min-width:0;font-size:11.5px;color:var(--ink,#403b35);overflow-wrap:anywhere}
 .pool-label small{display:block;margin-top:2px;font-size:9.5px;color:var(--muted)}
 
-/* 像素风美化包里 `.beautify-pixel *{border-radius:0!important}` 加载更晚，
-   用更高权重把新组件的圆角拿回来（只作用于这些新组件）。*/
+/* 组件圆角与容器样式 */
 .shell .fullscreen-chat .compose-box,
 .shell .fullscreen-chat .compose-tray,
 .shell .settings-screen .vendor-card,
@@ -1194,7 +1190,7 @@ details[open]>summary .fold-chevron{transform:rotate(90deg)}
 .shell .room-screen .room-name-avatar span{display:grid;place-items:center;width:100%;height:100%;font-size:16px;font-weight:700}
 .shell .room-screen .room-name-avatar.editing{outline:2px solid var(--accent,#8b593b)}
 
-/* 新组件的圆角：像素风 `.beautify-pixel *{border-radius:0!important}` 加载更晚，用高权重拿回来 */
+/* 组件圆角与容器样式 */
 .shell .settings-screen .vendor-icon-grid button.vendor-icon-tile,
 .shell .settings-screen .vendor-icon-grid .vit-icon,
 .shell .settings-screen .resource-world>.worldbook-panel,

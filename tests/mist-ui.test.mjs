@@ -44,7 +44,7 @@ test('默认 Mist 与其余主题都提供完整语义变量（未来换主题�
   assert.equal(mist['--ink'], '#302c37')
   assert.notEqual(mist['--ink'].toLowerCase(), '#000000', '文字不用纯黑')
   assert.equal(mist['--primary'], '#8a79aa')
-  assert.equal(mist['--page-bg'], '#f3f0f4')
+  assert.equal(mist['--page-bg'], '#ffffff')
   for (const t of theme.THEMES) {
     const s = theme.themeStyle({ ...theme.DEFAULT_THEME, theme: t.id })
     for (const key of REQUIRED_TOKENS) assert.equal(typeof s[key], 'string', t.id + ' 缺少 ' + key)
@@ -74,9 +74,10 @@ test('聊天技术信息与正式输入栏保留功能', () => {
 })
 
 test('默认不再套像素黑白硬边皮肤，Mist 是开箱基础主题', () => {
-  const beautify = read('src/beautify.ts')
-  assert.match(beautify, /DEFAULT_BEAUTIFY_PACK = 'plain'/)
-  assert.match(beautify, /id: 'pixel'/, '像素风仍保留可手动开启')
+  const app = read('src/App.tsx')
+  assert.doesNotMatch(app, /beautifyPack|pixel\.css/)
+  assert.doesNotMatch(app, /BUILTIN_THEME_PACKS/)
+  assert.match(read('src/ThemeSettings.tsx'), /loadThemePacks/ )
   const mist = read('src/mist.css')
   assert.match(mist, /\.shell \.fullscreen-chat \.compose-box \.send-button/, '发送按钮规则需压过旧的 4 类选择器')
 })

@@ -46,9 +46,9 @@ export async function buildBackupPayload(kindId, people, options = {}) {
   }
   if (!localMode && kindId === 'full') {
     const response = await fetchApi('/api/backups/records', {credentials:'include'})
-    if (!response.ok) throw new Error('服务器不支持任务、账本和日记备份，请更新服务器后重试')
+    if (!response.ok) throw new Error('服务器不支持任务备份，请更新服务器后重试')
     const records = await response.json()
-    if (records?.version !== 1 || !records.tables || ['scheduled_tasks','ledger_entries','ledger_operations','diary_entries'].some(key => !Array.isArray(records.tables[key]))) throw new Error('服务器记录备份数据无效')
+    if (records?.version !== 1 || !records.tables || ['scheduled_tasks'].some(key => !Array.isArray(records.tables[key]))) throw new Error('服务器记录备份数据无效')
     server.records = records
   }
   if (!localMode && kind.serverMcp) {

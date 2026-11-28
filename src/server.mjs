@@ -92,21 +92,6 @@ db.exec(`
     last_run_at TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
   );
   CREATE INDEX IF NOT EXISTS scheduled_tasks_due_idx ON scheduled_tasks(status, run_at);
-  CREATE TABLE IF NOT EXISTS ledger_entries (
-    id TEXT PRIMARY KEY, kind TEXT NOT NULL CHECK(kind IN ('income','expense')),
-    amount_cents INTEGER NOT NULL CHECK(amount_cents>0), currency TEXT NOT NULL,
-    category TEXT NOT NULL, note TEXT NOT NULL, entry_date TEXT NOT NULL,
-    created_by TEXT NOT NULL, created_at TEXT NOT NULL
-  );
-  CREATE TABLE IF NOT EXISTS ledger_operations (
-    request_id TEXT PRIMARY KEY, entry_id TEXT NOT NULL, actor TEXT NOT NULL, created_at TEXT NOT NULL
-  );
-  CREATE INDEX IF NOT EXISTS ledger_entries_date_idx ON ledger_entries(entry_date);
-  CREATE TABLE IF NOT EXISTS diary_entries (
-    id TEXT PRIMARY KEY, owner TEXT NOT NULL, title TEXT NOT NULL,
-    visibility TEXT NOT NULL CHECK(visibility IN ('public','locked')),
-    body TEXT NOT NULL, salt TEXT, iv TEXT, tag TEXT, created_at TEXT NOT NULL
-  );
   CREATE TABLE IF NOT EXISTS memory_embed_config (
     person TEXT PRIMARY KEY, endpoint TEXT NOT NULL, model TEXT NOT NULL,
     key_enc TEXT NOT NULL DEFAULT '', enabled INTEGER NOT NULL DEFAULT 1, updated_at TEXT NOT NULL
