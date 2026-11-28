@@ -80,3 +80,35 @@ test('本地事件流会推送真实运行事件并在关闭时解除订阅', as
     assert.match(last, /succeeded/)
   } finally { await reader.cancel(); unregister() }
 })
+
+test('Agent 运行用量可由现有账本按供应商和模型汇总', async () => {
+  values.clear()
+  const { usageRows } = await import('../src/usageLedger.mjs')
+  const unregister = registerLocalAgentExecutor(async () => ({ answer: '完成', usage: { at: '2026-11-28T01:00:00Z', rounds: [{ model:'m', vendorId:'v', vendor:'供应商', subscription:false, promptTokens:12, completionTokens:4 }] } }))
+  try {
+    const created = await request('/api/agent/runs', { person:'a', prompt:'统计' })
+    await wait()
+    const run = (await request('/api/agent/runs/' + created.run.id)).run
+    const rows = usageRows([{ messages:[{ role:'assistant', usage:run.usage }] }])
+    assert.equal(rows.length, 1)
+    assert.equal(rows[0].tokens, 16)
+    assert.equal(rows[0].calls, 1)
+    assert.equal(rows[0].vendor, '供应商')
+  } finally { unregister() }
+})
+
+test('大量历史运行不因新建任务被截断，账本按助手统计全部记录', async () => {
+  values.clear()
+  const { localAgentUsageMessages } = await import('../src/localAgentRuns.mjs')
+  const rows = Array.from({ length: 501 }, (_, i) => ({ id:'old-'+i, assistantId:'a', status:'succeeded', usage:{ model:'m', promptTokens:1, completionTokens:1 } }))
+  values.set('ai-home.local.agentRuns', JSON.stringify(rows))
+  const unregister = registerLocalAgentExecutor(async () => ({ answer:'完成', usage:{ model:'m', promptTokens:2, completionTokens:1 } }))
+  try {
+    const created = await request('/api/agent/runs', { person:'a', prompt:'新任务' })
+    await wait()
+    assert.equal((await request('/api/agent/runs/' + created.run.id)).run.status, 'succeeded')
+    assert.equal(JSON.parse(values.get('ai-home.local.agentRuns')).length, 502)
+    assert.equal(localAgentUsageMessages('a').length, 502)
+    assert.equal(localAgentUsageMessages('b').length, 0)
+  } finally { unregister() }
+})

@@ -12,5 +12,6 @@ export function registerLocalAgentExecutor(handler: (run: LocalAgentRun, signal:
 export function subscribeLocalAgentEvents(listener: (event: LocalAgentEvent) => void): () => void
 export function listLocalAgentRuns(person?: string, limit?: number): LocalAgentRun[]
 export function getLocalAgentRun(id: string): LocalAgentRun | null
+export function localAgentUsageMessages(person: string): Array<{ role: 'assistant'; usage: LocalAgentRun['usage'] }>
 export function startLocalAgentRun(input: { person: string; prompt: string; source?: string; conversationId?: string }): LocalAgentRun
 export function cancelLocalAgentRun(id: string): { ok: boolean; accepted: boolean; status: LocalAgentRun['status'] } | null

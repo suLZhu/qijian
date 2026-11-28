@@ -41,10 +41,13 @@ export function subscribeLocalAgentEvents(listener) {
   return () => listeners.delete(listener)
 }
 export function listLocalAgentRuns(person = '', limit = 30) {
-  const count = Math.max(1, Math.min(100, Number(limit) || 30))
+  const count = Math.max(1, Math.min(500, Number(limit) || 30))
   return read().filter(row => !person || row.assistantId === person).slice(0, count)
 }
 export function getLocalAgentRun(id) { return read().find(row => row.id === id) || null }
+export function localAgentUsageMessages(person) {
+  return read().filter(run => run.assistantId === person && run.status === 'succeeded' && run.usage && Object.keys(run.usage).length > 0).map(run => ({ role: 'assistant', usage: run.usage }))
+}
 export function startLocalAgentRun({ person, prompt, source = 'manual', conversationId = '' }) {
   // Preserve the existing honest error until the app has registered its executor.
   if (!execute) throw new Error('本地 Agent 执行器尚未接入')
@@ -57,10 +60,8 @@ export function startLocalAgentRun({ person, prompt, source = 'manual', conversa
   const id = crypto.randomUUID(), at = new Date().toISOString()
   const run = { id, assistantId: person, source, conversationId: String(conversationId || ''), prompt, answer: '', rounds: 0, toolCalls: 0, status: 'running', usage: {}, model: '', createdAt: at, updatedAt: at, finishedAt: null }
   const rows = read()
-  if (rows.length >= 500 && rows.every(row => row.status === 'running')) throw new Error('运行记录已满')
-  const removable = rows.filter(row => row.status !== 'running')
-  const running = rows.filter(row => row.status === 'running')
-  write([run, ...running, ...removable.slice(0, Math.max(0, 499 - running.length))])
+  // Preserve historical runs: provider-reported usage is part of the ledger.
+  write([run, ...rows])
   const controller = new AbortController()
   active.set(id, { controller, person })
   publish('run_created', run)

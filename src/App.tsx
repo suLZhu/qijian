@@ -42,6 +42,7 @@ import { BUILTIN_THEME_PACKS } from './builtinThemePacks.mjs'
 const PersonAppearance = lazy(() => import('./PersonAppearance').then(module => ({ default: module.PersonAppearance })))
 import { reportToolCallStart, reportToolCallEnd, classifyToolError, type ToolCallSource } from './toolCalls'
 import { authorizeChatTool } from './chatToolPolicy.mjs'
+import { registerLocalAgentExecutor, type LocalAgentResult } from './localAgentRuns.mjs'
 import { decideTaskConsumption, parseTaskEnvelope } from './taskResult.mjs'
 import { normalizeTimeZone, buildTimeContext } from './timeContext.mjs'
 // 生成态待发送队列：纯函数状态机 + 本机持久化（当前生成成功后按 scope 自动补发，非定时缓发）。
@@ -1225,9 +1226,10 @@ export default function App() {
   // 正在进行的模型请求：删除「正在生成」的助手消息时中止它；回写全部按 id 匹配，
   //   消息删除后天然无处可写，绝不会删除后又重新出现。
   const sendAbortRef = useRef<Record<string,{ id: string; controller: AbortController }>>({})
-  async function send(textInput: string, attachments: MessageAttachment[] = [], options: { assistantId?: Person; conversationId?: string; queuedIds?: string[]; insertUser?: boolean; historyEndIndex?: number; regenerate?: { replaceId: string; originalContent: string; originalUsage?: TokenUsage }; pendingId?: string; preserveDraft?: boolean } = {}): Promise<'ok'|'fail'|'noop'> {
+  async function send(textInput: string, attachments: MessageAttachment[] = [], options: { assistantId?: Person; conversationId?: string; queuedIds?: string[]; insertUser?: boolean; historyEndIndex?: number; regenerate?: { replaceId: string; originalContent: string; originalUsage?: TokenUsage }; pendingId?: string; preserveDraft?: boolean; agent?: { id: string; signal: AbortSignal; onResult: (result: LocalAgentResult) => void } } = {}): Promise<'ok'|'fail'|'noop'> {
     const text = textInput.trim()
     const target = options.assistantId ?? person
+    const updateMessages = options.agent ? (() => {}) as typeof updateActiveConversationMessages : updateActiveConversationMessages
     const requestedConversationId = options.conversationId ?? activeConversationIdsRef.current[target] ?? ''
     if ((!text && !attachments.length) || sendingRef.current[pendingScopeKey(target,requestedConversationId)]) return 'noop'
     if(options.conversationId && !conversationsRef.current[target]?.some(c=>c.id===requestedConversationId)) return 'fail'
@@ -1320,9 +1322,12 @@ export default function App() {
     // 重新生成复用原回复的 id：流式回写天然落在同一条消息上（= 覆盖旧回复，不新增第二版）。
     const regen = options.regenerate || null
     const assistantMessageId = regen ? regen.replaceId : pendingReplyId || crypto.randomUUID()
-    const toolRunId = crypto.randomUUID()
+    const toolRunId = options.agent?.id || crypto.randomUUID()
     const toolConversationId = sendConversationId
     const abortController = new AbortController()
+    const abortAgent = () => abortController.abort(options.agent?.signal.reason)
+    options.agent?.signal.addEventListener('abort', abortAgent, { once: true })
+    if (options.agent?.signal.aborted) abortAgent()
     const sendScope = pendingScopeKey(target,sendConversationId)
     sendAbortRef.current[sendScope] = { id: assistantMessageId, controller: abortController }
     // Batch high-frequency stream deltas so React does not rerender the whole app per token.
@@ -1335,7 +1340,7 @@ export default function App() {
       lastStreamPaint = Date.now()
       const content = latestStreamContent
       const reasoning = latestStreamReasoning
-      updateActiveConversationMessages(target, prev => prev.map(m => m.id === assistantMessageId ? {...m, content, reasoning} : m), sendConversationId)
+      updateMessages(target, prev => prev.map(m => m.id === assistantMessageId ? {...m, content, reasoning} : m), sendConversationId)
     }
     const queueStreamPaint = (content: string, reasoning: string) => {
       latestStreamContent = content
@@ -1347,12 +1352,12 @@ export default function App() {
     // 重新生成失败/空白时恢复原有有效回复；消息若已被用户删除，map 匹配不到、天然无副作用。
     const restoreRegenerate = () => {
       if (!regen) return
-      updateActiveConversationMessages(target, prev => prev.map(m => m.id === assistantMessageId ? { ...m, content: regen.originalContent, usage: regen.originalUsage } : m), sendConversationId)
+      updateMessages(target, prev => prev.map(m => m.id === assistantMessageId ? { ...m, content: regen.originalContent, usage: regen.originalUsage } : m), sendConversationId)
     }
     // 整条流的回写目标固定为 sendConversationId（即时=发送时所在会话；缓发 flush=队列所在会话）；
     // 用户随后切换会话不会改写别的会话。flush 路径用户气泡已显示过，只补助手占位；
     // 重新生成不插用户气泡，只把旧回复清空成「正在思考……」占位再原位重写。
-    updateActiveConversationMessages(target,prev=>regen
+    updateMessages(target,prev=>regen
       ? prev.map(m=>m.id===assistantMessageId?{...m,content:'',usage:undefined}:m)
       : options.insertUser===false
         ? [...prev,{role:'assistant',at:new Date().toISOString(),content:'',id:assistantMessageId}]
@@ -1360,7 +1365,7 @@ export default function App() {
     if(options.insertUser!==false && !options.preserveDraft)setDrafts(previous=>({...previous,[pendingScopeKey(target,sendConversationId)]:''}))
     setChatError('');sendingRef.current[sendScope]=true;setSendingScopes(prev=>({...prev,[sendScope]:true}));setGenerationStages(prev=>({...prev,[sendScope]:'preparing'}))
     // 进程被系统回收时靠这条标记恢复「上次未完成的生成」，不丢空白占位气泡。
-    startGeneration(localStorage,{person:target,conversationId:sendConversationId,messageId:assistantMessageId},Date.now())
+    if (!options.agent) startGeneration(localStorage,{person:target,conversationId:sendConversationId,messageId:assistantMessageId},Date.now())
     genDebug('generation_started',{person:target,conversationId:sendConversationId,messageId:assistantMessageId})
     // Android: generation is a user-initiated long-running operation. Keep the app
     // in foreground-service priority while the existing JS stream/tool loop runs.
@@ -1416,6 +1421,7 @@ export default function App() {
         } catch { /* optional memory parse/rank failure */ }
       }
     }
+    let agentToolCalls = 0
     const usageRounds: LedgerRound[] = []
     const usageTotals:TokenUsage={promptTokens:0,completionTokens:0,cachedTokens:0,cacheReadTokens:0}
     // 真机证据：流式过程中每 2s 打一次「仍在接收」，用于判断后台是否被系统暂停。
@@ -1656,9 +1662,9 @@ export default function App() {
         // 本轮流结束：冲刷清洗器缓冲，把暂缓的尾部补回；未闭合的抑制块由 flush 丢弃，
         // 绝不把半截系统注入写进聊天记录或下一轮工具请求。
         const contentTail=contentCleanup.flush()
-        if(contentTail){roundText+=contentTail;answer+=contentTail;updateActiveConversationMessages(target,prev=>prev.map(m=>m.id===assistantMessageId?{...m,content:answer}:m),sendConversationId)}
+        if(contentTail){roundText+=contentTail;answer+=contentTail;updateMessages(target,prev=>prev.map(m=>m.id===assistantMessageId?{...m,content:answer}:m),sendConversationId)}
         const reasoningTail=reasoningCleanup.flush()
-        if(reasoningTail){thinking+=reasoningTail;updateActiveConversationMessages(target,prev=>prev.map(m=>m.id===assistantMessageId?{...m,reasoning:thinking}:m),sendConversationId)}
+        if(reasoningTail){thinking+=reasoningTail;updateMessages(target,prev=>prev.map(m=>m.id===assistantMessageId?{...m,reasoning:thinking}:m),sendConversationId)}
         const toolCalls=Object.keys(calls).map(k=>calls[Number(k)]).filter(c=>c.id&&c.function.name)
         if(!toolCalls.length){finished=true;break}
         const allowedTools = new Set(openAITools.map(tool => tool.function.name))
@@ -1668,6 +1674,7 @@ export default function App() {
         setGenerationStages(prev=>({...prev,[sendScope]:'tools'}))
         requestMessages.push({role:'assistant',content:roundText||null,tool_calls:toolCalls})
         for(const call of toolCalls){
+          agentToolCalls++
           if(!toolBudget.tryStartTool()) throw new Error('本次消息的工具调用已达到安全上限（64 次），请缩小任务后继续。')
           const route=toolRoutes.get(call.function.name)
           let resultContent=''
@@ -1698,7 +1705,7 @@ export default function App() {
             await authorizeChatTool({ person:target, tool:route?route.name:call.function.name, signal:abortController.signal, fetchPolicy:apiFetch,
               confirm:tool=>confirmDialog({title:'工具调用确认',message:'允许本次调用「'+tool+'」吗？',confirmLabel:'允许'}) })
             const toolLabel=route?route.name:(webTool?'联网 / 内置浏览器':widgetTool?'房间小组件':workspaceTool?'本机工作区':conversationTool?'回顾更早的对话':call.function.name==='ledger_add_entry'?'共享记账单':scheduledTaskTool?'定时任务':'本地工具')
-            updateActiveConversationMessages(target,prev=>prev.map(m=>m.id===assistantMessageId?{...m,content:(answer?answer+'\n\n':'')+'正在调用工具：'+toolLabel+'…'}:m),sendConversationId)
+            updateMessages(target,prev=>prev.map(m=>m.id===assistantMessageId?{...m,content:(answer?answer+'\n\n':'')+'正在调用工具：'+toolLabel+'…'}:m),sendConversationId)
             if(webTool){
               const name=call.function.name
               if(name==='web_search'){
@@ -1895,17 +1902,18 @@ export default function App() {
       if(!answer){
         // 重新生成拿到空白回复：不覆盖旧回复，恢复原样并提示（防止有效回复被空白顶掉）。
         if(regen){restoreRegenerate();setChatError('重新生成没有返回内容，已保留原来的回复。');return 'fail'}
-        if (options.pendingId) throw new Error('模型没有返回可用回复，请确认后重试')
-        updateActiveConversationMessages(target,prev=>prev.map(m=>m.id===assistantMessageId?{...m,content:'（接口已响应，但没有收到文本内容。请检查模型名称、工具调用兼容性或接口的流式支持。）',usage:finalUsage}:m),sendConversationId)
+        if (options.pendingId || options.agent) throw new Error('模型没有返回可用回复，请确认后重试')
+        updateMessages(target,prev=>prev.map(m=>m.id===assistantMessageId?{...m,content:'（接口已响应，但没有收到文本内容。请检查模型名称、工具调用兼容性或接口的流式支持。）',usage:finalUsage}:m),sendConversationId)
       }
-      else if(finalUsage) updateActiveConversationMessages(target,prev=>prev.map(m=>m.id===assistantMessageId?{...m,usage:finalUsage}:m),sendConversationId)
+      else if(finalUsage) updateMessages(target,prev=>prev.map(m=>m.id===assistantMessageId?{...m,usage:finalUsage}:m),sendConversationId)
       // Ordinary replies now use the same deduplicated native notification path as
       // proactive/task messages. The decision layer suppresses it only while the
       // exact conversation is visibly open; background/lock-screen/other-chat gets it.
-      if(answer){notifyAfterWrite({
+      if(answer && !options.agent){notifyAfterWrite({
         kind:'message', person:target, messageId:assistantMessageId,
         conversationId:sendConversationId, text:answer, at:Date.now(),
       });genDebug('conversation_write_completed',{person:target,conversationId:sendConversationId,messageId:assistantMessageId})}
+      options.agent?.onResult({ answer, usage: finalUsage, model: activeModel.model, rounds: usageRounds.length, toolCalls: agentToolCalls })
       genOutcome='ok'
       return 'ok'
     } catch(err) {
@@ -1922,7 +1930,7 @@ export default function App() {
         }else{
           setChatError(msg.includes('Failed to fetch')?(isLocalMode()?'连接模型接口失败：请检查模型设置里的 API 地址、API Key 与网络后重试。':'连接失败：后端未响应，请确认后端服务（'+(getApiBase()||'本机后端 127.0.0.1:4180')+'）正在运行，或检查网络后重试。'):msg)
           // 失败时保留已经流式到达的文本，只追加一行失败说明，不把已生成内容整段抹掉。
-          updateActiveConversationMessages(target,prev=>prev.map(m=>m.id===assistantMessageId&&m.role==='assistant'?{...m,content:(answer?answer+'\n\n':'')+'（请求失败，请查看上方错误提示并检查模型设置。）'}:m),sendConversationId)
+          updateMessages(target,prev=>prev.map(m=>m.id===assistantMessageId&&m.role==='assistant'?{...m,content:(answer?answer+'\n\n':'')+'（请求失败，请查看上方错误提示并检查模型设置。）'}:m),sendConversationId)
         }
       }
       genOutcome='fail'
@@ -1940,7 +1948,8 @@ export default function App() {
           error:abortController.signal.aborted?'':diagnosticError,
         }:log))
       } catch { /* 诊断存储不可用时继续收尾 */ }
-      finishGeneration(localStorage, assistantMessageId)
+      options.agent?.signal.removeEventListener('abort', abortAgent)
+      if (!options.agent) finishGeneration(localStorage, assistantMessageId)
       setGenerationForeground({action:'stop', messageId:assistantMessageId})
       // 生成成功 → 自动补发同会话的 pending，开启下一轮；报错/中断不自动发（保留给用户）。
       if (genOutcome === 'ok') window.setTimeout(()=>void autoSendPending(target, sendConversationId),0)
@@ -1953,6 +1962,17 @@ export default function App() {
   // 否则会话、模型配置等都会拿到排队时刻的旧值。
   const sendRef = useRef(send)
   useEffect(() => { sendRef.current = send })
+  useEffect(() => registerLocalAgentExecutor(async (run, signal) => {
+    if (!isLocalMode()) throw new Error('当前不是本地模式')
+    const conversationId = run.conversationId || activeConversationIdsRef.current[run.assistantId] || ''
+    if (!conversationId || !conversationsRef.current[run.assistantId]?.some(c => c.id === conversationId)) throw new Error('助手没有可用的聊天会话')
+    if (Object.entries(sendingRef.current).some(([key, busy]) => { try { return busy && JSON.parse(key)[0] === run.assistantId } catch { return false } })) throw new Error('助手正在忙，请稍后重试')
+    let result: LocalAgentResult | undefined
+    const status = await sendRef.current(run.prompt, [], { assistantId:run.assistantId, conversationId, insertUser:false, preserveDraft:true, agent:{ id:run.id, signal, onResult:value => { result=value } } })
+    signal.throwIfAborted()
+    if (status !== 'ok' || !result) throw new Error(status === 'noop' ? '助手正在忙，请稍后重试' : '模型或工具执行失败，请检查聊天设置和诊断')
+    return result
+  }), [])
   // 同步锁：effect 重挂载、按钮点击可能同刻竞争同一条 pending，锁保证同时只进一次 send。
   const flushLockRef = useRef(new Set<string>())
 

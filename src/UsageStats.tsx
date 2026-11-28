@@ -1,5 +1,6 @@
 import { usageRows } from './usageLedger.mjs'
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
+import { localAgentUsageMessages, subscribeLocalAgentEvents } from './localAgentRuns.mjs'
 import { SoftSelect } from './SoftSelect'
 
 // AI 用量统计：按助手切换；同一助手用过多个模型时，每个模型可单独设置
@@ -50,10 +51,16 @@ export function UsageStats({ people, conversations, models, displayName }: {
 }) {
   const [pricing, setPricing] = useState<Record<string, Record<string, Price>>>(() => loadPricing())
   const [active, setActive] = useState(people[0] || '')
+  const [runRevision, setRunRevision] = useState(0)
+  useEffect(() => subscribeLocalAgentEvents(event => { if (event.type === 'run_finished') setRunRevision(value => value + 1) }), [])
 
   const perPerson = useMemo(() => {
-    return Object.fromEntries(people.map(person => [person, usageRows(conversations[person] || [])]))
-  }, [people, conversations])
+    return Object.fromEntries(people.map(person => {
+      let agentMessages: Msg[] = []
+      try { agentMessages = localAgentUsageMessages(person) } catch { /* storage unavailable */ }
+      return [person, usageRows([...(conversations[person] || []),{messages:[...agentMessages]}])]
+    }))
+  }, [people, conversations, runRevision])
 
   const priceFor = (person: string, model: string): Price => {
     const map = pricing[person] || {}
