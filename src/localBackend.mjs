@@ -20,18 +20,14 @@ import { mcpMigrationKey } from './mcpMigration.mjs'
 import { injectTimeContext, buildTimeContext } from './timeContext.mjs'
 import { decideProactiveWake, isQuietHour } from './proactiveRules.mjs'
 import { proactivePrompt, isProactiveSilence } from './proactivePrompt.mjs'
-import { readKeyCandidates, isRetryableKeyStatus, resolveChatAccess, chatRequestUrl } from './vendors.mjs'
-import { resolveModelConfig } from './resourceBindings.mjs'
-import { scheduledConversationInstructions, isScheduledConversationTask, scheduledConversationContext, scheduledConversationAnswer } from './server/agent/scheduledConversation.mjs'
+import { readKeyCandidates, isRetryableKeyStatus } from './vendors.mjs'
+import { scheduledConversationInstructions, isScheduledConversationTask, scheduledConversationAnswer } from './server/agent/scheduledConversation.mjs'
 import { taskResultEnvelope, parseTaskEnvelope } from './taskResult.mjs'
-import { buildRoutePlan, logicalModelId } from './modelRoutes.mjs'
-import { normalizeRouteState, activeLogicalId, fixedRouteId } from './routeState.mjs'
 import { normalizeLocalTask, makeLocalTask, dueLocalTasks, advanceLocalTask } from './localTasks.mjs'
-import { normalizeSubscriptions, SUBSCRIPTION_STORAGE_KEY } from './subscriptionChannels.mjs'
 import { subscriptionOperations } from './subscriptionOperations.mjs'
 import { runRouteChat } from './chatRouteRunner.mjs'
 import { subscriptionChatResponse } from './subscriptionChatResponse.mjs'
-import { directModelFetch, subscriptionModelFetch, nativeHttpStreamAvailable, setGenerationForeground } from './nativeSystem.mjs'
+import { directModelFetch, subscriptionModelFetch, nativeHttpStreamAvailable } from './nativeSystem.mjs'
 import { parseSearchResults } from './webSearch.mjs'
 import { WIDGET_TYPES, WIDGET_TITLES, defaultConfig, normalizeConfig } from './server/widgets.mjs'
 
@@ -446,6 +442,7 @@ function localAgentEventStream() {
 // The lock only protects the live WebView. The deterministic inbox id protects
 // a completed result if the process stops between writing it and advancing the task.
 const activeLocalTasks = new Set()
+const activeLocalTaskRuns = new Map()
 
 // A persisted running task with no live JS owner has an unknown upstream
 // outcome. Never pay for the same turn twice after a killed WebView.
@@ -474,7 +471,6 @@ async function runLocalConversationTask(task, nowMs) {
   if (activeLocalTasks.has(task.id)) return
   activeLocalTasks.add(task.id)
   const runId = 'local-' + task.id + '-' + Date.parse(task.run_at)
-  let protectedRun = false
   try {
     const inboxId = 'task-' + runId
     let inbox = readJSON(K.inbox, [])
@@ -485,52 +481,26 @@ async function runLocalConversationTask(task, nowMs) {
       const conversations = state.conversations?.[task.person] || []
       const conversation = conversations.find(item => item?.id === task.conversation_id)
       if (!conversation) throw new Error('绑定会话不可用，任务已暂停')
-      const bindings = readJSON('ai-home.bindings', state.bindings || {}) || {}
-      const binding = bindings[task.person] || {}
-      const profiles = readJSON('ai-home.modelProfiles', state.modelProfiles || [])
-      const defaultModel = readJSON('ai-home.defaultModel', '')
-      const legacy = readJSON('ai-home.modelConfig', state.modelConfig || {})
-      const model = resolveModelConfig(binding.modelProfileId || defaultModel, profiles, legacy[task.person] || {})
-      const vendors = readJSON('ai-home.vendors', [])
-      const vendor = vendors.find(item => item.id === model.vendorId)
-      const routeState = normalizeRouteState(readJSON('ai-home.routeState', null))
-      const logicalId = activeLogicalId(routeState, task.person, logicalModelId(model.model || ''))
-      const routes = buildRoutePlan({ routes: routeState.routes, logicalId, vendors, subscriptions: normalizeSubscriptions(readJSON(SUBSCRIPTION_STORAGE_KEY, [])), binding: { fixedRouteId: fixedRouteId(routeState, task.person) } })
-      let access = { routes }
-      if (!routes.length) {
-        const subscriptions = normalizeSubscriptions(readJSON(SUBSCRIPTION_STORAGE_KEY, []))
-        const legacyKey = readJSON('ai-home.apiKey', {})[task.person] || ''
-        const credentials = resolveChatAccess(vendors, subscriptions, model.vendorId || '', binding.keyId || '', legacyKey)
-        if (credentials.error) throw new Error(credentials.error)
-        if (!credentials.apiKeys.length || (!credentials.protocol && !model.endpoint)) {
-          throw new Error('请先为助手配置可用模型，任务已暂停')
-        }
-        access = {
-          apiKey: credentials.apiKeys[0], apiKeys: credentials.apiKeys,
-          subscriptionProtocol: credentials.protocol, subscriptionAccountId: credentials.accountId,
-        }
-      }
-      if (!model.model) throw new Error('请先为助手配置可用模型，任务已暂停')
-      const messages = [
-        { role: 'system', content: scheduledConversationInstructions() },
-        ...scheduledConversationContext(state, task.person, conversation),
-        { role: 'user', content: task.prompt },
-      ]
-      const body = { model: model.model, stream: false, messages }
-      // The existing Android generation service owns this request while it is in flight.
-      // A completed response still goes through the same durable inbox/ack path below.
+      if (isLocalAgentBusy(task.person)) return
       const beforeRequest = readJSON(K.tasks, [])
       const currentBeforeRequest = beforeRequest.find(item => item?.id === task.id)
       if (!currentBeforeRequest || currentBeforeRequest.status !== 'scheduled' || currentBeforeRequest.run_at !== task.run_at) return
-      // The reservation is durable before the model request. A killed WebView
-      // will recover it as unknown rather than silently spending again.
-      writeJSON(K.tasks, beforeRequest.map(item => item.id === task.id
-        ? { ...item, status: 'running', updated_at: nowISO() } : item))
-      protectedRun = setGenerationForeground({ action: 'start', assistantId: task.person, conversationId: task.conversation_id, messageId: runId })
-      const response = await handleChat({ signal: AbortSignal.timeout(45000), body: JSON.stringify({ endpoint: model.endpoint, chatUrl: vendor ? chatRequestUrl(vendor) : '', timeZone: state.timeZone, body, ...access }) })
-      const data = await response.json().catch(() => ({}))
-      if (!response.ok) throw new Error(data.error || '模型请求失败')
-      const answer = scheduledConversationAnswer(data.choices?.[0]?.message?.content, task.prompt)
+      // Reserve before requesting the model; after process death do not automatically repeat.
+      writeJSON(K.tasks, beforeRequest.map(item => item.id === task.id ? { ...item, status:'running', updated_at:nowISO() } : item))
+      const natural = isScheduledConversationTask(task.prompt, task.title)
+      const instruction = natural ? scheduledConversationInstructions() : '【定时工作流】这是用户预先安排的任务，不是用户刚发送的消息。请按任务要求执行，完成后简洁报告实际结果，不要虚构执行情况。'
+      const run = startLocalAgentRun({ person:task.person, conversationId:task.conversation_id, source:'scheduled', internal:true, prompt:instruction + '\n\n【任务内容】\n' + task.prompt })
+      activeLocalTaskRuns.set(task.id, run.id)
+      const finished = await new Promise((resolve, reject) => {
+        const timer = setTimeout(() => { unsubscribe(); cancelLocalAgentRun(run.id); reject(new Error('任务执行超时')) }, 600000)
+        const unsubscribe = subscribeLocalAgentEvents(event => {
+          if (event.type !== 'run_finished' || event.runId !== run.id) return
+          clearTimeout(timer); unsubscribe(); resolve(getLocalAgentRun(run.id))
+        })
+      })
+      if (!finished || finished.status !== 'succeeded') throw new Error(finished?.errorMessage || '模型任务未完成')
+      const answer = natural ? scheduledConversationAnswer(finished.answer, task.prompt) : String(finished.answer || '').trim()
+      if (!answer) throw new Error('模型没有返回任务结果')
       const current = readJSON(K.tasks, []).find(item => item?.id === task.id)
       if (!current || current.status !== 'running' || current.run_at !== task.run_at) return
       const latestState = readJSON(K.state, {}) || {}
@@ -553,7 +523,7 @@ async function runLocalConversationTask(task, nowMs) {
       writeJSON(K.tasks, latest.map(item => item.id === task.id ? { ...item, status: 'paused', last_error: String(error?.message || '任务执行失败'), updated_at: nowISO() } : item))
     }
   } finally {
-    if (protectedRun) setGenerationForeground({ action: 'stop', messageId: runId })
+    activeLocalTaskRuns.delete(task.id)
     activeLocalTasks.delete(task.id)
   }
 }
@@ -1119,7 +1089,7 @@ export async function localHandle(path, init) {
       const b = await readBody(init)
       const task = makeLocalTask({
         person: b.person, title: b.title, prompt: b.prompt, runAt: b.runAt,
-        recurrence: b.recurrence, intervalMinutes: b.intervalMinutes, conversationId: b.conversationId,
+        recurrence: b.recurrence, intervalMinutes: b.intervalMinutes, conversationId: b.conversationId, executionMode: b.executionMode,
       }, uuid())
       if (!task) return json(400, { error: '请填写任务名称、执行内容和有效执行时间' })
       const all = readJSON(K.tasks, [])
@@ -1139,7 +1109,7 @@ export async function localHandle(path, init) {
         return Array.isArray(ids) && ids.includes(task.conversation_id)
       })
       if (!due.length) return json(200, { fired: [], tasks: list })
-      const natural = due.filter(task => isScheduledConversationTask(task.prompt, task.title))
+      const natural = due.filter(task => task.execution_mode === 'agent')
       await Promise.all(natural.map(task => runLocalConversationTask(task, nowMs)))
       const ordinary = due.filter(task => !natural.includes(task))
       if (!ordinary.length) return json(200, { fired: [], alarmsChanged: natural.length > 0, tasks: readJSON(K.tasks, []) })
@@ -1190,6 +1160,7 @@ export async function localHandle(path, init) {
       const task = { ...row, status: ['scheduled', 'paused', 'completed'].includes(b.status) ? b.status : row.status, last_error: b.status === 'scheduled' ? '' : row.last_error, run_at: runAt, updated_at: nowISO() }
       list[i] = task
       try { writeJSON(K.tasks, list) } catch { return json(500, { error: '本地存储写入失败' }) }
+      if (b.status === 'paused' && activeLocalTaskRuns.has(row.id)) cancelLocalAgentRun(activeLocalTaskRuns.get(row.id))
       return json(200, { task })
     }
     if (taskMatch && method === 'DELETE') {
@@ -1199,6 +1170,7 @@ export async function localHandle(path, init) {
       const next = list.filter(t => !(t && t.id === taskMatch[1] && t.person === String(b.person || '')))
       if (next.length === list.length) return json(404, { error: '找不到该人物的任务' })
       try { writeJSON(K.tasks, next) } catch { return json(500, { error: '本地存储写入失败' }) }
+      if (activeLocalTaskRuns.has(taskMatch[1])) cancelLocalAgentRun(activeLocalTaskRuns.get(taskMatch[1]))
       return json(200, { ok: true })
     }
     if (p === '/api/workflows/manage' && method === 'POST') {
@@ -1210,7 +1182,7 @@ export async function localHandle(path, init) {
       if (b.action === 'create') {
         const task = makeLocalTask({
           person, title: b.title, prompt: b.prompt, runAt: b.runAt, recurrence: b.recurrence, intervalMinutes: b.intervalMinutes,
-          createdBy: person, temporary: b.temporary === true, conversationId: b.conversationId,
+          createdBy: person, temporary: b.temporary === true, conversationId: b.conversationId, executionMode: b.executionMode,
         }, uuid())
         if (!task) return json(400, { error: '工作流内容或时间无效' })
         try { writeJSON(K.tasks, [...list, task]) } catch { return json(500, { error: '本地存储写入失败' }) }
@@ -1229,6 +1201,7 @@ export async function localHandle(path, init) {
         next = list.map(t => t.id === row.id ? { ...t, status: b.action === 'pause' ? 'paused' : 'scheduled', last_error: b.action === 'resume' ? '' : t.last_error, updated_at: nowISO() } : t)
       }
       try { writeJSON(K.tasks, next) } catch { return json(500, { error: '本地存储写入失败' }) }
+      if (b.action !== 'resume' && activeLocalTaskRuns.has(row.id)) cancelLocalAgentRun(activeLocalTaskRuns.get(row.id))
       return json(200, { ok: true, ...(b.action === 'delete' ? {} : { task: next.find(t => t.id === row.id) }) })
     }
 

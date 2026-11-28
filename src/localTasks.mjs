@@ -8,6 +8,8 @@
 // 重复任务的 run_at 会直接递推到「下一个未来时刻」，避免离线几小时后补发几十条
 // 历史提醒。一次只补最近一次，符合用户对「提醒」的直觉。
 
+import { isScheduledConversationTask } from './server/agent/scheduledConversation.mjs'
+
 const str = (v) => String(v ?? '').trim()
 const RECURRENCE = ['once', 'daily', 'weekly']
 const STATUS = ['scheduled', 'running', 'paused', 'completed']
@@ -30,6 +32,7 @@ export function normalizeLocalTask(raw) {
     person: str(raw.person),
     title: str(raw.title).slice(0, 160),
     prompt: str(raw.prompt).slice(0, 12000),
+    execution_mode: ['reminder','agent'].includes(raw.execution_mode) ? raw.execution_mode : (isScheduledConversationTask(raw.prompt,raw.title) ? 'agent' : 'reminder'),
     run_at: new Date(at).toISOString(),
     recurrence: intervalMinutes ? 'daily' : (RECURRENCE.includes(raw.recurrence) ? raw.recurrence : 'once'),
     interval_minutes: intervalMinutes,
@@ -52,6 +55,7 @@ export function makeLocalTask(input, id, now = Date.now()) {
     person: input && input.person,
     title: input && input.title,
     prompt: input && input.prompt,
+    execution_mode: input && input.executionMode,
     run_at: input && input.runAt,
     recurrence: (input && input.recurrence) || 'once',
     interval_minutes: input && input.intervalMinutes,

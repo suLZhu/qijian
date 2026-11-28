@@ -4,6 +4,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { normalizeLocalTask, makeLocalTask, dueLocalTasks, nextRunAt, advanceLocalTask } from '../src/localTasks.mjs'
 import { localHandle } from '../src/localBackend.mjs'
+import { registerLocalAgentExecutor } from '../src/localAgentRuns.mjs'
 
 function memStorage() {
   const m = new Map()
@@ -182,92 +183,67 @@ test('十分钟重复任务在本地保存并按十分钟推进', async () => {
   assert.equal(Date.parse(result.data.tasks[0].run_at), T0 - 1000 + 600000)
 })
 
-test('本地自然提醒调用真实聊天入口并持久化结果后删除一次性临时任务', async () => {
+test('本地自然提醒使用统一执行器并持久化结果，确认后删除临时任务', async () => {
   localStorage.clear()
-  const person = 'assistant-001'
-  await put('/api/state', { state: { conversations: { [person]: [{ id: 'c1', messages: [{ role: 'user', content: '今天上班有点累' }] }] }, characters: { [person]: { definition: '温柔说话' } }, userSettings: { [person]: { callName: '阿懒' } } } })
-  localStorage.setItem('ai-home.modelConfig', JSON.stringify({ [person]: { endpoint: 'https://relay.example/v1', model: 'test-model' } }))
-  localStorage.setItem('ai-home.apiKey', JSON.stringify({ [person]: 'test-key' }))
-  const originalFetch = globalThis.fetch
-  let sent
-  globalThis.fetch = async (_url, init) => {
-    sent = JSON.parse(init.body)
-    return new Response(JSON.stringify({ choices: [{ message: { content: '阿懒，辛苦啦，起来喝口水吧。' } }] }), { status: 200 })
-  }
+  const person='assistant-001'
+  await put('/api/state',{state:{conversations:{[person]:[{id:'c1',messages:[]}]}}})
+  let input
+  const unregister=registerLocalAgentExecutor(async run => {input=run; return {answer:'阿懒，起来喝口水吧。',usage:{promptTokens:3,completionTokens:2}}})
   try {
-    const created = await post('/api/workflows/manage', { person, action: 'create', title: '提醒喝水', prompt: '十分钟后提醒阿懒喝水，起来走动', runAt: iso(T0 - 1000), recurrence: 'once', temporary: true, conversationId: 'c1' })
-    assert.equal(created.status, 201)
-    const result = await post('/api/tasks/run', { now: iso(T0), conversationIds: { [person]: ['c1'] } })
-    assert.equal(result.status, 200)
-    assert.equal(result.data.fired.length, 0)
-    assert.ok(sent.messages.some(message => message.content === '今天上班有点累'))
-    assert.ok(sent.messages.some(message => message.content.includes('温柔说话') && message.content.includes('阿懒')))
-    const inbox = await call('/api/inbox')
-    const envelope = JSON.parse(inbox.data.messages[0].content)
-    assert.equal(envelope.answer, '阿懒，辛苦啦，起来喝口水吧。')
-    assert.equal(envelope.prompt, '十分钟后提醒阿懒喝水，起来走动')
-    assert.equal((await call('/api/tasks?person=' + person)).data.tasks[0].status, 'completed')
-    await post('/api/tasks/run', { now: iso(T0), conversationIds: { [person]: ['c1'] } })
-    assert.equal((await call('/api/inbox')).data.messages.length, 1)
-    assert.equal((await post('/api/inbox/read', { id: inbox.data.messages[0].id })).status, 200)
-    assert.equal((await call('/api/tasks?person=' + person)).data.tasks.length, 0)
-  } finally {
-    globalThis.fetch = originalFetch
-  }
+    const created=await post('/api/workflows/manage',{person,action:'create',title:'提醒喝水',prompt:'十分钟后提醒阿懒喝水，起来走动',runAt:iso(T0-1000),temporary:true,conversationId:'c1'})
+    assert.equal(created.status,201)
+    const result=await post('/api/tasks/run',{now:iso(T0),conversationIds:{[person]:['c1']}})
+    assert.equal(result.status,200)
+    assert.equal(input.source,'scheduled')
+    assert.equal(input.conversationId,'c1')
+    assert.match(input.prompt,/定时聊天专用规则/)
+    const inbox=await call('/api/inbox')
+    const envelope=JSON.parse(inbox.data.messages[0].content)
+    assert.equal(envelope.answer,'阿懒，起来喝口水吧。')
+    assert.equal((await call('/api/tasks?person='+person)).data.tasks[0].status,'completed')
+    await post('/api/tasks/run',{now:iso(T0),conversationIds:{[person]:['c1']}})
+    assert.equal((await call('/api/inbox')).data.messages.length,1)
+    await post('/api/inbox/read',{id:inbox.data.messages[0].id})
+    assert.equal((await call('/api/tasks?person='+person)).data.tasks.length,0)
+  } finally {unregister()}
 })
 
-test('本地自然提醒模型失败时暂停任务并保留错误', async () => {
+test('本地自然提醒执行失败时暂停任务并保留错误', async () => {
   localStorage.clear()
-  const person = 'assistant-001'
-  await put('/api/state', { state: { conversations: { [person]: [{ id: 'c1', messages: [] }] } } })
-  localStorage.setItem('ai-home.modelConfig', JSON.stringify({ [person]: { endpoint: 'https://relay.example/v1', model: 'test-model' } }))
-  localStorage.setItem('ai-home.apiKey', JSON.stringify({ [person]: 'test-key' }))
-  const originalFetch = globalThis.fetch
-  globalThis.fetch = async () => new Response('unavailable', { status: 503 })
+  const person='assistant-001'
+  await put('/api/state',{state:{conversations:{[person]:[{id:'c1',messages:[]}]}}})
+  const unregister=registerLocalAgentExecutor(async()=>{throw new Error('模型返回 503')})
   try {
-    await post('/api/workflows/manage', { person, action: 'create', title: '提醒喝水', prompt: '提醒阿懒喝水', runAt: iso(T0 - 1000), temporary: true, conversationId: 'c1' })
-    await post('/api/tasks/run', { now: iso(T0), conversationIds: { [person]: ['c1'] } })
-    const tasks = (await call('/api/tasks?person=' + person)).data.tasks
-    assert.equal(tasks[0].status, 'paused')
-    assert.match(tasks[0].last_error, /503/)
-    assert.equal((await call('/api/inbox')).data.messages.length, 0)
-  } finally {
-    globalThis.fetch = originalFetch
-  }
+    await post('/api/workflows/manage',{person,action:'create',title:'提醒喝水',prompt:'提醒阿懒喝水',runAt:iso(T0-1000),temporary:true,conversationId:'c1'})
+    await post('/api/tasks/run',{now:iso(T0),conversationIds:{[person]:['c1']}})
+    const tasks=(await call('/api/tasks?person='+person)).data.tasks
+    assert.equal(tasks[0].status,'paused')
+    assert.match(tasks[0].last_error,/503/)
+    assert.equal((await call('/api/inbox')).data.messages.length,0)
+  } finally {unregister()}
 })
 
-test('本地提醒生成中暂停任务，不投递也不覆盖暂停状态', async () => {
+test('本地提醒生成中暂停任务，取消执行且不投递', async () => {
   localStorage.clear()
-  const person = 'assistant-001'
-  await put('/api/state', { state: { conversations: { [person]: [{ id: 'c1', messages: [] }] } } })
-  localStorage.setItem('ai-home.modelConfig', JSON.stringify({ [person]: { endpoint: 'https://relay.example/v1', model: 'test-model' } }))
-  localStorage.setItem('ai-home.apiKey', JSON.stringify({ [person]: 'test-key' }))
-  const originalFetch = globalThis.fetch
-  let release
+  const person='assistant-001'
+  await put('/api/state',{state:{conversations:{[person]:[{id:'c1',messages:[]}]}}})
   let started
-  const startedPromise = new Promise(resolve => { started = resolve })
-  globalThis.fetch = async () => {
+  const ready=new Promise(resolve=>{started=resolve})
+  const unregister=registerLocalAgentExecutor((_run,signal)=>new Promise((resolve,reject)=>{
     started()
-    await new Promise(resolve => { release = resolve })
-    return new Response(JSON.stringify({ choices: [{ message: { content: '来喝水吧。' } }] }), { status: 200 })
-  }
+    signal.addEventListener('abort',()=>reject(new Error('取消')),{once:true})
+  }))
   try {
-    const created = await post('/api/workflows/manage', { person, action: 'create', title: '提醒喝水', prompt: '提醒阿懒喝水', runAt: iso(T0 - 1000), temporary: true, conversationId: 'c1' })
-    const running = post('/api/tasks/run', { now: iso(T0), conversationIds: { [person]: ['c1'] } })
-    await startedPromise
-    assert.equal((await call('/api/tasks?person=' + person)).data.tasks[0].status, 'running')
-    assert.equal((await put('/api/tasks/' + created.data.task.id, { person, status: 'scheduled' })).status, 409)
-    assert.equal((await post('/api/workflows/manage', { person, action: 'resume', id: created.data.task.id })).status, 409)
-    const overlap = await post('/api/tasks/run', { now: iso(T0), conversationIds: { [person]: ['c1'] } })
-    assert.equal(overlap.data.fired.length, 0)
-    await put('/api/tasks/' + created.data.task.id, { person, status: 'paused' })
-    release()
+    const created=await post('/api/workflows/manage',{person,action:'create',title:'提醒喝水',prompt:'提醒阿懒喝水',runAt:iso(T0-1000),temporary:true,conversationId:'c1'})
+    const running=post('/api/tasks/run',{now:iso(T0),conversationIds:{[person]:['c1']}})
+    await ready
+    assert.equal((await call('/api/tasks?person='+person)).data.tasks[0].status,'running')
+    assert.equal((await put('/api/tasks/'+created.data.task.id,{person,status:'scheduled'})).status,409)
+    await put('/api/tasks/'+created.data.task.id,{person,status:'paused'})
     await running
-    assert.equal((await call('/api/inbox')).data.messages.length, 0)
-    assert.equal((await call('/api/tasks?person=' + person)).data.tasks[0].status, 'paused')
-  } finally {
-    globalThis.fetch = originalFetch
-  }
+    assert.equal((await call('/api/inbox')).data.messages.length,0)
+    assert.equal((await call('/api/tasks?person='+person)).data.tasks[0].status,'paused')
+  } finally {unregister()}
 })
 
 test('本地提醒结果已入收件箱但任务未结算时，恢复不重复请求模型', async () => {
@@ -295,36 +271,20 @@ test('本地提醒结果已入收件箱但任务未结算时，恢复不重复�
   }
 })
 
-test('到期提醒使用原助手的订阅令牌，代理错误时保留任务', async t => {
+test('定时工作流的执行器错误会保留错误和任务', async () => {
   localStorage.clear()
-  const person = 'assistant-001'
-  const save = (key, value) => localStorage.setItem('ai-home.' + key, JSON.stringify(value))
-  await put('/api/state', { state: { conversations: { [person]: [{ id: 'work', messages: [{ role: 'user', content: '刚开完会' }] }] } } })
-  save('modelConfig', { [person]: { model: 'shared-model', vendorId: 'shared', endpoint: '' } })
-  save('vendors', [{ id: 'shared', subscription: true, keys: [{ id: 'api', value: 'ordinary' }, { id: 'oauth', value: 'subscriber' }] }])
-  save('subscriptions', [{ id: 'sub', channelId: 'claude', vendorId: 'shared', vendorKeyId: 'oauth', loggedIn: true }])
-  let request
-  t.mock.method(globalThis, 'fetch', () => { throw new Error('unexpected direct request') })
-  globalThis.AiHomeSystem = {
-    status: () => '{}',
-    modelHttp(id, policy, method, url, headers, body) {
-      request = { policy, headers: JSON.parse(headers), body }
-      globalThis.__aihomeHttpStream(id, JSON.stringify({ type: 'error', message: '订阅代理不可用' }))
-    },
-  }
-  t.after(() => { delete globalThis.AiHomeSystem })
-  await post('/api/workflows/manage', { person, action: 'create', title: '提醒喝水', prompt: '提醒我喝水', runAt: iso(T0 - 1000), temporary: true, conversationId: 'work' })
-  await post('/api/tasks/run', { now: iso(T0), conversationIds: { [person]: ['work'] } })
-  assert.equal(request?.policy, 'subscription')
-  assert.equal(request.headers.authorization, 'Bearer subscriber')
-  assert.match(request.body, /刚开完会/)
-  const [task] = (await call('/api/tasks?person=' + person)).data.tasks
-  assert.equal(task.status, 'paused')
-  assert.match(task.last_error, /订阅代理不可用/)
-  assert.equal((await call('/api/inbox')).data.messages.length, 0)
-  assert.equal(globalThis.fetch.mock.callCount(), 0)
+  const person='assistant-001'
+  await put('/api/state',{state:{conversations:{[person]:[{id:'work',messages:[]}]}}})
+  const unregister=registerLocalAgentExecutor(async run=>{assert.equal(run.assistantId,person);throw new Error('订阅代理不可用')})
+  try {
+    await post('/api/workflows/manage',{person,action:'create',title:'提醒喝水',prompt:'提醒我喝水',runAt:iso(T0-1000),temporary:true,conversationId:'work'})
+    await post('/api/tasks/run',{now:iso(T0),conversationIds:{[person]:['work']}})
+    const [task]=(await call('/api/tasks?person='+person)).data.tasks
+    assert.equal(task.status,'paused')
+    assert.match(task.last_error,/订阅代理不可用/)
+    assert.equal((await call('/api/inbox')).data.messages.length,0)
+  } finally {unregister()}
 })
-
 
 test('自然提醒绑定会话消失时暂停并保留任务，不向其他会话投递', async () => {
   localStorage.clear()
@@ -371,4 +331,26 @@ test('本地模型结果已经持久化但状态未推进时，重启只结算�
   const tasks = (await call('/api/tasks?person=' + person)).data.tasks
   assert.equal(tasks[0].status, 'completed')
   assert.equal((await post('/api/tasks/run', { now: iso(T0) })).data.fired.length, 0)
+})
+
+test('明确选择 AI 工作流走统一 Agent，普通提醒不调用模型', async () => {
+  localStorage.clear()
+  const person='assistant-001'
+  await put('/api/state',{state:{conversations:{[person]:[{id:'c1',messages:[]}]}}})
+  const runs=[]
+  const unregister=registerLocalAgentExecutor(async run=>{runs.push(run);return {answer:'已检查并记录结果',usage:{promptTokens:2,completionTokens:3}}})
+  try {
+    const ai=await post('/api/tasks',{person,title:'整理资料',prompt:'检查清单并整理结果',runAt:iso(T0-1000),conversationId:'c1',executionMode:'agent'})
+    const reminder=await post('/api/tasks',{person,title:'喝水',prompt:'喝一杯水',runAt:iso(T0-1000),conversationId:'c1',executionMode:'reminder'})
+    assert.equal(ai.data.task.execution_mode,'agent')
+    assert.equal(reminder.data.task.execution_mode,'reminder')
+    const result=await post('/api/tasks/run',{now:iso(T0),conversationIds:{[person]:['c1']}})
+    assert.equal(runs.length,1)
+    assert.equal(runs[0].source,'scheduled')
+    assert.match(runs[0].prompt,/检查清单并整理结果/)
+    assert.equal(result.data.fired.length,1)
+    const inbox=await call('/api/inbox')
+    assert.equal(inbox.data.messages.filter(m=>m.kind==='task_result').length,1)
+    assert.equal(inbox.data.messages.filter(m=>m.kind==='task_notice').length,1)
+  } finally {unregister()}
 })
