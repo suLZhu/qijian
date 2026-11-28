@@ -112,3 +112,24 @@ test('大量历史运行不因新建任务被截断，账本按助手统计全�
     assert.equal(localAgentUsageMessages('b').length, 0)
   } finally { unregister() }
 })
+
+test('运行失败或取消后保留供应商已返回的用量，不虚构未返回的用量', async () => {
+  values.clear()
+  const { reportLocalAgentUsage, localAgentUsageMessages } = await import('../src/localAgentRuns.mjs')
+  let finish
+  const unregister = registerLocalAgentExecutor((run, signal) => new Promise((resolve, reject) => {
+    reportLocalAgentUsage(run.id, { model:'m', promptTokens:12, completionTokens:3 })
+    finish = () => reject(new Error('中断'))
+    signal.addEventListener('abort', finish, { once:true })
+  }))
+  try {
+    const created = await request('/api/agent/runs', { person:'a', prompt:'任务' })
+    await wait()
+    await request('/api/agent/runs/' + created.run.id + '/cancel', {})
+    await wait()
+    const run = (await request('/api/agent/runs/' + created.run.id)).run
+    assert.equal(run.status, 'cancelled')
+    assert.equal(run.usage.promptTokens, 12)
+    assert.deepEqual(localAgentUsageMessages('a')[0].usage, run.usage)
+  } finally { unregister() }
+})

@@ -52,7 +52,7 @@ export function UsageStats({ people, conversations, models, displayName }: {
   const [pricing, setPricing] = useState<Record<string, Record<string, Price>>>(() => loadPricing())
   const [active, setActive] = useState(people[0] || '')
   const [runRevision, setRunRevision] = useState(0)
-  useEffect(() => subscribeLocalAgentEvents(event => { if (event.type === 'run_finished') setRunRevision(value => value + 1) }), [])
+  useEffect(() => subscribeLocalAgentEvents(event => { if (event.type === 'run_finished' || event.type === 'run_usage') setRunRevision(value => value + 1) }), [])
 
   const perPerson = useMemo(() => {
     return Object.fromEntries(people.map(person => {

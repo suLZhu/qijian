@@ -46,7 +46,15 @@ export function listLocalAgentRuns(person = '', limit = 30) {
 }
 export function getLocalAgentRun(id) { return read().find(row => row.id === id) || null }
 export function localAgentUsageMessages(person) {
-  return read().filter(run => run.assistantId === person && run.status === 'succeeded' && run.usage && Object.keys(run.usage).length > 0).map(run => ({ role: 'assistant', usage: run.usage }))
+  return read().filter(run => run.assistantId === person && run.usage && Object.keys(run.usage).length > 0).map(run => ({ role: 'assistant', usage: run.usage }))
+}
+// Persist only usage actually reported by the provider, including partial failed runs.
+export function reportLocalAgentUsage(id, usage) {
+  const item = active.get(id)
+  if (!item || !usage || typeof usage !== 'object') return false
+  const run = update(id, { usage })
+  publish('run_usage', run)
+  return true
 }
 export function startLocalAgentRun({ person, prompt, source = 'manual', conversationId = '' }) {
   // Preserve the existing honest error until the app has registered its executor.

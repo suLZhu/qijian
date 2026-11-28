@@ -2,7 +2,7 @@ export type LocalAgentRun = {
   id: string; assistantId: string; source: string; conversationId: string
   prompt: string; answer: string; rounds: number; toolCalls: number
   status: 'running' | 'succeeded' | 'failed' | 'cancelled' | 'timed_out'
-  usage: { promptTokens?: number; completionTokens?: number; cachedTokens?: number; calls?: number }
+  usage: { promptTokens?: number; completionTokens?: number; cachedTokens?: number; cacheReadTokens?: number; calls?: number; model?: string; at?: string; rounds?: Array<{ model: string; vendorId: string; vendor: string; subscription: boolean; promptTokens: number; completionTokens: number }> }
   model: string; createdAt: string; updatedAt: string; finishedAt: string | null
   errorCode?: string; errorMessage?: string
 }
@@ -13,5 +13,6 @@ export function subscribeLocalAgentEvents(listener: (event: LocalAgentEvent) => 
 export function listLocalAgentRuns(person?: string, limit?: number): LocalAgentRun[]
 export function getLocalAgentRun(id: string): LocalAgentRun | null
 export function localAgentUsageMessages(person: string): Array<{ role: 'assistant'; usage: LocalAgentRun['usage'] }>
+export function reportLocalAgentUsage(id: string, usage: LocalAgentRun['usage']): boolean
 export function startLocalAgentRun(input: { person: string; prompt: string; source?: string; conversationId?: string }): LocalAgentRun
 export function cancelLocalAgentRun(id: string): { ok: boolean; accepted: boolean; status: LocalAgentRun['status'] } | null
