@@ -87,3 +87,11 @@
 - 删除：本地自然提醒独立模型路由和请求实现；旧任务通过既有类型判断迁移，未删除用户任务。
 - 验证：全量 567 项通过；Web 构建及类型检查通过。任务测试使用模拟执行器，真实模型、Android 及工具执行尚未端到端验证。
 - 未解决：真实供应商验证、听觉哨兵、全局审计；WebView 进程被回收后不执行 AI，回前台后补查。
+
+## 听觉与前台哨兵
+
+- 修改：AndroidManifest.xml、SystemBridge.java、src/HearingSettings.tsx、src/hearingProtocol.mjs、src/hearingProtocol.d.mts、src/App.tsx、src/AppLayout.tsx、src/UsageStats.tsx、src/localAgentRuns.mjs、src/localBackend.mjs、src/nativeSystem.mjs、src/usageLedger.mjs、src/usageLedger.d.mts、听觉专项测试与 package.json。
+- 实现：按助手配置听觉，单次录音和上传，Whisper 兼容转写及 input_audio 理解；前台手动启动实时哨兵、10 秒录音分段、触发词、60–3600 秒触发间隔、免打扰和忙碌限制；听觉模型只负责感知，聊天助手处理不可信描述且禁用工具；关闭页面、切后台或点击停止会释放麦克风并取消运行；绑定会话、账本及不含音频/转写正文的诊断记录。
+- 删除：听觉组件中重复协议实现，提取为共用请求模块。
+- 验证：全量 574 项测试及 Web 构建、TypeScript 检查通过；测试覆盖 multipart 字节、理解格式、供应商域名、模拟事件触发、停止、助手隔离及免打扰；存在大 chunk 警告。
+- 未解决：Android 原生编译环境、真机权限及麦克风资源释放、真实模型端到端、页面实际渲染和后台行为尚未验证；实时哨兵仅在本地模式且该页面前台可见时工作，不自动后台录音。

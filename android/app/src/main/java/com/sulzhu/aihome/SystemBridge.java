@@ -94,6 +94,15 @@ final class SystemBridge {
 
     @JavascriptInterface
     public void modelHttp(String id, String policy, String method, String url, String headersJson, String body) {
+        modelHttpInternal(id, policy, method, url, headersJson, body, false);
+    }
+
+    @JavascriptInterface
+    public void modelHttpBinary(String id, String policy, String method, String url, String headersJson, String body) {
+        modelHttpInternal(id, policy, method, url, headersJson, body, true);
+    }
+
+    private void modelHttpInternal(String id, String policy, String method, String url, String headersJson, String body, boolean binary) {
         if (id == null || id.isEmpty()) return;
         // Publish a cancellation flag before starting the worker, including while resolving the proxy.
         java.util.concurrent.atomic.AtomicBoolean cancelled = new java.util.concurrent.atomic.AtomicBoolean();
@@ -116,7 +125,8 @@ final class SystemBridge {
                 }
                 if ("POST".equals(method)) {
                     conn.setDoOutput(true);
-                    byte[] out = body.getBytes(StandardCharsets.UTF_8);
+                    if (binary && body.length() > 36 * 1024 * 1024) throw new java.io.IOException("上传文件过大");
+                    byte[] out = binary ? android.util.Base64.decode(body, android.util.Base64.DEFAULT) : body.getBytes(StandardCharsets.UTF_8);
                     conn.setFixedLengthStreamingMode(out.length);
                     try (OutputStream os = conn.getOutputStream()) { os.write(out); }
                 }

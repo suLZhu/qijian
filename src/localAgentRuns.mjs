@@ -86,7 +86,7 @@ export function startLocalAgentRun({ person, prompt, source = 'manual', conversa
   prompt = String(prompt || '').trim()
   if (!person || person.length > 120) throw new Error('人物身份无效')
   if (!prompt || prompt.length > 20000) throw new Error('任务内容需为 1 至 20000 字')
-  if (source !== 'manual' && !(internal === true && ['proactive', 'scheduled'].includes(source))) throw new Error('不支持此运行来源')
+  if (source !== 'manual' && !(internal === true && ['proactive', 'scheduled', 'hearing'].includes(source))) throw new Error('不支持此运行来源')
   if ([...active.values()].some(item => item.person === person)) throw new Error('当前助手已有任务正在执行')
   const id = crypto.randomUUID(), at = new Date().toISOString()
   const run = { id, assistantId: person, source, conversationId: String(conversationId || ''), prompt, answer: '', rounds: 0, toolCalls: 0, status: 'running', usage: {}, model: '', createdAt: at, updatedAt: at, finishedAt: null }

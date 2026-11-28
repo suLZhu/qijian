@@ -40,6 +40,7 @@ type AppLayoutProps = {
   renderTasks?:(person:string)=>ReactNode
   renderSystem?: () => ReactNode
   renderRoomScene?: (person: string, onAction: (action: string) => void) => ReactNode
+  renderHearing?: (person:string,onUse:(text:string)=>void)=>ReactNode
   renderSettings?: (section: string, person: string) => ReactNode
   renderProfile?: (person: string) => ReactNode
   renderBackup?: () => ReactNode
@@ -118,6 +119,8 @@ export default function AppLayout(props:AppLayoutProps = {}) {
   const [section, setSection] = useState<string | null>(()=>{try{if(sessionStorage.getItem('ai-home.afterRestoreSection')==='data'){sessionStorage.removeItem('ai-home.afterRestoreSection');return '数据与连接'}}catch{}return null})
   const [subsection,setSubsection]=useState('')
   const [toolsOpen, setToolsOpen] = useState(false)
+  const [hearingOpen,setHearingOpen]=useState(false)
+  useEffect(()=>setHearingOpen(false),[props.person,view])
   const [pendingEdit,setPendingEdit]=useState<{scope:string;text:string}|null>(null)
   const [bindingPanel,setBindingPanel]=useState<'world'|'mcp'|null>(null)
   const scope=JSON.stringify([person,data.activeIds[person]||''])
@@ -236,6 +239,7 @@ export default function AppLayout(props:AppLayoutProps = {}) {
     if(selection){setSelection(null);return true}
     if(pendingEdit){setPendingEdit(null);return true}
     if(bindingPanel){setBindingPanel(null);return true}
+    if(hearingOpen){setHearingOpen(false);return true}
     if(toolsOpen){setToolsOpen(false);return true}
     if(drawer){setDrawer(false);return true}
     if(section){setSection(null);return true}
@@ -315,7 +319,7 @@ export default function AppLayout(props:AppLayoutProps = {}) {
               if(tab==='订阅账号') return props.renderSubscription?.()
               if(tab==='世界书'||tab==='MCP') return props.renderResource?.(tab==='世界书'?'world':'mcp')
               if(tab==='备份与恢复') return props.renderBackup?.()
-              if(['定时任务','自主生活','记忆管理','工具看板','SKILL','助手主题'].includes(tab)) return <><div className="qj-settings-assistant"><span>选择助手</span><SoftSelect ariaLabel="选择助手" value={settingsPerson} options={people.map(id=>({value:id,label:displayName(id)}))} onChange={setSettingsAssistant}/></div><div key={tab+settingsPerson}>{tab==='定时任务'?props.renderTasks?.(settingsPerson):props.renderSettings?.(tab,settingsPerson)}</div></>
+              if(['定时任务','自主生活','记忆管理','工具看板','SKILL','助手主题','听觉'].includes(tab)) return <><div className="qj-settings-assistant"><span>选择助手</span><SoftSelect ariaLabel="选择助手" value={settingsPerson} options={people.map(id=>({value:id,label:displayName(id)}))} onChange={setSettingsAssistant}/></div><div key={tab+settingsPerson}>{tab==='定时任务'?props.renderTasks?.(settingsPerson):props.renderSettings?.(tab,settingsPerson)}</div></>
               if(tab==='聊天展示') return <ChatDisplaySettings compact/>
               return props.renderSettings?.(tab,person)
             }}/>}
@@ -349,7 +353,8 @@ export default function AppLayout(props:AppLayoutProps = {}) {
       <button className={view === 'settings'||view==='theme'?'active':''} onClick={() => go('settings')}><span><IconSettings size={19}/></span>设置</button>
     </nav>
     {view==='chat'&&(toolsOpen||bindingPanel)&&<button className="qj-chat-scrim" aria-label="关闭聊天工具" onClick={()=>{setToolsOpen(false);setBindingPanel(null)}}/>}
-    {view==='chat'&&toolsOpen && <div className="qj-tool-tray" role="dialog" aria-label="添加聊天附件"><strong>添加附件</strong><div className="qj-attachment-actions"><button onClick={()=>{setToolsOpen(false);imagePicker.current?.click()}}>图片</button><button onClick={()=>{setToolsOpen(false);filePicker.current?.click()}}>文件</button><button onClick={()=>{setToolsOpen(false);cameraPicker.current?.click()}}>拍照</button><button onClick={()=>setToolsOpen(false)}>收起</button></div></div>}
+    {view==='chat'&&hearingOpen&&<><button className="qj-chat-scrim" aria-label="关闭听觉" onClick={()=>setHearingOpen(false)}/><div className="qj-tool-tray" role="dialog" aria-label="听觉"><button onClick={()=>setHearingOpen(false)}>关闭</button><Suspense fallback={<p>正在加载听觉…</p>}>{props.renderHearing?.(person,text=>{props.onDraftChange?.([draft,text].filter(Boolean).join('\n'));setHearingOpen(false)})}</Suspense></div></>}
+    {view==='chat'&&toolsOpen && <div className="qj-tool-tray" role="dialog" aria-label="添加聊天附件"><strong>添加附件</strong><div className="qj-attachment-actions"><button onClick={()=>{setToolsOpen(false);imagePicker.current?.click()}}>图片</button><button onClick={()=>{setToolsOpen(false);filePicker.current?.click()}}>文件</button><button onClick={()=>{setToolsOpen(false);cameraPicker.current?.click()}}>拍照</button><button onClick={()=>{setToolsOpen(false);setHearingOpen(true)}}>听觉</button><button onClick={()=>setToolsOpen(false)}>收起</button></div></div>}
     {drawer && <div className="qj-drawer-layer"><button className="qj-scrim" aria-label="关闭菜单" onClick={() => setDrawer(false)} /><aside className="qj-drawer">
       <div className="qj-drawer-title"><b>栖间</b><button className="qj-icon" aria-label="关闭侧边栏" onClick={()=>setDrawer(false)}><IconClose size={18}/></button></div>
       <h3 className="qj-label">我的助手</h3>

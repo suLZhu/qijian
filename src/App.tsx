@@ -1,3 +1,4 @@
+const HearingSettings = lazy(() => import('./HearingSettings').then(module => ({ default: module.HearingSettings })))
 const UsageStats = lazy(() => import('./UsageStats').then(module => ({ default: module.UsageStats })))
 import { SettingsInjection, SettingsTools } from './SettingsControls'
 const MediaSettings = lazy(() => import('./MediaSettings').then(module => ({ default: module.MediaSettings })))
@@ -706,7 +707,7 @@ export default function App() {
           // 主动消息成功进入收件箱后发系统通知。任务类走「写回聊天」入口统一发，
           // 否则同一 runId 会因为 task_notice / task_result 两条收件箱行弹两次。
           for(const m of fresh){
-            if(m.kind==='task_result'||m.kind==='task_notice'||m.kind==='proactive_result')continue
+            if(m.kind==='task_result'||m.kind==='task_notice'||m.kind==='proactive_result'||m.kind==='hearing_result')continue
             notifyAfterWrite({kind:m.kind||'message',person:m.person,messageId:m.id,text:m.content,at:Date.parse(m.created_at)||Date.now()})
           }
         }
@@ -721,14 +722,14 @@ export default function App() {
       },[authStatus,notifyAfterWrite])
   useEffect(()=>{if(!toast)return;const timer=window.setTimeout(()=>setToast(null),6500);return()=>window.clearTimeout(timer)},[toast])
   async function openInboxMessage(message:InboxMessage) {
-    const envelope = (message.kind === 'task_result' || message.kind === 'proactive_result') ? parseTaskEnvelope(message.content) : null
+    const envelope = (['task_result','proactive_result','hearing_result'].includes(message.kind)) ? parseTaskEnvelope(message.content) : null
     if (envelope?.conversationId && !(conversations[message.person] || []).some(c => c.id === envelope.conversationId)) {
       setChatError('通知对应的会话已不存在')
       return
     }
     setOpenChatSignal(value => value + 1)
     setPerson(message.person);setPage('room');setChatOpen(true);setActiveTool('');setToast(null)
-    if (message.kind === 'task_result' || message.kind === 'proactive_result') {
+    if (['task_result','proactive_result','hearing_result'].includes(message.kind)) {
       // 任务结果：跳到绑定会话供查看；已读确认交给「持久化成功后 ack」的管线，
       // 点击本身绝不提前确认——否则可能确认一条尚未落盘的消息。
       const env = envelope
@@ -1192,15 +1193,15 @@ export default function App() {
   useEffect(() => {
     if (authStatus !== 'signedIn' || !cloudReady) return
     for (const m of inbox) {
-      if (!['task_result','proactive_result'].includes(m.kind) || m.read_at) continue
+      if (!['task_result','proactive_result','hearing_result'].includes(m.kind) || m.read_at) continue
       const decision = decideTaskConsumption(conversationsRef.current[m.person], m.content)
       if (decision.action === 'write') {
         const { runId, title, prompt, answer } = decision.envelope
         const conversationId = decision.conversationId
         genDebug('task_exec_started',{runId,person:m.person,scheduledAt:String(m.created_at||''),conversationId,source:'cloud_inbox'})
-        updateActiveConversationMessages(m.person, prev => prev.some(x => x && x.taskRunId === runId) ? prev : [...prev, { role: 'assistant', content: answer, id: 'task-' + runId, taskRunId: runId, contextNote: m.kind==='proactive_result' ? '自主生活' : title ? '定时任务：' + title : '定时任务结果', taskDetails: prompt }], conversationId)
+        updateActiveConversationMessages(m.person, prev => prev.some(x => x && x.taskRunId === runId) ? prev : [...prev, { role: 'assistant', content: answer, id: 'task-' + runId, taskRunId: runId, contextNote: m.kind==='hearing_result' ? '听觉事件' : m.kind==='proactive_result' ? '自主生活' : title ? '定时任务：' + title : '定时任务结果', taskDetails: prompt }], conversationId)
         // 云端任务结果写回原会话后发通知；runId 与本地任务、原生闹钟是同一个稳定键。
-        notifyAfterWrite({kind:m.kind==='proactive_result'?'message':'task',person:m.person,runId,text:answer,conversationId,messageId:m.id,at:Date.parse(m.created_at)||Date.now()})
+        notifyAfterWrite({kind:m.kind==='task_result'?'task':'message',person:m.person,runId,text:answer,conversationId,messageId:m.id,at:Date.parse(m.created_at)||Date.now()})
         genDebug('task_exec_completed',{runId,person:m.person,notifiedAt:Date.now(),source:'cloud_inbox'})
         pendingTaskAcks.current.set(m.id, { runId, person: m.person, conversationId })
         // 把防抖哨兵拨到已超期：任务结果必须尽快落盘，之后才能确认已读。
@@ -1972,10 +1973,11 @@ export default function App() {
     const conversationId = run.conversationId || activeConversationIdsRef.current[run.assistantId] || ''
     if (!conversationId || !conversationsRef.current[run.assistantId]?.some(c => c.id === conversationId)) throw new Error('助手没有可用的聊天会话')
     if (Object.entries(sendingRef.current).some(([key, busy]) => { try { return busy && JSON.parse(key)[0] === run.assistantId } catch { return false } })) throw new Error('助手正在忙，请稍后重试')
-    const proactiveConfig = run.source === 'proactive' ? read<Record<string,any>>('ai-home.local.proactive', {})[run.assistantId] : null
+    const proactiveConfig = ['proactive','hearing'].includes(run.source) ? read<Record<string,any>>('ai-home.local.proactive', {})[run.assistantId] : null
     if (run.source === 'proactive' && (!proactiveConfig?.enabled || !proactiveConfig?.allow_chat)) throw new Error('自主生活权限已关闭')
+    if (run.source === 'hearing' && localStorage.getItem('ai-home.hearing.enabled.'+run.assistantId) !== 'true') throw new Error('听觉权限已关闭')
     let result: LocalAgentResult | undefined
-    const status = await sendRef.current(run.prompt, [], { assistantId:run.assistantId, conversationId, insertUser:false, preserveDraft:true, agent:{ id:run.id, signal, allowTools:run.source !== 'proactive', allowMemorySearch:run.source !== 'proactive' || !!proactiveConfig?.allow_memory_search, onResult:value => { result=value } } })
+    const status = await sendRef.current(run.prompt, [], { assistantId:run.assistantId, conversationId, insertUser:false, preserveDraft:true, agent:{ id:run.id, signal, allowTools:!['proactive','hearing'].includes(run.source), allowMemorySearch:!['proactive','hearing'].includes(run.source) || !!proactiveConfig?.allow_memory_search, onResult:value => { result=value } } })
     signal.throwIfAborted()
     if (status !== 'ok' || !result) throw new Error(status === 'noop' ? '助手正在忙，请稍后重试' : '模型或工具执行失败，请检查聊天设置和诊断')
     return result
@@ -2331,6 +2333,7 @@ export default function App() {
     onSend={sendChatMessage}
     renderSubscription={()=> <SubscriptionAccounts vendors={vendors} setVendors={setVendors} setModelProfiles={setModelProfiles} subscriptions={subscriptions} setSubscriptions={setSubscriptions}/>}
     renderSystem={()=> <AndroidSystemSettings people={assistants.map(a=>a.id)} displayName={displayName} avatarOf={id=>characters[id]?.avatar||''}/>}
+    renderHearing={(target,onUse)=><HearingSettings key={target} vendors={vendors} person={target} onUse={onUse}/>}
     renderSettings={(section,target)=>{
       if(section==='自主生活') return <ProactivePanel key={target} person={target} personLabel={displayName}/>
       if(section==='SKILL') return <SkillWorkbench key={target} person={target} personLabel={displayName}/>
@@ -2341,7 +2344,7 @@ export default function App() {
       if(section==='模型目录') return <ProviderManagement section={catalogSection} onSection={s=>setCatalogSection(s==='vendor'?'vendor:catalog':s)} vendors={vendors} setVendors={setVendors} setModelProfiles={setModelProfiles} modelProfiles={modelProfiles} defaultModelId={defaultModelId} setDefaultModelId={setDefaultModelId}/>
       if(section==='聊天模型') return <DefaultModelPage profiles={modelProfiles} vendors={vendors} defaultModelId={defaultModelId} setDefaultModelId={setDefaultModelId} onBack={()=>{}}/>
       if(section==='生图'||section==='视频'||section==='语音') return <MediaSettings vendors={vendors} fixedMode={section==='生图'?'image':section==='视频'?'video':'audio'}/>
-      if(section==='听觉') return <p>待开发</p>
+      if(section==='听觉') return <HearingSettings key={target} vendors={vendors} person={target}/>
       if(section==='上下文') return <ContextSettings/>
       if(section==='记忆管理') return <MemoryPanel key={target} person={target} personLabel={displayName(target)} personMessages={messages[target]||[]}/>
       if(section==='信息注入') return <><TimeZoneSettings timeZone={timeZone} setTimeZone={setTimeZone}/><SettingsInjection/></>
@@ -2368,7 +2371,7 @@ export default function App() {
     onConfirmPending={()=>void flushPending(person,activeConversationIds[person]||'',true)}
     renderBinding={kind=><WorldMcpMatrix key={person+kind} mode="bind" only={kind} person={person} worldEntries={worldEntries} setWorldEntries={setWorldEntries}/>}
   />
-    {toast&&(()=>{const env=['task_result','proactive_result'].includes(toast.kind)?parseTaskEnvelope(toast.content):null;return <div className="inbox-toast" role="status"><button type="button" className="inbox-toast-main" onClick={()=>openInboxMessage(toast)}><b><IconMail className="ui-icon-inline" size={14}/> {displayName(toast.person)} · {env?(toast.kind==='proactive_result'?'主动消息':'定时任务结果'):toast.kind==='test'?'通知测试':'新消息'}</b><span>{env?env.answer||'（任务已完成，无文字总结）':toast.content}</span><small>{env?'点击查看结果会话':'点击打开聊天'}</small></button><button type="button" aria-label="收起消息" className="inbox-toast-dismiss" onClick={()=>setToast(null)}><IconClose size={15}/></button></div>})()}
+    {toast&&(()=>{const env=['task_result','proactive_result','hearing_result'].includes(toast.kind)?parseTaskEnvelope(toast.content):null;return <div className="inbox-toast" role="status"><button type="button" className="inbox-toast-main" onClick={()=>openInboxMessage(toast)}><b><IconMail className="ui-icon-inline" size={14}/> {displayName(toast.person)} · {env?(toast.kind==='hearing_result'?'听觉消息':toast.kind==='proactive_result'?'主动消息':'定时任务结果'):toast.kind==='test'?'通知测试':'新消息'}</b><span>{env?env.answer||'（任务已完成，无文字总结）':toast.content}</span><small>{env?'点击查看结果会话':'点击打开聊天'}</small></button><button type="button" aria-label="收起消息" className="inbox-toast-dismiss" onClick={()=>setToast(null)}><IconClose size={15}/></button></div>})()}
     {fallbackNotice ? <div className="cloud-status error fallback-notice" role="status"><span><IconWarning className="ui-icon-inline" size={14}/> {fallbackNotice}</span><button onClick={()=>{setFallbackNotice('');setOpenSettingsSignal(value=>value+1)}}>去设置重新连接</button><button onClick={()=>setFallbackNotice('')}>知道了</button></div> : ((!isLocalMode()||cloudStatus==='error')&&cloudStatus!=='saved' && <div className={'cloud-status '+cloudStatus} role="status"><span>{cloudStatus==='saving'?(isLocalMode()?'本地保存中…':'云端保存中…'):cloudStatus==='error'?(isLocalMode()?'本地保存失败，请检查浏览器存储空间':'云端暂不可用，本地数据已保留'):'连接云端…'}</span>{cloudStatus==='error'&&<button onClick={retryCloudConnection}>{isLocalMode()?'重试保存':'重连云端'}</button>}</div>)}
     <UiDialogHost/>
     <WebBrowser page={webPage} onClose={() => setWebPage(null)}/>

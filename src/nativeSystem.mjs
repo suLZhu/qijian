@@ -54,6 +54,17 @@ async function fetchThroughBridge(policy, url, { method = 'GET', headers, body, 
   const b = bridge()
   if (!nativeHttpStreamAvailable()) throw new Error('需要支持模型网络分流的 App 原生网络桥，请更新 APK 或连接栖间服务器')
   signal?.throwIfAborted()
+  const binary = body instanceof ArrayBuffer || ArrayBuffer.isView(body) || body instanceof Blob
+  let payload = String(body ?? '')
+  if (binary) {
+    if (typeof b.modelHttpBinary !== 'function') throw new Error('音频上传需要更新 APK')
+    const bytes = body instanceof Blob ? new Uint8Array(await body.arrayBuffer()) : body instanceof ArrayBuffer ? new Uint8Array(body) : new Uint8Array(body.buffer, body.byteOffset, body.byteLength)
+    if (bytes.byteLength > 26 * 1024 * 1024) throw new Error('上传文件过大')
+    let raw = ''
+    for (let i = 0; i < bytes.length; i += 8192) raw += String.fromCharCode(...bytes.subarray(i, i + 8192))
+    payload = btoa(raw)
+  } else if (body != null && typeof body !== 'string') throw new Error('原生网络桥不支持此请求体类型')
+  signal?.throwIfAborted()
   install()
   const id = 'model-' + Date.now() + '-' + Math.random().toString(36).slice(2)
   return new Promise((resolve, reject) => {
@@ -94,7 +105,9 @@ async function fetchThroughBridge(policy, url, { method = 'GET', headers, body, 
       } catch (error) { fail(error) }
     })
     try {
-      b.modelHttp(id, policy, method, String(url), JSON.stringify(Object.fromEntries(new Headers(headers))), String(body ?? ''))
+      const args = [id, policy, method, String(url), JSON.stringify(Object.fromEntries(new Headers(headers))), payload]
+      if (binary) b.modelHttpBinary(...args)
+      else b.modelHttp(...args)
     } catch (error) { fail(error) }
   })
 }

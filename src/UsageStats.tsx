@@ -1,4 +1,4 @@
-import { usageRows } from './usageLedger.mjs'
+import { usageRows, readMediaUsage } from './usageLedger.mjs'
 import { useEffect, useMemo, useState } from 'react'
 import { localAgentUsageMessages, subscribeLocalAgentEvents } from './localAgentRuns.mjs'
 import { SoftSelect } from './SoftSelect'
@@ -58,7 +58,7 @@ export function UsageStats({ people, conversations, models, displayName }: {
     return Object.fromEntries(people.map(person => {
       let agentMessages: Msg[] = []
       try { agentMessages = localAgentUsageMessages(person) } catch { /* storage unavailable */ }
-      return [person, usageRows([...(conversations[person] || []),{messages:[...agentMessages]}])]
+      return [person, usageRows([...(conversations[person] || []),{messages:[...readMediaUsage(localStorage,person), ...agentMessages]}])]
     }))
   }, [people, conversations, runRevision])
 

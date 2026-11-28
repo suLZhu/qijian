@@ -18,3 +18,10 @@ export function usageRows(conversations) {
   }
   return [...groups.values()].sort((a, b) => b.lastAt.localeCompare(a.lastAt))
 }
+
+export function readMediaUsage(storage,person){
+  try{const rows=JSON.parse(storage.getItem('ai-home.mediaUsage.'+person)||'[]');return Array.isArray(rows)?rows:[]}catch{return []}
+}
+export function recordMediaUsage(storage,person,usage){
+  try{const rows=readMediaUsage(storage,person);rows.push({role:'assistant',usage});storage.setItem('ai-home.mediaUsage.'+person,JSON.stringify(rows))}catch{/* storage unavailable */}
+}
