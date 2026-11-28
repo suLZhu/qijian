@@ -1,12 +1,12 @@
-// 房间工作区里的小组件：记账本 / 清单 / 便签 / 计数器。
+// 房间工作区里的小组件：清单 / 便签 / 计数器。
 // 助手通过 widget_* 工具创建，长期保存；只有用户点删除才会消失。
 import { useCallback, useEffect, useRef, useState } from 'react'
 import './RoomWidgets.css'
 import { apiFetch } from './apiBase.mjs'
 import { confirmDialog } from './uiDialog'
-import { IconCheck, IconChevronRight, IconClose, IconEdit, IconGrid, IconLedger, IconMinus, IconPlus, IconSparkles, IconTrash, type IconComponent } from './icons'
+import { IconCheck, IconChevronRight, IconClose, IconEdit, IconGrid, IconMinus, IconPlus, IconSparkles, IconTrash, type IconComponent } from './icons'
 
-export type WidgetType = 'custom' | 'ledger' | 'checklist' | 'note' | 'counter'
+export type WidgetType = 'custom' | 'checklist' | 'note' | 'counter'
 export type RoomWidget = {
   id: string
   person: string
@@ -19,34 +19,13 @@ export type RoomWidget = {
 
 const TYPE_META: Record<WidgetType, { icon: IconComponent; label: string }> = {
   custom: { icon: IconSparkles, label: 'AI 小组件' },
-  ledger: { icon: IconLedger, label: '记账本' },
   checklist: { icon: IconCheck, label: '清单' },
   note: { icon: IconEdit, label: '便签' },
   counter: { icon: IconGrid, label: '计数器' },
 }
 
-function money(value: number): string {
-  const n = Number(value) || 0
-  return (n < 0 ? '-¥' : '¥') + Math.abs(n).toFixed(2)
-}
-
-function ledgerTotals(config: any) {
-  const entries = Array.isArray(config?.entries) ? config.entries : []
-  let expense = 0, income = 0
-  for (const entry of entries) {
-    const amount = Number(entry?.amount) || 0
-    if (entry?.kind === 'income') income += amount
-    else expense += amount
-  }
-  return { expense, income, balance: income - expense, entries }
-}
-
 function summary(widget: RoomWidget): string {
   if (widget.type === 'custom') return String(widget.config?.summary || '').trim() || 'AI 定制小组件'
-  if (widget.type === 'ledger') {
-    const { balance, entries } = ledgerTotals(widget.config)
-    return entries.length ? '结余 ' + money(balance) + ' · ' + entries.length + ' 笔' : '还没有记账'
-  }
   if (widget.type === 'checklist') {
     const items = Array.isArray(widget.config?.items) ? widget.config.items : []
     const done = items.filter((item: any) => item?.done).length
@@ -81,7 +60,7 @@ export function RoomWidgets({ person }: { person: string }) {
 
   if (!widgets.length && !error) return <div className="room-widgets-empty">
     <span aria-hidden="true"><IconGrid size={18}/></span>
-    <small>还没有小组件。在聊天里说「给我建一个记账本」，它会一直留在这里。</small>
+    <small>还没有小组件。在聊天里说「给我建一个清单」，它会一直留在这里。</small>
   </div>
 
   return <div className="room-widgets">
@@ -151,9 +130,6 @@ function WidgetSheet({ widget, onClose, onSaved }: { widget: RoomWidget; onClose
   const [title, setTitle] = useState(widget.title)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
-  const [amount, setAmount] = useState('')
-  const [note, setNote] = useState('')
-  const [kind, setKind] = useState<'expense' | 'income'>('expense')
   const [item, setItem] = useState('')
   const [noteText, setNoteText] = useState(String(widget.config?.text || ''))
   const customTimerRef = useRef<number | undefined>(undefined)
@@ -219,20 +195,6 @@ function WidgetSheet({ widget, onClose, onSaved }: { widget: RoomWidget; onClose
     await save({ title: nextTitle })
   }
 
-  async function addLedger() {
-    const value = Number(amount)
-    if (!Number.isFinite(value) || value === 0) { setError('金额不能为 0'); return }
-    const entries = Array.isArray(current.config?.entries) ? current.config.entries : []
-    const next = { ...current.config, entries: [...entries, { id: crypto.randomUUID(), amount: Math.abs(value), note: note.trim(), kind, at: new Date().toISOString() }] }
-    const saved = await save({ config: next })
-    if (saved) { setAmount(''); setNote('') }
-  }
-
-  async function removeEntry(id: string) {
-    const entries = (Array.isArray(current.config?.entries) ? current.config.entries : []).filter((entry: any) => entry.id !== id)
-    await save({ config: { ...current.config, entries } })
-  }
-
   async function addItem() {
     if (!item.trim()) return
     const items = Array.isArray(current.config?.items) ? current.config.items : []
@@ -277,7 +239,6 @@ function WidgetSheet({ widget, onClose, onSaved }: { widget: RoomWidget; onClose
     finally { setBusy(false) }
   }
 
-  const ledger = ledgerTotals(current.config)
   return <div className="widget-sheet-scrim" onClick={() => void closeSheet()}>
     <div className="widget-sheet" role="dialog" aria-modal="true" aria-label={current.title} onClick={event => event.stopPropagation()}>
       <div className="widget-sheet-head">
@@ -290,28 +251,6 @@ function WidgetSheet({ widget, onClose, onSaved }: { widget: RoomWidget; onClose
       {current.type === 'custom' && <>
         <CustomWidgetFrame widget={current} onData={saveCustomData}/>
         <p className="custom-widget-hint">AI 定制小组件 · 数据自动保存在这台设备</p>
-      </>}
-
-      {current.type === 'ledger' && <>
-        <div className="widget-ledger-total">
-          <span><small>支出</small><b>{money(ledger.expense)}</b></span>
-          <span><small>收入</small><b>{money(ledger.income)}</b></span>
-          <span><small>结余</small><b className={ledger.balance < 0 ? 'negative' : ''}>{money(ledger.balance)}</b></span>
-        </div>
-        <form className="widget-add-row" onSubmit={event => { event.preventDefault(); void addLedger() }}>
-          <input inputMode="decimal" value={amount} onChange={event => setAmount(event.target.value)} placeholder="金额" aria-label="金额" />
-          <input value={note} onChange={event => setNote(event.target.value)} placeholder="备注（可选）" aria-label="备注" />
-          <button type="button" className={'widget-kind' + (kind === 'income' ? ' income' : '')} onClick={() => setKind(kind === 'income' ? 'expense' : 'income')}>{kind === 'income' ? '收入' : '支出'}</button>
-          <button type="submit" disabled={busy}>记一笔</button>
-        </form>
-        <div className="widget-entries">
-          {ledger.entries.length === 0 ? <p className="widget-empty">还没有记录。</p> : ledger.entries.slice().reverse().map((entry: any) =>
-            <div className="widget-entry" key={entry.id}>
-              <span className="widget-entry-main"><b>{entry.note || (entry.kind === 'income' ? '收入' : '支出')}</b><small>{new Date(entry.at).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}</small></span>
-              <span className={'widget-entry-amount ' + (entry.kind === 'income' ? 'income' : '')}>{entry.kind === 'income' ? '+' : '-'}{money(entry.amount)}</span>
-              <button type="button" className="widget-entry-delete" aria-label="删除这笔" onClick={() => void removeEntry(entry.id)}><IconTrash size={14}/></button>
-            </div>)}
-        </div>
       </>}
 
       {current.type === 'checklist' && <>

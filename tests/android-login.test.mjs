@@ -400,3 +400,14 @@ test('服务器任务、账本和日记备份可恢复，坏记录使整次事�
     database.close()
   }
 })
+
+test('服务器停用旧账本和日记接口，不删除已保存数据',async()=>{
+  const headers={Authorization:'Bearer '+(await login()).body.token,'Content-Type':'application/json'}
+  const db=new DatabaseSync(join(dbDir,'test.sqlite'))
+  const id='dddddddd-dddd-4ddd-8ddd-dddddddddddd'
+  try {
+    db.prepare('INSERT INTO diary_entries VALUES (?,?,?,?,?,?,?,?,?)').run(id,'user','旧日记','public','保留',null,null,null,'2026-01-01')
+    for(const path of ['/api/diary','/api/ledger']) assert.equal((await fetch(BASE+path,{headers})).status,404)
+    assert.equal(db.prepare('SELECT body FROM diary_entries WHERE id=?').get(id).body,'保留')
+  } finally {db.prepare('DELETE FROM diary_entries WHERE id=?').run(id);db.close()}
+})

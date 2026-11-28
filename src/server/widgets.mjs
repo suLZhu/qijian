@@ -1,7 +1,7 @@
-// 房间小组件：助手可以创建长期存在的记账本 / 清单 / 便签 / 计数器。
+// 房间小组件：助手可以创建长期存在的清单 / 便签 / 计数器。
 // 与服务端/本地模式共用同一套归一化逻辑；配置是 JSON，写库前先清洗。
-export const WIDGET_TYPES = ['custom', 'ledger', 'checklist', 'note', 'counter']
-export const WIDGET_TITLES = { custom: '小组件', ledger: '记账本', checklist: '清单', note: '便签', counter: '计数器' }
+export const WIDGET_TYPES = ['custom', 'checklist', 'note', 'counter']
+export const WIDGET_TITLES = { custom: '小组件', checklist: '清单', note: '便签', counter: '计数器' }
 
 function text(value, max) {
   return String(value == null ? '' : value).trim().slice(0, max)
@@ -16,7 +16,6 @@ function uid() {
 
 export function defaultConfig(type) {
   if (type === 'custom') return { html: '', data: {}, summary: '' }
-  if (type === 'ledger') return { currency: 'CNY', entries: [] }
   if (type === 'checklist') return { items: [] }
   if (type === 'note') return { text: '' }
   return { count: 0, step: 1 }
@@ -32,17 +31,6 @@ export function normalizeConfig(type, raw) {
       if (encoded.length > 60000) data = {}
     } catch { data = {} }
     return { html, data, summary: String(config.summary == null ? '' : config.summary).slice(0, 80) }
-  }
-  if (type === 'ledger') {
-    if (Array.isArray(config.entries) && config.entries.length > 200) throw Object.assign(new Error('记账组件已达 200 条上限，未保存新记录'), {status:400})
-    const entries = (Array.isArray(config.entries) ? config.entries : []).map(entry => ({
-      id: text(entry?.id, 80) || uid(),
-      amount: Math.round(Math.abs(Number(entry?.amount) || 0) * 100) / 100,
-      note: text(entry?.note, 120),
-      kind: entry?.kind === 'income' ? 'income' : 'expense',
-      at: text(entry?.at, 40) || new Date().toISOString(),
-    })).filter(entry => entry.amount !== 0)
-    return { currency: text(config.currency, 8) || 'CNY', entries }
   }
   if (type === 'checklist') {
     if (Array.isArray(config.items) && config.items.length > 200) throw Object.assign(new Error('清单组件已达 200 项上限，未保存新内容'), {status:400})
@@ -85,10 +73,11 @@ export function mapWidget(row) {
 }
 
 export function listWidgets(db, person) {
-  return db.prepare('SELECT * FROM room_widgets WHERE person=? ORDER BY created_at ASC').all(String(person || '')).map(mapWidget)
+  return db.prepare("SELECT * FROM room_widgets WHERE person=? AND type <> 'ledger' ORDER BY created_at ASC").all(String(person || '')).map(mapWidget)
 }
 
 export function createWidget(db, person, input = {}) {
+  if (input.type === 'ledger') throw Object.assign(new Error('该小组件已停用'), {status:400})
   const type = WIDGET_TYPES.includes(input.type) ? input.type : 'note'
   const title = text(input.title, 60) || WIDGET_TITLES[type]
   const config = normalizeConfig(type, input.config)
@@ -101,7 +90,7 @@ export function createWidget(db, person, input = {}) {
 
 export function updateWidget(db, id, person, patch = {}) {
   const row = db.prepare('SELECT * FROM room_widgets WHERE id=? AND person=?').get(String(id || ''), String(person || ''))
-  if (!row) throw Object.assign(new Error('小组件不存在或不属于当前助手'), { status: 404 })
+  if (!row || row.type === 'ledger') throw Object.assign(new Error('小组件不存在或不属于当前助手'), { status: 404 })
   const current = mapWidget(row)
   const title = patch.title != null ? (text(patch.title, 60) || current.title) : current.title
   const config = patch.config != null ? normalizeConfig(current.type, patch.config) : current.config
@@ -111,6 +100,6 @@ export function updateWidget(db, id, person, patch = {}) {
 }
 
 export function deleteWidget(db, id, person) {
-  const result = db.prepare('DELETE FROM room_widgets WHERE id=? AND person=?').run(String(id || ''), String(person || ''))
+  const result = db.prepare("DELETE FROM room_widgets WHERE id=? AND person=? AND type <> 'ledger'").run(String(id || ''), String(person || ''))
   return result.changes > 0
 }

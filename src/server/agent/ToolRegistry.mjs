@@ -6,7 +6,6 @@
 //     whatever the model put in `person` is overwritten before execution.
 //  2. MCP tool names are namespaced per connection so two servers exposing the
 //     same tool name can never shadow each other.
-import { randomUUID } from 'node:crypto'
 import { searchMemoryIndex } from '../../memoryIndex.mjs'
 import { SQLiteMemoryProvider } from './MemoryStore.mjs'
 
@@ -102,52 +101,6 @@ const BUILTINS = [
         .slice(0, 5)
         .map(e => ({ id: e.id, title: e.title, content: String(e.content || '').slice(0, 800) }))
       return { results: hits }
-    },
-  },
-  {
-    name: 'ledger_list',
-    source: 'ledger',
-    readOnly: true,
-    definition: def('ledger_list', '读取共享账本最近的收支记录。', {
-      limit: { type: 'integer', description: '返回条数，默认 20，最多 100' },
-    }, []),
-    run(db, _person, args) {
-      const limit = Math.min(100, Math.max(1, Number(args.limit) || 20))
-      const rows = db.prepare('SELECT id,kind,amount_cents,currency,category,note,entry_date,created_by,created_at FROM ledger_entries ORDER BY entry_date DESC,created_at DESC LIMIT ?').all(limit)
-      return { entries: rows.map(r => ({ id: r.id, kind: r.kind, amount: r.amount_cents / 100, currency: r.currency, category: r.category, note: r.note, date: r.entry_date, createdBy: r.created_by })) }
-    },
-  },
-  {
-    name: 'ledger_add',
-    source: 'ledger',
-    readOnly: false,
-    definition: def('ledger_add', '记一笔账（写操作）。只有用户明确要求记账时才可调用；调用成功才算已记账。', {
-      kind: { type: 'string', enum: ['income', 'expense'], description: 'income 收入 / expense 支出' },
-      amount: { type: 'number', description: '金额（元），必须大于 0' },
-      currency: { type: 'string', enum: ['CNY', 'JPY', 'USD', 'EUR', 'HKD'], description: '币种，默认 CNY' },
-      category: { type: 'string', description: '分类，默认 其他' },
-      note: { type: 'string', description: '备注' },
-      date: { type: 'string', description: '日期 YYYY-MM-DD' },
-    }, ['kind', 'amount', 'date']),
-    run(db, person, args) {
-      if (!['income', 'expense'].includes(args.kind)) throw Object.assign(new Error('收支类型无效'), { status: 400 })
-      const cents = Math.round(Number(args.amount) * 100)
-      if (!Number.isSafeInteger(cents) || cents <= 0 || cents > 1e12) throw Object.assign(new Error('金额无效'), { status: 400 })
-      const currency = String(args.currency || 'CNY').toUpperCase()
-      if (!['CNY', 'JPY', 'USD', 'EUR', 'HKD'].includes(currency)) throw Object.assign(new Error('暂不支持此币种'), { status: 400 })
-      const date = String(args.date || '')
-      if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || Number.isNaN(Date.parse(date + 'T00:00:00Z')) || new Date(date + 'T00:00:00Z').toISOString().slice(0, 10) !== date) throw Object.assign(new Error('日期无效'), { status: 400 })
-      const category = String(args.category || '其他').trim().slice(0, 40)
-      const note = String(args.note || '').trim().slice(0, 300)
-      const requestId = randomUUID()
-      const id = randomUUID(), now = new Date().toISOString()
-      db.exec('BEGIN IMMEDIATE')
-      try {
-        db.prepare('INSERT INTO ledger_entries (id,kind,amount_cents,currency,category,note,entry_date,created_by,created_at) VALUES (?,?,?,?,?,?,?,?,?)').run(id, args.kind, cents, currency, category, note, date, person, now)
-        db.prepare('INSERT INTO ledger_operations (request_id,entry_id,actor,created_at) VALUES (?,?,?,?)').run(requestId, id, person, now)
-        db.exec('COMMIT')
-      } catch (e) { db.exec('ROLLBACK'); throw e }
-      return { ok: true, id }
     },
   },
 ]

@@ -191,7 +191,7 @@ export function ToolDashboard({ person, personLabel, onJumpToSource }: {
   }
 
   // 已知工具的策略编辑器（MCP 工具名按运行记录动态补充）。
-  const knownTools = ['ledger_add', 'ledger_list', 'memory_search', 'memory_add', 'worldbook_search']
+  const knownTools = ['memory_search', 'memory_add', 'worldbook_search']
   for (const log of logs) if (log.toolName && !knownTools.includes(log.toolName) && log.source !== 'mcp') knownTools.push(log.toolName)
   const policyTools = [...new Set([...knownTools, ...Object.keys(policies)])].slice(0, 12)
 

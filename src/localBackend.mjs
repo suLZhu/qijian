@@ -37,8 +37,6 @@ const K = {
   state: 'ai-home.local.state',
   stateUpdatedAt: 'ai-home.local.stateUpdatedAt',
   keys: 'ai-home.local.keys',
-  ledger: 'ai-home.local.ledger',
-  diary: 'ai-home.local.diary',
   toolLogs: 'ai-home.local.toolLogs',
   memoryRecords: 'ai-home.local.memoryRecords',
   mcp: 'ai-home.local.mcp',
@@ -174,12 +172,7 @@ function b64ToBytes(b64) {
   return out
 }
 
-function bytesToB64(bytes) {
-  let bin = ''
-  const view = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes)
-  for (let i = 0; i < view.length; i++) bin += String.fromCharCode(view[i])
-  return btoa(bin)
-}
+
 
 function makeAttUrl(rec) {
   try {
@@ -207,28 +200,6 @@ export function localAttachmentUrl(preview) {
   const m = /^\/api\/attachments\/([^/?#]+)$/.exec(String(preview == null ? '' : preview))
   if (!m) return preview
   return attUrls.get(decodeURIComponent(m[1])) || preview
-}
-
-// ── 日记加密（WebCrypto AES-256-GCM + PBKDF2）──────────────────────────────
-async function deriveAesKey(secret, salt) {
-  const subtle = globalThis.crypto && globalThis.crypto.subtle
-  if (!subtle) throw new Error('当前环境不支持加密存储（需要 https 或 localhost）')
-  const base = await subtle.importKey('raw', new TextEncoder().encode(String(secret)), 'PBKDF2', false, ['deriveKey'])
-  return subtle.deriveKey({ name: 'PBKDF2', salt, iterations: 100_000, hash: 'SHA-256' }, base, { name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt'])
-}
-
-async function encryptText(secret, text) {
-  const salt = crypto.getRandomValues(new Uint8Array(16))
-  const iv = crypto.getRandomValues(new Uint8Array(12))
-  const key = await deriveAesKey(secret, salt)
-  const ct = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, new TextEncoder().encode(text))
-  return { salt: bytesToB64(salt), iv: bytesToB64(iv), body: bytesToB64(new Uint8Array(ct)) }
-}
-
-async function decryptText(secret, rec) {
-  const key = await deriveAesKey(secret, b64ToBytes(rec.salt))
-  const pt = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: b64ToBytes(rec.iv) }, key, b64ToBytes(rec.body))
-  return new TextDecoder().decode(pt)
 }
 
 // ── 本地记忆检索（镜像 server 端 searchMemoryIndex 的分词与打分语义）──────
@@ -851,11 +822,12 @@ export async function localHandle(path, init) {
     if (p === '/api/widgets' && method === 'GET') {
       const person = q.get('person') || ''
       const all = readJSON(K.widgets, [])
-      return json(200, { widgets: (Array.isArray(all) ? all : []).filter(w => w && w.person === person) })
+      return json(200, { widgets: (Array.isArray(all) ? all : []).filter(w => w && w.person === person && w.type !== 'ledger') })
     }
     if (p === '/api/widgets' && method === 'POST') {
       const body = await readBody(init).catch(() => null)
       if (!body || !body.person) return json(400, { error: '缺少人物' })
+      if (body.type === 'ledger') return json(400, {error:'该小组件已停用'})
       const type = WIDGET_TYPES.includes(body.type) ? body.type : 'note'
       const now = new Date().toISOString()
       const widget = {
@@ -878,6 +850,7 @@ export async function localHandle(path, init) {
       const index = all.findIndex(w => w && w.id === widgetMatch[1] && w.person === body.person)
       if (index < 0) return json(404, { error: '小组件不存在' })
       const current = all[index]
+      if (current.type === 'ledger') return json(404, {error:'小组件不存在'})
       const next = {
         ...current,
         title: body.title != null ? String(body.title).slice(0, 60) || current.title : current.title,
@@ -892,107 +865,7 @@ export async function localHandle(path, init) {
       const body = await readBody(init).catch(() => null)
       if (!body || !body.person) return json(400, { error: '缺少人物' })
       const all = readJSON(K.widgets, [])
-      writeJSON(K.widgets, all.filter(w => !(w && w.id === widgetMatch[1] && w.person === body.person)))
-      return json(200, { ok: true })
-    }
-
-    if (p === '/api/ledger' && method === 'GET') {
-      const entries = readJSON(K.ledger, []).map(e => ({
-        id: e.id, kind: e.kind, amount: e.amount, currency: e.currency, category: e.category,
-        note: e.note, date: e.date, createdBy: e.createdBy, createdAt: e.createdAt,
-      }))
-      return json(200, { entries })
-    }
-    if (p === '/api/ledger' && method === 'POST') {
-      const b = await readBody(init)
-      if (!['income', 'expense'].includes(b.kind)) return json(400, { error: '收支类型无效' })
-      const amount = Number(b.amount)
-      if (!Number.isFinite(amount) || amount <= 0 || amount > 1e10) return json(400, { error: '金额无效' })
-      const currency = String(b.currency || 'CNY').toUpperCase()
-      if (!['CNY', 'JPY', 'USD', 'EUR', 'HKD'].includes(currency)) return json(400, { error: '暂不支持此币种' })
-      const date = String(b.date || '')
-      if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || Number.isNaN(Date.parse(date + 'T00:00:00Z')) || new Date(date + 'T00:00:00Z').toISOString().slice(0, 10) !== date) return json(400, { error: '日期无效' })
-      const requestId = String(b.requestId || '')
-      if (!/^[a-zA-Z0-9_-]{12,100}$/.test(requestId)) return json(400, { error: '请求编号无效' })
-      const all = readJSON(K.ledger, [])
-      const prior = all.find(e => e && e.requestId === requestId)
-      if (prior) return json(200, { ok: true, id: prior.id, duplicate: true })
-      if (all.length >= 5000) return json(507, { error: '本机账目已达容量上限，未新增账目，已有记录均已保留' })
-      const entry = {
-        id: uuid(), kind: b.kind, amount, currency,
-        category: String(b.category || '其他').trim().slice(0, 40),
-        note: String(b.note || '').trim().slice(0, 300),
-        date, createdBy: String(b.actor || 'user'), createdAt: nowISO(), requestId,
-      }
-      all.unshift(entry)
-      try { writeJSON(K.ledger, all) } catch { return json(500, { error: '本地存储写入失败' }) }
-      return json(201, { ok: true, id: entry.id })
-    }
-    const ledgerDel = p.match(/^\/api\/ledger\/([0-9a-f-]{36})$/)
-    if (ledgerDel && method === 'DELETE') {
-      const all = readJSON(K.ledger, [])
-      const next = all.filter(e => !(e && e.id === ledgerDel[1]))
-      if (next.length === all.length) return json(404, { error: '账目不存在' })
-      try { writeJSON(K.ledger, next) } catch { return json(500, { error: '本地存储写入失败' }) }
-      return json(200, { ok: true })
-    }
-
-    // ── 日记本（上锁日记 WebCrypto 加密存储） ──
-    if (p === '/api/diary' && method === 'GET') {
-      const entries = readJSON(K.diary, [])
-        .slice()
-        .sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)))
-        .map(r => ({
-          id: r.id, owner: r.owner, title: r.title, visibility: r.visibility,
-          date: String(r.created_at || '').slice(0, 10),
-          ...(r.visibility === 'public' ? { content: r.body } : {}),
-        }))
-      return json(200, { entries })
-    }
-    if (p === '/api/diary' && method === 'POST') {
-      const b = await readBody(init)
-      const owner = String(b.owner || '').trim()
-      if (!owner) return json(400, { error: '作者无效' })
-      if (!['public', 'locked'].includes(b.visibility)) return json(400, { error: '公开状态无效' })
-      const title = String(b.title || '').trim()
-      const content = String(b.content || '')
-      if (!title || title.length > 100 || !content.trim() || content.length > 20000) return json(400, { error: '标题或正文无效' })
-      const all = readJSON(K.diary, [])
-      if (all.length >= 1000) return json(507, { error: '本机日记已达容量上限，未新增日记，已有记录均已保留' })
-      const record = { id: uuid(), owner, title, visibility: b.visibility, created_at: nowISO() }
-      if (b.visibility === 'locked') {
-        const secret = String(b.secret || '')
-        if (secret.length < 6 || secret.length > 100) return json(400, { error: '暗号需为6至100位' })
-        try {
-          const enc = await encryptText(secret, content)
-          Object.assign(record, { body: enc.body, salt: enc.salt, iv: enc.iv })
-        } catch (error) { return json(500, { error: error.message || '加密存储不可用' }) }
-      } else {
-        record.body = content
-      }
-      all.unshift(record)
-      try { writeJSON(K.diary, all) } catch { return json(500, { error: '本地存储写入失败' }) }
-      return json(201, { ok: true, id: record.id })
-    }
-    const diaryRead = p.match(/^\/api\/diary\/([0-9a-f-]{36})\/read$/)
-    if (diaryRead && method === 'POST') {
-      const b = await readBody(init)
-      const record = readJSON(K.diary, []).find(r => r && r.id === diaryRead[1])
-      if (!record) return json(404, { error: '日记不存在' })
-      if (record.visibility === 'public') return json(200, { content: record.body })
-      const secret = String(b.secret || '')
-      if (!secret || secret.length > 100) return json(400, { error: '请提供暗号' })
-      try {
-        const content = await decryptText(secret, record)
-        return json(200, { content })
-      } catch { return json(403, { error: '暗号错误或日记无法解锁' }) }
-    }
-    const diaryDel = p.match(/^\/api\/diary\/([0-9a-f-]{36})$/)
-    if (diaryDel && method === 'DELETE') {
-      const all = readJSON(K.diary, [])
-      const next = all.filter(r => !(r && r.id === diaryDel[1]))
-      if (next.length === all.length) return json(404, { error: '日记不存在' })
-      try { writeJSON(K.diary, next) } catch { return json(500, { error: '本地存储写入失败' }) }
+      writeJSON(K.widgets, all.filter(w => !(w && w.id === widgetMatch[1] && w.person === body.person && w.type !== 'ledger')))
       return json(200, { ok: true })
     }
 

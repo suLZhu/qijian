@@ -1,7 +1,7 @@
 import { normalizeIntervalMinutes } from './localTasks.mjs'
 import { subscriptionFetch, directFetch } from './server/outboundFetch.mjs'
 import { createServer } from 'node:http'
-import { randomBytes, createHash, timingSafeEqual, createCipheriv, createDecipheriv, randomUUID, scryptSync } from 'node:crypto'
+import { randomBytes, createHash, timingSafeEqual, createCipheriv, createDecipheriv, randomUUID } from 'node:crypto'
 import { isIP } from 'node:net'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
@@ -632,54 +632,6 @@ const apiServer = createServer(async (req, res) => {
     } finally { releaseChat() }
   }
 
-  if (url.pathname === '/api/diary' && req.method === 'GET') {
-    const rows=db.prepare('SELECT id,owner,title,visibility,body,created_at FROM diary_entries ORDER BY created_at DESC LIMIT 500').all()
-    return send(res,200,{entries:rows.map(r=>({id:r.id,owner:r.owner,title:r.title,visibility:r.visibility,date:r.created_at.slice(0,10),...(r.visibility==='public'?{content:r.body}:{})}))})
-  }
-  if (url.pathname === '/api/diary' && req.method === 'POST') {
-    try {
-      const b=await readBody(req)
-      if(!(b.owner==='阿懒'||isValidAssistantId(b.owner)))return send(res,400,{error:'作者无效'})
-      if(!['public','locked'].includes(b.visibility))return send(res,400,{error:'公开状态无效'})
-      const title=String(b.title||'').trim(),content=String(b.content||'')
-      if(!title||title.length>100||!content.trim()||content.length>20000)return send(res,400,{error:'标题或正文无效'})
-      let body=content,salt=null,iv=null,tag=null
-      if(b.visibility==='locked'){
-        const secret=String(b.secret||'')
-        if(secret.length<6||secret.length>100)return send(res,400,{error:'暗号需为6至100位'})
-        salt=randomBytes(16).toString('hex');iv=randomBytes(12).toString('hex')
-        const key=scryptSync(secret,Buffer.from(salt,'hex'),32)
-        const cipher=createCipheriv('aes-256-gcm',key,Buffer.from(iv,'hex'))
-        body=Buffer.concat([cipher.update(content,'utf8'),cipher.final()]).toString('base64')
-        tag=cipher.getAuthTag().toString('hex')
-      }
-      const id=randomUUID()
-      db.prepare('INSERT INTO diary_entries(id,owner,title,visibility,body,salt,iv,tag,created_at) VALUES(?,?,?,?,?,?,?,?,?)').run(id,b.owner,title,b.visibility,body,salt,iv,tag,new Date().toISOString())
-      return send(res,201,{ok:true,id})
-    }catch(e){return send(res,400,{error:e.message||'保存失败'})}
-  }
-  const diaryRead=url.pathname.match(/^\/api\/diary\/([0-9a-f-]{36})\/read$/)
-  if(diaryRead&&req.method==='POST'){
-    try{
-      const b=await readBody(req)
-      const row=db.prepare('SELECT * FROM diary_entries WHERE id=?').get(diaryRead[1])
-      if(!row)return send(res,404,{error:'日记不存在'})
-      if(row.visibility==='public')return send(res,200,{content:row.body})
-      const secret=String(b.secret||'')
-      if(!secret||secret.length>100)return send(res,400,{error:'请提供暗号'})
-      const key=scryptSync(secret,Buffer.from(row.salt,'hex'),32)
-      const decipher=createDecipheriv('aes-256-gcm',key,Buffer.from(row.iv,'hex'))
-      decipher.setAuthTag(Buffer.from(row.tag,'hex'))
-      const content=Buffer.concat([decipher.update(Buffer.from(row.body,'base64')),decipher.final()]).toString('utf8')
-      return send(res,200,{content})
-    }catch{return send(res,403,{error:'暗号错误或日记无法解锁'})}
-  }
-  const diaryDelete=url.pathname.match(/^\/api\/diary\/([0-9a-f-]{36})$/)
-  if(diaryDelete&&req.method==='DELETE'){
-    const result=db.prepare('DELETE FROM diary_entries WHERE id=?').run(diaryDelete[1])
-    return send(res,result.changes?200:404,result.changes?{ok:true}:{error:'日记不存在'})
-  }
-
   // Tool call execution log. Rows are written by the frontend only at real tool
   // call sites; the server re-redacts every stored argument and result anyway.
   if (url.pathname === '/api/tool-logs' && req.method === 'GET') {
@@ -699,45 +651,6 @@ const apiServer = createServer(async (req, res) => {
       const body = await readBody(req)
       return send(res, 200, finishToolLog(db, toolLogMatch[1], body))
     } catch (error) { return send(res, error.status || 400, { error: error.message || '更新工具调用记录失败' }) }
-  }
-
-  if (url.pathname === '/api/ledger' && req.method === 'GET') {
-    const rows = db.prepare('SELECT id,kind,amount_cents,currency,category,note,entry_date,created_by,created_at FROM ledger_entries ORDER BY entry_date DESC,created_at DESC LIMIT 2000').all()
-    return send(res, 200, { entries: rows.map(r=>({ id:r.id,kind:r.kind,amount:r.amount_cents/100,currency:r.currency,category:r.category,note:r.note,date:r.entry_date,createdBy:r.created_by,createdAt:r.created_at })) })
-  }
-  if (url.pathname === '/api/ledger' && req.method === 'POST') {
-    try {
-      const b = await readBody(req)
-      if (!['income','expense'].includes(b.kind)) return send(res,400,{error:'收支类型无效'})
-      const cents = Math.round(Number(b.amount)*100)
-      if (!Number.isSafeInteger(cents)||cents<=0||cents>1e12) return send(res,400,{error:'金额无效'})
-      const currency=String(b.currency||'CNY').toUpperCase()
-      if (!['CNY','JPY','USD','EUR','HKD'].includes(currency)) return send(res,400,{error:'暂不支持此币种'})
-      const date=String(b.date||'')
-      if (!/^\d{4}-\d{2}-\d{2}$/.test(date)||Number.isNaN(Date.parse(date+'T00:00:00Z'))||new Date(date+'T00:00:00Z').toISOString().slice(0,10)!==date) return send(res,400,{error:'日期无效'})
-      const category=String(b.category||'其他').trim().slice(0,40)
-      const note=String(b.note||'').trim().slice(0,300)
-      const actor=String(b.actor||'user')
-      if (!(actor==='user'||isValidAssistantId(actor))) return send(res,400,{error:'操作者无效'})
-      const requestId=String(b.requestId||'')
-      // 幂等键直接复用模型的 tool_call id（形如 call_xxx，含下划线），因此允许下划线。
-      if (!/^[a-zA-Z0-9_-]{12,100}$/.test(requestId)) return send(res,400,{error:'请求编号无效'})
-      const prior=db.prepare('SELECT entry_id FROM ledger_operations WHERE request_id=?').get(requestId)
-      if(prior)return send(res,200,{ok:true,id:prior.entry_id,duplicate:true})
-      const id=randomUUID(),now=new Date().toISOString()
-      db.exec('BEGIN IMMEDIATE')
-      try{
-        db.prepare('INSERT INTO ledger_entries (id,kind,amount_cents,currency,category,note,entry_date,created_by,created_at) VALUES (?,?,?,?,?,?,?,?,?)').run(id,b.kind,cents,currency,category,note,date,actor,now)
-        db.prepare('INSERT INTO ledger_operations (request_id,entry_id,actor,created_at) VALUES (?,?,?,?)').run(requestId,id,actor,now)
-        db.exec('COMMIT')
-      }catch(e){db.exec('ROLLBACK');throw e}
-      return send(res,201,{ok:true,id})
-    } catch(e){return send(res,e.status||400,{error:e.message||'记账失败'})}
-  }
-  const ledgerDelete=url.pathname.match(/^\/api\/ledger\/([0-9a-f-]{36})$/)
-  if (ledgerDelete && req.method === 'DELETE') {
-    const result=db.prepare('DELETE FROM ledger_entries WHERE id=?').run(ledgerDelete[1])
-    return send(res,result.changes?200:404,result.changes?{ok:true}:{error:'账目不存在'})
   }
 
   if (url.pathname === '/api/mcp/test' && req.method === 'POST') {
