@@ -1,0 +1,13 @@
+<!doctype html><html><body><div id="app"></div><pre id="result">RUNNING</pre><script type="module">
+import React from 'react';import {createRoot} from 'react-dom/client';import AppLayout from '/src/AppLayout.tsx';import {handleBack} from '/src/backStack.mjs';
+const delay=ms=>new Promise(r=>setTimeout(r,ms));const pick=(s)=>document.querySelector(s);
+try{
+ const root=createRoot(pick('#app'));root.render(React.createElement(AppLayout,{assistants:[{id:'assistant-yanweixi',name:'小晏'}],conversations:{},activeIds:{}}));await delay(300);
+ pick('[aria-label="打开侧边栏"]').click();await delay(100);if(!pick('.qj-drawer'))throw Error('drawer not opened');
+ if(!handleBack())throw Error('back not consumed');await delay(100);if(pick('.qj-drawer'))throw Error('drawer not closed');
+ pick('[aria-label="打开侧边栏"]').click();await delay(100);pick('.qj-drawer-settings').click();await delay(100);
+ const settings=[...document.querySelectorAll('.qj-row')].find(e=>e.textContent.includes('外观与主题'));if(!settings)throw Error('settings not visible');settings.click();await delay(100);
+ if(!handleBack())throw Error('settings back not consumed');await delay(100);if(![...document.querySelectorAll('.qj-row')].some(e=>e.textContent.includes('外观与主题')))throw Error('did not return to settings');
+ pick('#result').textContent='PASS';root.unmount();
+}catch(e){pick('#result').textContent='FAIL '+(e.stack||e)}
+</script></body></html>

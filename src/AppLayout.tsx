@@ -83,23 +83,7 @@ function readAssistantState() {
 
 export default function AppLayout(props:AppLayoutProps = {}) {
   const [view, setView] = useState<View>(()=>{try{return sessionStorage.getItem('ai-home.afterRestoreSection')==='data'?'settings':'home'}catch{return 'home'}})
-  useEffect(() => { props.onViewChange?.(view) }, [view])
-  useEffect(() => {
-    if (!props.openChatSignal) return
-    setView('chat')
-    setSection(null)
-    setDrawer(false)
-    setToolsOpen(false)
-    setBindingPanel(null)
-  }, [props.openChatSignal])
-  useEffect(() => {
-    if (!props.openSettingsSignal) return
-    setView('settings')
-    setSection('数据与连接')
-    setDrawer(false)
-    setToolsOpen(false)
-    setBindingPanel(null)
-  }, [props.openSettingsSignal])
+  useEffect(() => { props.onViewChange?.(view) }, [view, props.onViewChange])
   const [storedData] = useState(readAssistantState)
   const data = { assistants: props.assistants || storedData.assistants, conversations: props.conversations || storedData.conversations, activeIds: props.activeIds || storedData.activeIds }
   const people = data.assistants.map(a=>a.id)
@@ -123,6 +107,22 @@ export default function AppLayout(props:AppLayoutProps = {}) {
   useEffect(()=>setHearingOpen(false),[props.person,view])
   const [pendingEdit,setPendingEdit]=useState<{scope:string;text:string}|null>(null)
   const [bindingPanel,setBindingPanel]=useState<'world'|'mcp'|null>(null)
+  useEffect(() => {
+    if (!props.openChatSignal) return
+    setView('chat')
+    setSection(null)
+    setDrawer(false)
+    setToolsOpen(false)
+    setBindingPanel(null)
+  }, [props.openChatSignal])
+  useEffect(() => {
+    if (!props.openSettingsSignal) return
+    setView('settings')
+    setSection('数据与连接')
+    setDrawer(false)
+    setToolsOpen(false)
+    setBindingPanel(null)
+  }, [props.openSettingsSignal])
   const scope=JSON.stringify([person,data.activeIds[person]||''])
   const [attachmentDrafts,setAttachmentDrafts]=useState<Record<string,Attachment[]>>({})
   const attachments=attachmentDrafts[scope]||[]
@@ -231,7 +231,7 @@ export default function AppLayout(props:AppLayoutProps = {}) {
     setBindingPanel(null)
   }
   const backState = useRef<()=>boolean>(()=>false)
-  backState.current=()=>{
+  useLayoutEffect(()=>{ backState.current=()=>{
     if(modelOpen){setModelOpen(false);return true}
     if(rename){setRename(null);return true}
     if(messageEdit){setMessageEdit(null);return true}
@@ -245,7 +245,7 @@ export default function AppLayout(props:AppLayoutProps = {}) {
     if(section){setSection(null);return true}
     if(view!=='home'){go('home');return true}
     return false
-  }
+  } })
   useEffect(()=>pushBackHandler(()=>backState.current()),[])
   const title = view === 'home' ? '栖间' : view === 'chat' ? displayName(person) : view === 'room' ? displayName(person) + '的房间' :
     view === 'settings' ? (section || '设置') :

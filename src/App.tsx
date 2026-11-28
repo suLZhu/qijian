@@ -824,10 +824,11 @@ export default function App() {
     if (data.chatPool && typeof data.chatPool === 'object') setChatPool(normalizePool(data.chatPool))
   }, [])
   const loadCloudState = useCallback(async () => {
+    if (!latestSnapshot.current) throw new Error('本机状态尚未准备好，请稍后重试')
     // 刚恢复过备份：先把恢复后的本地快照推到服务器，避免被旧云端快照盖回去。
     if (localStorage.getItem('ai-home.restorePending') === '1') {
       try {
-        await syncRestoredSnapshot(localStorage, latestSnapshot.current || getSnapshot(), state => apiFetch('/api/state', {
+        await syncRestoredSnapshot(localStorage, latestSnapshot.current, state => apiFetch('/api/state', {
           method: 'PUT', credentials: 'include', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ state }),
         }))
@@ -2209,6 +2210,7 @@ export default function App() {
   }
 
 
+  const onLayoutViewChange=useCallback((view:string)=>{setChatOpen(view==='chat');setPage(view==='home'?'home':view==='settings'||view==='theme'?'settings':'room')},[])
   if (apiSetupActive) return <ApiSetupScreen onSubmit={applyApiAddress}/>
   // 启动探测期（checking）用中性加载页：不再渲染 LoginScreen，避免真机上
   // 网络慢时闪现/停留「云端登录」页（用户反馈「一直会有登录云端」的一半来源）。
@@ -2334,7 +2336,7 @@ export default function App() {
     renderModelPicker={close=> <ModelPickerSheet profiles={modelProfiles} activeId={bindings[person]?.modelProfileId||defaultModelId||''} vendorKeys={allVendorKeys(vendors)} binding={bindings[person]||emptyBinding()} onPatchBinding={next=>setBindings(old=>({...old,[person]:next}))} onPick={id=>{setBindings(old=>({...old,[person]:{...(old[person]||emptyBinding()),modelProfileId:id}}));close()}} onClose={close} subscriptionVendorIds={vendors.filter(v=>v.subscription).map(v=>v.id)} vendors={vendors} routeState={routeState} setRouteState={setRouteState} lastRouteInfo={lastRouteInfo} person={person}/>}
     openSettingsSignal={openSettingsSignal}
     openChatSignal={openChatSignal}
-    onViewChange={view=>{setChatOpen(view==='chat');setPage(view==='home'?'home':view==='settings'||view==='theme'?'settings':'room')}}
+    onViewChange={onLayoutViewChange}
     assistants={assistants.map(a=>({id:a.id,name:a.name,avatar:characters[a.id]?.avatar||''}))}
     userAvatar={userSettings[person]?.avatar||''}
     userName={roomName}

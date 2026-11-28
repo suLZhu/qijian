@@ -1088,7 +1088,7 @@ export async function localHandle(path, init) {
       return catalog
     }
     if (p === '/api/mcp' && method === 'GET') {
-      return json(200, { connections: readMcpCatalog().map(({ token, ...row }) => row) })
+      return json(200, { connections: readMcpCatalog().map(({ token: _token, ...row }) => row) })
     }
     if (p === '/api/mcp/bindings' && method === 'GET') {
       const person = q.get('person') || ''
@@ -1119,7 +1119,7 @@ export async function localHandle(path, init) {
       const all = readMcpCatalog()
       const record = { id: uuid(), name, url: remote, transport: 'httpStream', enabled: true, token, updated_at: nowISO() }
       try { writeJSON(K.mcp, [record, ...all].slice(0, 200)) } catch { return json(500, { error: '本地服务保存失败' }) }
-      const { token: hidden, ...connection } = record
+      const { token: _token, ...connection } = record
       return json(201, { connection })
     }
     const mcpMatch = p.match(/^\/api\/mcp\/([a-f0-9-]+)(?:\/(tools|call))?$/)
@@ -1145,7 +1145,7 @@ export async function localHandle(path, init) {
       if (token.length > 8192) return json(400, { error: 'Token 长度超出限制' })
       all[i] = { ...all[i], name, url, token, enabled: b.enabled === undefined ? all[i].enabled !== false : !!b.enabled, updated_at: nowISO() }
       try { writeJSON(K.mcp, all) } catch { return json(500, { error: '本地更新失败' }) }
-      const { token: hidden, ...connection } = all[i]
+      const { token: _token, ...connection } = all[i]
       return json(200, { connection })
     }
     if (mcpMatch && method === 'POST' && ['tools', 'call'].includes(mcpMatch[2])) {

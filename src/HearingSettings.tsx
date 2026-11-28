@@ -29,7 +29,7 @@ export function HearingSettings({vendors,person,onUse}:{vendors:Vendor[];person:
     release()
     if(alive.current){setSentinelActive(false);setSentinelPhase('');setNotice('实时听觉已停止')}
     void apiFetch('/api/hearing/stop',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({person})}).catch(()=>{})
-  },[person,release])
+  },[person,release,setNotice])
   useEffect(()=>{alive.current=true;if(isLocalMode())void apiFetch('/api/hearing/stop',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({person})}).catch(()=>{});const hidden=()=>{if(document.hidden&&sentinel.current)stopSentinel()};document.addEventListener('visibilitychange',hidden);return ()=>{alive.current=false;document.removeEventListener('visibilitychange',hidden);if(sentinel.current)stopSentinel();active.current?.abort();if(recorder.current?.state==='recording')recorder.current.stop();release()}},[person,stopSentinel,release])
 
   async function startRecording(){
