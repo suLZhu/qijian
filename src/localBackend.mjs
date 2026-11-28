@@ -621,7 +621,7 @@ function startLocalProactive(person, conversationId, manual = false) {
   if (!decision.queued) return decision
   const selected = String(conversationId || readJSON('ai-home.activeConversationIds', {})[person] || '')
   if (!selected || !state.conversations?.[person]?.some(item => item?.id === selected)) return { queued:false, reason:'没有可用聊天会话' }
-  const run = startLocalAgentRun({ person, conversationId:selected, source:'proactive', internal:true, prompt:proactivePrompt(person, config.plan_note) + '\n本次自主行动不使用工具；不确定时可以选择沉默。' })
+  const run = startLocalAgentRun({ person, conversationId:selected, source:'proactive', internal:true, prompt:proactivePrompt(person, config.plan_note) + '\n本次只可使用自主计划便签工具，不可调用其他工具；不确定时可以选择沉默。' })
   const all = readJSON(K.proactiveEvents, [])
   const row = { id:uuid(), person, reason:manual?'用户手动测试唤醒':'自主心跳', mood:'curious', status:'pending', run_id:run.id, conversation_id:selected, created_at:nowISO(), updated_at:nowISO() }
   try { writeJSON(K.proactiveEvents, [row, ...all]) } catch (error) { cancelLocalAgentRun(run.id); throw error }
@@ -1287,6 +1287,16 @@ export async function localHandle(path, init) {
       return json(200, { ok: true })
     }
 
+    if (p === '/api/proactive/plan' && method === 'POST') {
+      const b = await readBody(init), person = String(b.person || '').trim(), note = String(b.note || '').trim()
+      const all = readJSON(K.proactive, {}), config = all[person]
+      if (!config?.enabled || !config.allow_chat) return json(403, {error:'自主生活权限已关闭'})
+      if (note.length > 1000) return json(400, {error:'自主计划不能超过1000字'})
+      all[person] = { ...config, plan_note:note, plan_updated_at:nowISO() }
+      writeJSON(K.proactive, all)
+      return json(200, {ok:true})
+    }
+
     // ── 自主生活：前台调度共用本地 Agent 执行器 ──
     if (p === '/api/proactive' && method === 'GET') {
       const person = q.get('person') || ''
@@ -1304,7 +1314,7 @@ export async function localHandle(path, init) {
         const mode = ['quiet', 'natural', 'lively'].includes(b.mode) ? b.mode : 'natural'
         const start = Number(b.quiet_start), end = Number(b.quiet_end), interval = Number(b.interval_hours), limit = Number(b.daily_wake_limit ?? readJSON(K.proactive, {})[person]?.daily_wake_limit ?? 6), tokenLimit = Number(b.daily_token_limit ?? readJSON(K.proactive, {})[person]?.daily_token_limit ?? 12000)
         if (!Number.isInteger(start) || start < 0 || start > 23 || !Number.isInteger(end) || end < 0 || end > 23 || !Number.isInteger(interval) || interval < 2 || interval > 72 || !Number.isInteger(limit) || limit < 1 || limit > 48 || !Number.isInteger(tokenLimit) || tokenLimit < 1000 || tokenLimit > 500000) return json(400, { error: '时间或每日唤醒上限无效' })
-        const settings = { person, enabled: b.enabled === true || b.enabled === 1 ? 1 : 0, mode, quiet_start: start, quiet_end: end, interval_hours: interval, daily_wake_limit: limit, daily_token_limit: tokenLimit, allow_chat: b.allow_chat ?? readJSON(K.proactive, {})[person]?.allow_chat ?? 1 ? 1 : 0, allow_memory_search: b.allow_memory_search ?? readJSON(K.proactive, {})[person]?.allow_memory_search ?? 1 ? 1 : 0, updated_at: nowISO() }
+        const settings = { person, enabled: b.enabled === true || b.enabled === 1 ? 1 : 0, mode, quiet_start: start, quiet_end: end, interval_hours: interval, daily_wake_limit: limit, daily_token_limit: tokenLimit, allow_chat: b.allow_chat ?? readJSON(K.proactive, {})[person]?.allow_chat ?? 1 ? 1 : 0, allow_memory_search: b.allow_memory_search ?? readJSON(K.proactive, {})[person]?.allow_memory_search ?? 1 ? 1 : 0, plan_note:readJSON(K.proactive,{})[person]?.plan_note || '', plan_updated_at:readJSON(K.proactive,{})[person]?.plan_updated_at || null, updated_at: nowISO() }
         const all = readJSON(K.proactive, {})
         all[person] = settings
         try { writeJSON(K.proactive, all) } catch { return json(500, { error: '本地存储写入失败' }) }

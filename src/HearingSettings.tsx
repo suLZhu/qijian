@@ -16,6 +16,7 @@ export function HearingSettings({vendors,person,onUse}:{vendors:Vendor[];person:
   const recorder=useRef<MediaRecorder|null>(null),stream=useRef<MediaStream|null>(null),recordTimer=useRef<ReturnType<typeof setTimeout>|null>(null)
   const alive=useRef(true),[recording,setRecording]=useState(false),[starting,setStarting]=useState(false)
   const sentinel=useRef(false),[sentinelActive,setSentinelActive]=useState(false)
+  const [sentinelPhase,setSentinelPhase]=useState<'recording'|'recognizing'|''>('')
   function release(){
     if(recordTimer.current)clearTimeout(recordTimer.current)
     recordTimer.current=null
@@ -26,7 +27,7 @@ export function HearingSettings({vendors,person,onUse}:{vendors:Vendor[];person:
     active.current?.abort()
     if(recorder.current?.state==='recording')recorder.current.stop()
     release()
-    if(alive.current){setSentinelActive(false);setNotice('实时听觉已停止')}
+    if(alive.current){setSentinelActive(false);setSentinelPhase('');setNotice('实时听觉已停止')}
     void apiFetch('/api/hearing/stop',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({person})}).catch(()=>{})
   }
   useEffect(()=>{alive.current=true;if(isLocalMode())void apiFetch('/api/hearing/stop',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({person})}).catch(()=>{});const hidden=()=>{if(document.hidden&&sentinel.current)stopSentinel()};document.addEventListener('visibilitychange',hidden);return ()=>{alive.current=false;document.removeEventListener('visibilitychange',hidden);if(sentinel.current)stopSentinel();active.current?.abort();if(recorder.current?.state==='recording')recorder.current.stop();release()}},[])
@@ -64,6 +65,7 @@ export function HearingSettings({vendors,person,onUse}:{vendors:Vendor[];person:
       sentinel.current=true;setSentinelActive(true);setNotice('实时听觉已开启，正在录音并分段识别')
       const segment=()=>{
         if(!sentinel.current||!stream.current)return
+        setSentinelPhase('recording')
         const r=new MediaRecorder(stream.current);recorder.current=r
         const chunks:Blob[]=[]
         r.ondataavailable=e=>{if(e.data.size)chunks.push(e.data)}
@@ -73,6 +75,7 @@ export function HearingSettings({vendors,person,onUse}:{vendors:Vendor[];person:
           const type=r.mimeType||'audio/webm',ext=type.includes('mp4')?'m4a':type.includes('ogg')?'ogg':'webm'
           const audio=new File(chunks,'recording.'+ext,{type})
           if(!audio.size){stopSentinel();if(alive.current)setNotice('录音为空，实时听觉已停止');return}
+          setSentinelPhase('recognizing')
           const controller=new AbortController();active.current=controller
           const timer=setTimeout(()=>controller.abort(),120000),started=Date.now();let attempted=false,status=0,outcome='失败'
           try{
@@ -126,11 +129,12 @@ export function HearingSettings({vendors,person,onUse}:{vendors:Vendor[];person:
     <label>接口路径<input disabled={busy||sentinelActive} value={cfg.path} onChange={e=>setCfg({...cfg,path:e.target.value})}/></label>
     <button disabled={busy||sentinelActive} onClick={()=>{try{save();setNotice('配置已保存')}catch{setNotice('保存失败')}}}>保存配置</button>
     <label>音频文件<input disabled={busy||recording||starting||sentinelActive} type="file" accept="audio/*,.webm,.mp4,.m4a" onChange={e=>setFile(e.target.files?.[0]||null)}/></label>
-    <p>单次识别仅上传所选文件。实时听觉开启期间会持续录音，并每 10 秒上传音频至所选供应商；切到后台或关闭页面会停止。</p>
+    <p>单次识别仅上传所选文件。实时听觉每次录音 10 秒并上传至所选供应商，识别期间暂停录音；切到后台或关闭页面会停止。</p>
     <label>触发词<input disabled={sentinelActive||busy} value={cfg.trigger} onChange={e=>setCfg({...cfg,trigger:e.target.value})}/></label>
     <label>触发间隔（秒）<input type="number" min={60} max={3600} disabled={sentinelActive||busy} value={cfg.triggerIntervalSeconds} onChange={e=>setCfg({...cfg,triggerIntervalSeconds:Math.max(60,Math.min(3600,Number(e.target.value)||120))})}/></label>
     {sentinelActive?<button onClick={stopSentinel}>立即停止实时听觉</button>:<button disabled={!isLocalMode()||!enabled||busy||recording||starting||cfg.mode!=='transcribe'} onClick={()=>void startSentinel()}>开启实时听觉</button>}
-    {sentinelActive&&<p role="status">正在录音并识别 · 离开页面或切到后台会停止</p>}
+    {sentinelActive&&<p role="status">{sentinelPhase==='recording'?'正在录音':'录音已暂停，正在识别'} · 离开页面或切到后台会停止</p>}
+    {!isLocalMode()&&<p>实时听觉目前仅支持本地模式。</p>}
 
     {recording?<button onClick={()=>recorder.current?.stop()}>停止录音</button>:<button disabled={!enabled||busy||starting||sentinelActive||cfg.mode==='understand'} onClick={()=>void startRecording()}>{starting?'等待麦克风权限…':'开始录音'}</button>}
     {file&&<p>已选择：{file.name} · {Math.ceil(file.size/1024)} KB</p>}

@@ -94,3 +94,16 @@ test('普通 Agent API 不能冒用内部自主来源', async () => {
     assert.match(result.error,/来源/)
   } finally { unregister() }
 })
+
+test('自主计划只改助手便签，保存设置时保留且禁用时拒绝', async () => {
+  setup()
+  const before=(await req('/api/proactive?person=a')).settings
+  assert.equal((await req('/api/proactive/plan',{person:'a',note:'下次关心近况'})).ok,true)
+  const after=(await req('/api/proactive?person=a')).settings
+  assert.equal(after.plan_note,'下次关心近况')
+  for(const key of ['enabled','allow_chat','allow_memory_search','daily_token_limit','quiet_start'])assert.equal(after[key],before[key])
+  await req('/api/proactive',{person:'a',action:'configure',...after,enabled:true})
+  assert.equal((await req('/api/proactive?person=a')).settings.plan_note,'下次关心近况')
+  await req('/api/proactive',{person:'a',action:'configure',...after,enabled:false})
+  assert.equal((await req('/api/proactive/plan',{person:'a',note:'不能保存'})).status,403)
+})

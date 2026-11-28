@@ -1227,7 +1227,7 @@ export default function App() {
   // 正在进行的模型请求：删除「正在生成」的助手消息时中止它；回写全部按 id 匹配，
   //   消息删除后天然无处可写，绝不会删除后又重新出现。
   const sendAbortRef = useRef<Record<string,{ id: string; controller: AbortController }>>({})
-  async function send(textInput: string, attachments: MessageAttachment[] = [], options: { assistantId?: Person; conversationId?: string; queuedIds?: string[]; insertUser?: boolean; historyEndIndex?: number; regenerate?: { replaceId: string; originalContent: string; originalUsage?: TokenUsage }; pendingId?: string; preserveDraft?: boolean; agent?: { id: string; signal: AbortSignal; onResult: (result: LocalAgentResult) => void; allowMemorySearch?: boolean; allowTools?: boolean } } = {}): Promise<'ok'|'fail'|'noop'> {
+  async function send(textInput: string, attachments: MessageAttachment[] = [], options: { assistantId?: Person; conversationId?: string; queuedIds?: string[]; insertUser?: boolean; historyEndIndex?: number; regenerate?: { replaceId: string; originalContent: string; originalUsage?: TokenUsage }; pendingId?: string; preserveDraft?: boolean; agent?: { id: string; signal: AbortSignal; onResult: (result: LocalAgentResult) => void; allowMemorySearch?: boolean; allowTools?: boolean; source?: string } } = {}): Promise<'ok'|'fail'|'noop'> {
     const text = textInput.trim()
     const target = options.assistantId ?? person
     const updateMessages = options.agent ? (() => {}) as typeof updateActiveConversationMessages : updateActiveConversationMessages
@@ -1609,6 +1609,7 @@ export default function App() {
         }
       } catch { /* MCP is optional; continue with normal model chat. */ }
       }
+      if (options.agent?.source==='proactive' && chatPrefs.toolsEnabled) openAITools.push({type:'function',function:{name:'proactive_plan_update',description:'更新当前助手自己的自主生活计划便签；不能更改用户权限、预算或定时任务。',parameters:{type:'object',properties:{note:{type:'string',description:'简短计划便签，最长 1000 字'}},required:['note'],additionalProperties:false}}})
       const toolBudget=createToolExecutionBudget({roundLimit:chatPrefs.toolRoundLimit})
       for(let round=0;round<toolBudget.roundLimit&&!finished;round++){
         const requestBody:any={model:activeModel.model.trim(),messages:requestMessages,stream:true,stream_options:{include_usage:true}}
@@ -1681,6 +1682,7 @@ export default function App() {
           let resultContent=''
           let callKey:string|null=null
           try{
+            const proactivePlanTool=call.function.name==='proactive_plan_update' && options.agent?.source==='proactive'
             const localWorldbookTool=['worldbook_create_entry','worldbook_search_entries','worldbook_update_entry'].includes(call.function.name)
             const scheduledTaskTool=['scheduled_task_list','scheduled_task_create','scheduled_task_manage'].includes(call.function.name)
             const conversationTool=call.function.name==='conversation_search'
@@ -1689,7 +1691,7 @@ export default function App() {
             const roomTool=call.function.name==='room_get_layout'||call.function.name==='room_set_layout'
             const themeTool=call.function.name==='theme_pack_list'||call.function.name==='theme_pack_apply'||call.function.name==='theme_pack_save'
             const webTool=call.function.name==='web_search'||call.function.name==='open_web_page'
-            const logSource:ToolCallSource=webTool?'web':widgetTool?'widget':workspaceTool?'workspace':conversationTool?'memory':call.function.name==='ledger_add_entry'?'ledger':localWorldbookTool?'worldbook':scheduledTaskTool?'workflow':'mcp'
+            const logSource:ToolCallSource=proactivePlanTool?'workflow':webTool?'web':widgetTool?'widget':workspaceTool?'workspace':conversationTool?'memory':call.function.name==='ledger_add_entry'?'ledger':localWorldbookTool?'worldbook':scheduledTaskTool?'workflow':'mcp'
             // 真实调用点：模型发起的每一次工具调用都先登记（含随后被拒绝的），供聊天卡片与看板共用。
             let args:any;let argsParsed=true
             try{args=JSON.parse(call.function.arguments||'{}')}catch{argsParsed=false}
@@ -1700,14 +1702,18 @@ export default function App() {
               serverName:route?route.connectionName:'',
               arguments:argsParsed?args:call.function.arguments||'{}',eventId:toolRunId+':'+call.id,
             })
-            if(!webTool&&!widgetTool&&!roomTool&&!themeTool&&!workspaceTool&&!conversationTool&&call.function.name!=='ledger_add_entry'&&!localWorldbookTool&&!scheduledTaskTool&&(!route||route.person!==target)) throw new Error('工具没有绑定到当前人物，已拒绝调用。')
+            if(!proactivePlanTool&&!webTool&&!widgetTool&&!roomTool&&!themeTool&&!workspaceTool&&!conversationTool&&call.function.name!=='ledger_add_entry'&&!localWorldbookTool&&!scheduledTaskTool&&(!route||route.person!==target)) throw new Error('工具没有绑定到当前人物，已拒绝调用。')
             if(!argsParsed)throw new Error('模型生成的工具参数不是合法 JSON。')
             if(!args||typeof args!=='object'||Array.isArray(args))throw new Error('工具参数必须是 JSON 对象。')
             await authorizeChatTool({ person:target, tool:route?route.name:call.function.name, signal:abortController.signal, fetchPolicy:apiFetch,
               confirm:tool=>confirmDialog({title:'工具调用确认',message:'允许本次调用「'+tool+'」吗？',confirmLabel:'允许'}) })
             const toolLabel=route?route.name:(webTool?'联网 / 内置浏览器':widgetTool?'房间小组件':workspaceTool?'本机工作区':conversationTool?'回顾更早的对话':call.function.name==='ledger_add_entry'?'共享记账单':scheduledTaskTool?'定时任务':'本地工具')
             updateMessages(target,prev=>prev.map(m=>m.id===assistantMessageId?{...m,content:(answer?answer+'\n\n':'')+'正在调用工具：'+toolLabel+'…'}:m),sendConversationId)
-            if(webTool){
+            if(proactivePlanTool){
+              const response=await apiFetch('/api/proactive/plan',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({person:target,note:args.note}),signal:abortController.signal})
+              const data=await response.json();if(!response.ok)throw new Error(data.error||'计划保存失败')
+              resultContent=JSON.stringify({ok:true,message:'自主计划已更新'})
+            }else if(webTool){
               const name=call.function.name
               if(name==='web_search'){
                 const searchQuery=String(args.query||'').trim()
@@ -1977,7 +1983,7 @@ export default function App() {
     if (run.source === 'proactive' && (!proactiveConfig?.enabled || !proactiveConfig?.allow_chat)) throw new Error('自主生活权限已关闭')
     if (run.source === 'hearing' && localStorage.getItem('ai-home.hearing.enabled.'+run.assistantId) !== 'true') throw new Error('听觉权限已关闭')
     let result: LocalAgentResult | undefined
-    const status = await sendRef.current(run.prompt, [], { assistantId:run.assistantId, conversationId, insertUser:false, preserveDraft:true, agent:{ id:run.id, signal, allowTools:!['proactive','hearing'].includes(run.source), allowMemorySearch:!['proactive','hearing'].includes(run.source) || !!proactiveConfig?.allow_memory_search, onResult:value => { result=value } } })
+    const status = await sendRef.current(run.prompt, [], { assistantId:run.assistantId, conversationId, insertUser:false, preserveDraft:true, agent:{ id:run.id, signal, source:run.source, allowTools:!['proactive','hearing'].includes(run.source), allowMemorySearch:!['proactive','hearing'].includes(run.source) || !!proactiveConfig?.allow_memory_search, onResult:value => { result=value } } })
     signal.throwIfAborted()
     if (status !== 'ok' || !result) throw new Error(status === 'noop' ? '助手正在忙，请稍后重试' : '模型或工具执行失败，请检查聊天设置和诊断')
     return result

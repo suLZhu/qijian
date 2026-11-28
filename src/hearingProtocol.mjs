@@ -26,7 +26,7 @@ export async function recognizeAudio({ vendor, config, file, signal, onAttempt, 
   } else throw new Error('不支持的听觉模式')
   signal?.throwIfAborted()
   onAttempt?.()
-  const response = await fetchImpl(url.href,options)
+  const response = await fetchImpl(url.href,{...options,timeoutMs:120000})
   if (!response.ok) throw Object.assign(new Error('识别接口返回 HTTP '+response.status),{ status:response.status })
   const data = await response.json()
   const text = config.mode === 'understand' ? data.choices?.[0]?.message?.content : data.text

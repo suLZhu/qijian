@@ -50,7 +50,7 @@ export function subscriptionModelFetch(url, options = {}) {
   return fetchThroughBridge('subscription', url, options)
 }
 
-async function fetchThroughBridge(policy, url, { method = 'GET', headers, body, signal } = {}) {
+async function fetchThroughBridge(policy, url, { method = 'GET', headers, body, signal, timeoutMs = 30000 } = {}) {
   const b = bridge()
   if (!nativeHttpStreamAvailable()) throw new Error('需要支持模型网络分流的 App 原生网络桥，请更新 APK 或连接栖间服务器')
   signal?.throwIfAborted()
@@ -84,7 +84,7 @@ async function fetchThroughBridge(policy, url, { method = 'GET', headers, body, 
       reject(error)
     }
     const abort = () => fail(signal.reason || new DOMException('请求已取消', 'AbortError'))
-    const timer = setTimeout(() => fail(new Error('等待模型接口响应超时')), 30000)
+    const timer = setTimeout(() => fail(new Error('等待模型接口响应超时')), Math.max(1000, Math.min(120000, Number(timeoutMs) || 30000)))
     const stream = new ReadableStream({ start(c) { controller = c }, cancel: stop })
     signal?.addEventListener('abort', abort, { once: true })
     streamCallbacks.set(id, event => {
