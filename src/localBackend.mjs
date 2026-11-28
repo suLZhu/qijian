@@ -1,3 +1,4 @@
+import { startLocalAgentRun, listLocalAgentRuns, getLocalAgentRun, cancelLocalAgentRun } from './localAgentRuns.mjs'
 import { createMcpConnectionPool } from './server/mcpConnectionPool.mjs'
 // 本地模式后端垫片（LocalBackend）：未配置服务器地址时，浏览器/WebView 内
 // 直接应答全部 /api/* 请求，让 App 开箱即用——不依赖任何云端或本机后端进程。
@@ -1242,13 +1243,24 @@ export async function localHandle(path, init) {
       return json(400, { error: '未知操作' })
     }
 
-    // ── Agent 运行：本地无执行器 → 空列表 + 明确降级 ──
-    if (p === '/api/agent/runs' && method === 'GET') return json(200, { runs: [] })
-    if (p === '/api/agent/runs' && method === 'POST') return json(400, { error: DEGRADED.agent })
+    // 本地运行生命周期：只有注册真实执行器后才接受新任务。
+    if (p === '/api/agent/runs' && method === 'GET') return json(200, { runs: listLocalAgentRuns(q.get('person') || '', q.get('limit')) })
+    if (p === '/api/agent/runs' && method === 'POST') {
+      try { const b = await readBody(init); return json(201, { run: startLocalAgentRun(b) }) }
+      catch (error) { return json(400, { error: error instanceof Error ? error.message : '本地 Agent 启动失败' }) }
+    }
     const agentRun = p.match(/^\/api\/agent\/runs\/([0-9a-f-]{36})$/)
-    if (agentRun && method === 'GET') return json(404, { error: '运行记录不存在' })
+    if (agentRun && method === 'GET') {
+      const run = getLocalAgentRun(agentRun[1])
+      if (!run) return json(404, { error: '运行记录不存在' })
+      const logs = readJSON(K.toolLogs, []).filter(log => log?.runId === run.id).slice(0, 100)
+      return json(200, { run, logs })
+    }
     const agentCancel = p.match(/^\/api\/agent\/runs\/([0-9a-f-]{36})\/cancel$/)
-    if (agentCancel && method === 'POST') return json(404, { error: '运行记录不存在' })
+    if (agentCancel && method === 'POST') {
+      const result = cancelLocalAgentRun(agentCancel[1])
+      return result ? json(200, result) : json(404, { error: '运行记录不存在' })
+    }
     if (p === '/api/agent/events' && method === 'GET') return sseKeepAlive()
     if (p === '/api/agent/policies' && method === 'GET') {
       const person = q.get('person') || ''

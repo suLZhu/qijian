@@ -8,6 +8,7 @@
 // existing polling instead of freezing cards.
 import { useEffect, useState } from 'react'
 import { apiFetch, apiUrl, getSessionToken, isLocalMode } from './apiBase.mjs'
+import { subscribeLocalAgentEvents } from './localAgentRuns.mjs'
 
 export type AgentRunStatus = 'running' | 'succeeded' | 'failed' | 'cancelled' | 'timed_out'
 
@@ -69,10 +70,10 @@ function dispatch(raw: string) {
 
 // 订阅一次共享连接；最后一个订阅者离开时关闭（避免看板卸载后仍挂长连接）。
 export function subscribeAgentEvents(listener: (event: AgentEvent) => void): () => void {
+  if (isLocalMode()) return subscribeLocalAgentEvents(listener)
   listeners.add(listener)
   refCount++
-  // 本地模式没有后台执行器，事件流恒空：不建 EventSource，避免对不存在的
-  // /api/agent/events 无限重连（看板运行列表本地同样返回空数组）。
+  // 云端使用共享 SSE；本地事件由同进程执行器直接分发。
   if (!source && !isLocalMode()) {
     try {
       // EventSource 无法设置 Authorization 头：跨源（Android 局域网）时凭证走 ?token= 查询参数，
